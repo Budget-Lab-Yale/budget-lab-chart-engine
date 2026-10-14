@@ -2078,19 +2078,17 @@ describe("axes primitives — pane titles + tick density (task B3)", () => {
     expect(marks[0]).toBeTruthy();
   });
 
-  it("a higher density multiplier yields fewer (or equal) x ticks", () => {
+  it("a narrower data width yields fewer (or equal) x ticks", () => {
     const xDomain: [Date, Date] = [new Date(2010, 0, 1), new Date(2026, 0, 1)];
-    const dense = temporalXTicks(xDomain, 1);
-    const sparse = temporalXTicks(xDomain, 2);
-    expect(sparse.length).toBeLessThan(dense.length);
-    // Default (no multiplier) matches multiplier 1.
-    expect(temporalXTicks(xDomain).length).toBe(dense.length);
-    // Documented clamping: expects integers >= 1. Non-integers floor (1.9 -> 1, NOT 2), and
-    // sub-1 / zero / negative inputs clamp to 1 (every tick), never collapsing the cadence.
-    expect(temporalXTicks(xDomain, 1.9).length).toBe(dense.length); // floor(1.9)=1
-    expect(temporalXTicks(xDomain, 0).length).toBe(dense.length); // max(1, 0)=1
-    expect(temporalXTicks(xDomain, 0.5).length).toBe(dense.length); // floor->0, max->1
-    expect(temporalXTicks(xDomain, -3).length).toBe(dense.length); // max(1, -3)=1
+    const wide = temporalXTicks(xDomain, 640);
+    const narrow = temporalXTicks(xDomain, 160);
+    expect(narrow.length).toBeLessThan(wide.length);
+    // No width: the span alone decides, as at a width where every label fits.
+    expect(temporalXTicks(xDomain).length).toBe(wide.length);
+    // A width that is not a positive number is no width.
+    expect(temporalXTicks(xDomain, 0).length).toBe(wide.length);
+    expect(temporalXTicks(xDomain, -3).length).toBe(wide.length);
+    expect(temporalXTicks(xDomain, NaN).length).toBe(wide.length);
     // Sentinel against an unused import.
     expect(typeof makeTickFormatter([0, 1], { prefix: "", suffix: "" })).toBe("function");
     expect(typeof d3.timeFormat).toBe("function");

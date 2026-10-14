@@ -30,10 +30,10 @@ import {
   domainBounds,
   makeTickFormatter,
 } from "./scales";
-import { bandLabelMode } from "./axes";
+import { bandLabelMode, temporalXTicks } from "./axes";
 import type { BandLabelMode } from "./axes";
 import { makeXAdapter, numericAxisDomain } from "./x-adapter";
-import type { XAdapter } from "./x-adapter";
+import type { XAdapter, SharedXDomain } from "./x-adapter";
 import { parseDate } from "../spec/parse-time";
 import { binValues, computeThresholds, temporalThresholds, normalizeBinned } from "./histogram-bin";
 import type { BinInput, BinnedRow } from "./histogram-bin";
@@ -123,6 +123,12 @@ export interface RenderOptions {
    *  chart, or a faceted chart's figure orchestrator omitting it) → every marker renders,
    *  unchanged from today. */
   paneFacetValue?: string;
+  /** Small multiples on a continuous x-axis: the x range every pane shares, computed by the figure
+   *  from per-pane probes. Absent → the axis fits this pane's own rows. */
+  sharedX?: SharedXDomain;
+  /** Small multiples on a date axis: the plot width every pane fits its ticks to — see
+   *  `BuildXOptsOptions.tickWidth`. */
+  xTickWidth?: number;
   /** Inline title-selector color accent: an already-resolved
    *  CSS color (run through `palette.resolveColor` by the caller) applied as the sole series'
    *  color WHEN the chart resolves to exactly one series (after `series_order` filtering). A
@@ -332,6 +338,11 @@ export interface PaneResult {
    *  label reads exactly as the in-frame label would have. */
   formatValue: (v: number) => string;
   dataInScope: PreparedRow[];
+  /** Continuous x-axis only: the extent of this pane's parsed x values, and the domain Plot drew
+   *  its x scale over (wider when a marker or band reaches past the data). Small-multiples probes
+   *  union them into the figure's `SharedXDomain`. Epoch ms on a date axis. */
+  xDataExtent?: [number, number];
+  xScaleDomain?: [number, number];
   /** The chart-type-specific mark layers — legend decision reads dashedNames /
    *  seriesColors / legendExtras / legendVisualOrder / netMode off this. */
   layers: MarkLayers;
@@ -411,7 +422,23 @@ export function renderPane(
   // In the row order the full render sums them (assemblePaneResult sorts its rows the same way): a
   // series' sign is a float sum, so a different order can flip a near-cancelling one and swap shades.
   if (monoBasis) sortByCategoryOrder(spec, monoBasis.dataInScope);
-  return assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data, monoBasis);
+  const pane = assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data, monoBasis);
+  // A date axis fits its ticks to the data's span, but a marker, band or callout past the data
+  // widens the scale Plot draws, crowding the labels. Only the render knows that scale, so when it
+  // would thin the ticks, render once more with it explicit (the same domain, so nothing else moves).
+  // Small-multiples panes already arrive with their drawn range in `sharedX`.
+  if (!opts.sharedX && (xType === "temporal" || xType === "quarterly") && pane.xDataExtent && pane.xScaleDomain) {
+    const [d0, d1] = pane.xDataExtent;
+    const [s0, s1] = pane.xScaleDomain;
+    if (s0 < d0 || s1 > d1) {
+      const width = (opts.width ?? 720) - (opts.marginLeft ?? TBL_MARGIN_LEFT) - (opts.marginRight ?? TBL_MARGIN_RIGHT);
+      const dates: [Date, Date] = [new Date(d0), new Date(d1)];
+      if (temporalXTicks(dates, width, [s0, s1]).length !== temporalXTicks(dates, width).length) {
+        return renderPane(spec, rows, { ...opts, sharedX: { data: [d0, d1], scale: [s0, s1] } }, classNameSuffix, facetInfo);
+      }
+    }
+  }
+  return pane;
 }
 
 /** This pane's rows with every section drawn, when `section_order` leaves some of them out; else
@@ -1096,6 +1123,9 @@ function assemblePaneResult(
     labelMode: xLabelMode,
     tagCategoryLabels: chartType === "bar" || chartType === "stacked",
     bottomGutter: rugAllowance(spec),
+    dataWidth: dataWidthForX,
+    ...(opts.xTickWidth != null ? { tickWidth: opts.xTickWidth } : {}),
+    ...(opts.sharedX ? { sharedX: opts.sharedX } : {}),
   });
   // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
@@ -1321,6 +1351,8 @@ function assemblePaneResult(
       affixes: valueAffixes,
     }),
     dataInScope,
+    ...(xExtent ? { xDataExtent: xExtent } : {}),
+    ...(xExtent ? { xScaleDomain: numericAxisDomain((svg as any).scale?.("x")?.domain) ?? xExtent } : {}),
     layers,
     seriesHatches,
     seriesPainted,

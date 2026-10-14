@@ -4,6 +4,43 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.17.1] - 2026-10-14
+
+### Fixed
+- Small multiples on a `temporal`, `quarterly` or `numeric` x-axis: the panes now share one x range,
+  in both `shared` and `per-pane` mode. Each pane used to fit its own rows, so a pane whose data
+  started later drew a different axis from its neighbours. The shared range is the union of every
+  pane's own; on a date axis that includes markers, bands and callouts past the data. Categorical
+  panes keep their own categories; histograms keep their binning rules.
+- Temporal and quarterly tick labels no longer overprint in a narrow plot. The cadence still comes
+  from the span of the data, and now steps up (quarterly, half-yearly, then 1, 2, 5, 10, 20, 50, 100
+  years and so on, down to a single tick) while adjacent labels would overlap at the drawn width,
+  measured on the drawn scale (which a marker or band past the data widens). In small multiples on a
+  date axis, histograms included, every pane fits its ticks to the narrowest pane, so unequal
+  `pane_widths` still give every pane the same ticks and bottom margin. This mostly reaches
+  small-multiples panes and phone-width cards.
+- Line and area hover (the crosshair and the coordinated cursor) mapped the pointer across the
+  pane's own data extent rather than the x range Plot drew, so wherever the two differed — a marker
+  or band past the data on a single chart, and now every pane drawn over a shared range — the guide
+  and dots landed off the points and the pointer resolved to the wrong observation. Both read the
+  drawn range now.
+
+### Removed
+- The `densityMultiplier` parameter of `temporalXTicks` / `tblTemporalXAxis` (every caller passed 1).
+  Both now take the plot's data width in that position.
+
+### Upgrading
+- **Archive scan** (budget-lab-charts at origin/main 1afaaa5, plus the open SCF figures and the untracked
+  `charts/trackers/`): every chart rendered live with 1.17.0 and 1.17.1 and the SVG markup compared.
+  At 760 px all 64 are byte-identical: no faceted figure there has panes with different x ranges, and
+  no desktop-width temporal axis crowds. At 390 px six standalone temporal charts thin their ticks:
+  `recession-indicators/yield-curve` (5 -> 10 years) and five `emp-dispersion-graphs` figures
+  (`lfp-by-education`, `lfp-quintiles-rf`, `lfp-quintiles-rf-contemporaneous`,
+  `unemployment-quintiles-rf`, `unemployment-quintiles-rf-contemporaneous`; 1 -> 2 years). No golden
+  moved.
+- `budget-lab-interactives` vendors its own engine (1.13.0, 1.15.0); its small-multiples figures
+  are categorical bars, which this release does not touch.
+
 ## [1.17.0] - 2026-10-13
 
 ### Added

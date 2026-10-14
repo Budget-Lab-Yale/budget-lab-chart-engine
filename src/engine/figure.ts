@@ -20,7 +20,8 @@ import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, singleChartDrawsNetDots, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
-import type { LegendItem, ShapeLegendItem, RenderOptions } from "./index";
+import type { LegendItem, ShapeLegendItem, RenderOptions, PaneResult } from "./index";
+import type { SharedXDomain } from "./x-adapter";
 import { resolveValueAffixes, normalizeSpec } from "./util";
 import { dumbbellRowExtent } from "./marks/dumbbell";
 import { NET_DOT_ROW_PX } from "./marks/stacked";
@@ -488,6 +489,42 @@ export interface FigureRenderResult {
   netMode?: NetMode;
 }
 
+/** Whether a figure's panes share one x range: every continuous axis, in both modes. A categorical
+ *  axis keeps each pane's own categories (panes may legitimately hold different ones), and a
+ *  histogram already shares its bin edges (`figureBinThresholds`). */
+function sharesXRange(spec: ChartSpec): boolean {
+  return spec.xAxisType !== "categorical" && spec.chartType !== "histogram";
+}
+
+/** The x range every pane is drawn over: the union of the probes' own ranges, so no pane loses a
+ *  point, marker or band it would have drawn alone. Undefined when no probe has a continuous x. */
+function figureSharedX(probes: PaneResult[]): SharedXDomain | undefined {
+  const union = (spans: Array<[number, number] | undefined>): [number, number] | undefined => {
+    const present = spans.filter((s): s is [number, number] => s != null);
+    if (!present.length) return undefined;
+    return [Math.min(...present.map((s) => s[0])), Math.max(...present.map((s) => s[1]))];
+  };
+  const data = union(probes.map((p) => p.xDataExtent));
+  const scale = union(probes.map((p) => p.xScaleDomain));
+  return data && scale ? { data, scale } : undefined;
+}
+
+/** On a date axis (any chart type, histograms included), the narrowest pane's data width: every pane
+ *  fits its ticks to it, so unequal pane widths cannot give panes different ticks or bottom margins.
+ *  `marginLeft` is one value or one per column, as the caller renders them. Undefined off a date axis. */
+function dateAxisTickWidth(
+  spec: ChartSpec,
+  colWidths: number[],
+  marginLeft: number | number[],
+  opts: RenderOptions,
+): number | undefined {
+  if (spec.xAxisType !== "temporal" && spec.xAxisType !== "quarterly") return undefined;
+  const right = opts.marginRight ?? TBL_MARGIN_RIGHT;
+  return Math.min(
+    ...colWidths.map((w, c) => w - (Array.isArray(marginLeft) ? (marginLeft[c] as number) : marginLeft) - right),
+  );
+}
+
 /** Histogram shared mode: the ONE set of bin thresholds every pane bins to, computed over all rows.
  *  Undefined in per-pane mode (each pane bins its own rows), for pre-binned data (the edges are in
  *  the data), and off histograms. */
@@ -759,8 +796,9 @@ export function renderFigure(
     return { mode: worst, marginBottom: Math.max(...paneCats.map((p) => bandLabelMarginBottom(p.cats, worst))) };
   };
 
-  // PER-PANE mode: each pane is its OWN single-frame SVG with an independent y-scale, units,
-  // and x-domain (Plot faceting can't give independent y-scales, so we render + compose N
+  // PER-PANE mode: each pane is its OWN single-frame SVG with an independent y-scale and units
+  // (a continuous x range is still shared — see sharesXRange) (Plot faceting can't give
+  // independent y-scales, so we render + compose N
   // mini-SVGs instead of one faceted SVG). Each pane gets a distinct deterministic
   // classNameSuffix ("p0", "p1", …) so clip-path ids stay unique across the composed DOM, and
   // `pane: true` thins its line stroke.
@@ -790,9 +828,29 @@ export function renderFigure(
     // still keyed, matching how `figureSeries` is resolved over every pane's rows.
     const panePainted: Array<Map<string, SeriesHatch>> = [];
   const paneFills: Array<Map<string, string>> = [];
+    // The panes share one x range (see sharesXRange), read off a probe render of each pane.
+    const sharedX = sharesXRange(spec)
+      ? figureSharedX(
+          paneValues.map((value) =>
+            renderPane(
+              spec,
+              rows.filter((r) => (r[facetField] as string) === value),
+              { ...opts, height: effHeight, pane: true, paneFacetValue: value },
+              "probe",
+            ),
+          ),
+        )
+      : undefined;
+    // Ticks fit the narrowest pane, measured with the margins renderPane itself subtracts.
+    const xTickWidth = dateAxisTickWidth(
+      spec,
+      Array.from({ length: columns }, (_, c) => perPaneWidths?.[c] ?? opts.width ?? availW),
+      opts.marginLeft ?? TBL_MARGIN_LEFT,
+      opts,
+    );
     const panes: FigurePane[] = paneValues.map((value, i) => {
-      // Restrict the rows to this pane (own y-domain/units/x-domain). No facetInfo → renderPane
-      // renders a standalone single frame for these rows only.
+      // Restrict the rows to this pane (own y-domain/units). No facetInfo → renderPane renders a
+      // standalone single frame for these rows only.
       const paneRows = rows.filter((r) => (r[facetField] as string) === value);
       const col = i % columns;
       const p = renderPane(
@@ -809,6 +867,8 @@ export function renderFigure(
           ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
           ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
           ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
+          ...(sharedX ? { sharedX } : {}),
+          ...(xTickWidth != null ? { xTickWidth } : {}),
         },
         `p${i}`,
       );
@@ -948,9 +1008,11 @@ export function renderFigure(
   // 3b. Vertical categorical facets: coordinate the x-axis label layout so panes' baselines align
   //     (shared by both modes — see coordinateXLabels). Data width per column: the shared-mode
   //     column outer width minus its own left margin + the right margin.
-  const { mode: forcedXLabelMode, marginBottom: forcedMarginBottom } = coordinateXLabels(
-    colWidths.map((w, c) => w - (colMarginLeft[c] as number) - TBL_MARGIN_RIGHT),
-  );
+  const colDataW = colWidths.map((w, c) => w - (colMarginLeft[c] as number) - TBL_MARGIN_RIGHT);
+  const { mode: forcedXLabelMode, marginBottom: forcedMarginBottom } = coordinateXLabels(colDataW);
+  // 3c. Shared x range (continuous axes), from the y probes; ticks fit the narrowest column.
+  const sharedX = sharesXRange(spec) ? figureSharedX(probes) : undefined;
+  const xTickWidth = dateAxisTickWidth(spec, colWidths, colMarginLeft, opts);
 
   // 4. Render each pane as its own single frame at its column's OUTER width + left margin, forcing
   //    the shared y-domain. Panes hide the y-tick LABELS on non-leftmost columns.
@@ -977,6 +1039,8 @@ export function renderFigure(
         chartSeriesCount,
         yDomain: sharedYDomain,
         ...(binThresholds ? { binThresholds } : {}),
+        ...(sharedX ? { sharedX } : {}),
+        ...(xTickWidth != null ? { xTickWidth } : {}),
         width: colWidths[col],
         ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),
         ...(forcedMarginBottom != null ? { marginBottom: forcedMarginBottom } : {}),
