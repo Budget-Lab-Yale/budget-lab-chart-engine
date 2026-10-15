@@ -58,6 +58,14 @@ export function validateTableData(spec: TableSpec, rows: TidyRow[]) {
   const roles = [...spec.stub.map(labelOf), ...spec.header, spec.value];
   if (spec.pane != null) roles.push(spec.pane);
   for (const c of roles) if (!cols.has(c)) errors.push(`config/data mismatch: column "${c}" not found`);
+  // Read per cell by name (table/model.ts); a column the data lacks would silently drop every
+  // emphasis flag or footnote marker.
+  for (const field of ["emphasis_column", "footnote_column"] as const) {
+    const c = spec[field];
+    if (c && !cols.has(c)) {
+      errors.push(`config/data mismatch: ${field} is "${c}" but no such column exists (columns: ${JSON.stringify([...cols].sort())})`);
+    }
+  }
   if (errors.length) return { valid: false, errors };
   const stubCols = spec.stub.map(labelOf);
   const SEP = "\x1F";

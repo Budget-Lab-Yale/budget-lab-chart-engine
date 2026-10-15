@@ -2,7 +2,7 @@
 export interface FormatRule {
   /** "number" (default), "percent" (multiply by 100), or "currency". */
   type?: "number" | "percent" | "currency";
-  /** Decimal places to display. */
+  /** Decimal places to display: an integer 0–10 (validated). */
   decimals?: number;
   /** Group thousands with ",". */
   thousands?: boolean;

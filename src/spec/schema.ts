@@ -541,7 +541,10 @@ export const CHART_SPEC_SCHEMA = {
       type: "object",
       additionalProperties: false,
       properties: {
-        bins: { type: "number" },
+        // A positive integer: the binner reads bins <= 0 as "auto" and draws a fractional count's
+        // width, so either would publish a differently binned chart without a word. binWidth's
+        // value rules depend on xAxisType and live in validate.ts (histogramSpecError).
+        bins: { type: "integer", minimum: 1 },
         binWidth: { anyOf: [{ type: "number" }, { type: "string" }] },
         domain: { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 },
         normalize: { type: "string", enum: ["none", "proportion", "density"] },

@@ -16,6 +16,7 @@ import { ownValue } from "../spec/own-key";
 import { sectionKeyer, categoryText, rowsInSectionOrder } from "../spec/section-key";
 import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
 import { facetsDrawAsGroups } from "../spec/facet-groups";
+import { figurePaneValues } from "../spec/panes";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
@@ -546,24 +547,6 @@ function figureBinThresholds(
         binWidth: typeof bw === "number" ? bw : undefined,
         domain: spec.histogram?.domain,
       });
-}
-
-/** The figure's panes, in order: distinct facet values in data-encounter order, then reordered and
- *  filtered by `small_multiples.pane_order` when set (it names the included panes, in order). A
- *  blank facet cell is not a pane. Both drops are mirrored by validateChartData's keyed-callout
- *  "drawn nowhere" rules (src/spec/validate.ts) — change both. */
-function figurePaneValues(spec: ChartSpec, rows: TidyRow[], facetField: string): string[] {
-  const encounterOrder: string[] = [];
-  const seen = new Set<string>();
-  for (const r of rows) {
-    const v = r[facetField] as string;
-    if (v != null && v !== "" && !seen.has(v)) {
-      seen.add(v);
-      encounterOrder.push(v);
-    }
-  }
-  const order = spec.small_multiples?.pane_order;
-  return order && order.length ? order.filter((v) => seen.has(v)) : encounterOrder;
 }
 
 /**

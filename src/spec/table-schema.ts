@@ -9,7 +9,9 @@ const FORMAT_RULE = {
   additionalProperties: false,
   properties: {
     type: { type: "string", enum: ["number", "percent", "currency"] },
-    decimals: { type: "number" },
+    // Integer 0–10, the chart `decimals` bound: table/format.ts hands it to Number#toFixed, which
+    // throws a RangeError outside 0–100 and silently truncates a fraction.
+    decimals: { type: "integer", minimum: 0, maximum: 10 },
     thousands: { type: "boolean" },
     signColor: { type: "boolean" },
     prefix: { type: "string" },

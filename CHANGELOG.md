@@ -109,6 +109,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     waterfalls, and the dumbbell gap label's default of 1 decimal place.
 
 ### Changed
+- Validation is stricter; specs it now rejects rendered wrongly, blank, or not at all. Rendered
+  output of every spec that still validates is unchanged, and every spec in the `budget-lab-charts`
+  archive that validated still does.
+  - Every chart type, histograms included, checks each spec key that names a value in the data
+    against the data, where the chart reads the field: the `series_*` maps, `highlightSeries` (bar,
+    histogram), `series_marker` and `gap_annotation.series_a`/`series_b` (dumbbell),
+    `barStack.stackOrder` (stacked), `x_labels` (where a hover card or a callout's `{x}` is sure to
+    read it), `section_order`, `section_labels`, `small_multiples.pane_order`/`pane_titles`/
+    `pane_widths`, `overlays[].facet`, `annotations.points[].series`, and `facet` on reference
+    markers and x-anchored callouts. On a histogram none of these was checked; elsewhere a typo in
+    the newly checked ones dimmed every series, drew a scoped marker nowhere, or silently did
+    nothing the chart showed. `pane_widths` now counts only the panes the grid draws: a blank facet
+    cell, which is not a pane, made a correctly sized array fail.
+  - `columns.section`, and on a waterfall `columns.kind`, must name a column in the data. A
+    misspelled `kind` column drew every waterfall step as a delta.
+  - `histogram.bins` must be a positive integer: 0 or less fell back to automatic binning, and a
+    fraction such as 2.5 drew about that many bins, the last one short. `histogram.binWidth` must
+    be greater than 0 (0 or less fell back to automatic binning); a string is accepted only on a
+    temporal axis, as `day`, `week`, `month`, `quarter`, `year` or a positive day count such as
+    `"7"`, where any other string fell back to automatic binning. `histogram.domain` must be
+    ascending (a reversed one drew a single bin).
+  - A whitespace-only value cell is rejected as not numeric. It drew as 0.
+  - Tables: `format` `decimals` must be an integer from 0 to 10 in every scope (a negative or
+    over-100 value threw at render, a fraction was truncated), and `emphasis_column` /
+    `footnote_column` must name a column in the data (a typo dropped every emphasis or footnote).
 - `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while
   printing a `localhost` URL, so another machine on the same network could open every spec under
   the root, data included. `--host <addr>` opts in to another address, and the printed URL is the

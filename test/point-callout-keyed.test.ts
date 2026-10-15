@@ -149,14 +149,15 @@ describe("annotations.points[].point — data validation", () => {
     expect(r.errors.join("\n")).toMatch(/annotations\.points\[0\]\.point "blank" matches a row whose "y" cell is empty/);
   });
 
-  it("accepts a whitespace-only value cell, which the engine draws at 0, and reports a non-numeric one once (per row, not per callout)", () => {
-    const ws = rowsOf([...ROWS, { x: "0.5", y: " ", g: "Earlier", period: "ws" }]);
-    expect(validateChartData(withPoints([{ point: "ws", label: "l" }]), ws).valid).toBe(true);
-    const bad = rowsOf([...ROWS, { x: "0.5", y: "abc", g: "Earlier", period: "bad" }]);
-    const r = validateChartData(withPoints([{ point: "bad", label: "l" }]), bad);
-    expect(r.valid).toBe(false);
-    expect(r.errors.filter((e) => /annotations\.points/.test(e))).toHaveLength(0);
-    expect(r.errors.filter((e) => /is not numeric/.test(e))).toHaveLength(1);
+  it("reports a whitespace-only or non-numeric value cell once (per row, not per callout)", () => {
+    // A whitespace-only cell is not blank: the engine would draw it at 0, so it is rejected as
+    // not numeric, like "abc", by the per-row check alone.
+    for (const [period, y] of [["ws", " "], ["bad", "abc"]] as const) {
+      const r = validateChartData(withPoints([{ point: period, label: "l" }]), rowsOf([...ROWS, { x: "0.5", y, g: "Earlier", period }]));
+      expect(r.valid, period).toBe(false);
+      expect(r.errors.filter((e) => /annotations\.points/.test(e)), period).toHaveLength(0);
+      expect(r.errors.filter((e) => /is not numeric/.test(e)), period).toHaveLength(1);
+    }
   });
 
   it("a missing value column is reported once by the role check, not again per callout", () => {

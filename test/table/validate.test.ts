@@ -104,3 +104,39 @@ describe("validateTableData", () => {
     expect(r.valid).toBe(false); expect(r.errors.join()).toMatch(/duplicate/i);
   });
 });
+
+// `decimals` reaches Number#toFixed (table/format.ts), which throws a RangeError below 0 or above
+// 100 and truncates a fraction; the chart schema's 0–10 integer bound is the one used here.
+describe("format decimals: an integer 0 to 10 in every scope", () => {
+  const scopes: Array<[path: string, format: (d: unknown) => object]> = [
+    ["/format/default/decimals", (d) => ({ default: { decimals: d } })],
+    ["/format/columns/2026/decimals", (d) => ({ columns: { "2026": { decimals: d } } })],
+    ["/format/groups/A/decimals", (d) => ({ groups: { A: { decimals: d } } })],
+    ["/format/rows/r1/decimals", (d) => ({ rows: { r1: { decimals: d } } })],
+  ];
+  for (const [path, format] of scopes) {
+    it(`${path}: 0 and 10 pass; -1, 11 and 1.5 are rejected`, () => {
+      expect(validateTableSpec({ ...ok, format: format(0) }).valid).toBe(true);
+      expect(validateTableSpec({ ...ok, format: format(10) }).valid).toBe(true);
+      expect(validateTableSpec({ ...ok, format: format(-1) }).errors).toEqual([`${path}: must be >= 0`]);
+      expect(validateTableSpec({ ...ok, format: format(11) }).errors).toEqual([`${path}: must be <= 10`]);
+      expect(validateTableSpec({ ...ok, format: format(1.5) }).errors).toEqual([`${path}: must be integer`]);
+    });
+  }
+});
+
+describe("emphasis_column and footnote_column must name a data column", () => {
+  const rows = [
+    { g: "A", lab: "r1", per: "2026", val: "1", em: "yes", fn: "a" },
+    { g: "A", lab: "r1", per: "2027", val: "2", em: "", fn: "" },
+  ] as any;
+  it("present columns pass", () => {
+    expect(validateTableData({ ...ok, emphasis_column: "em", footnote_column: "fn", footnotes: { a: "x" } }, rows).valid).toBe(true);
+  });
+  it.each(["emphasis_column", "footnote_column"])("a %s the data lacks is rejected, listing the columns", (field) => {
+    const r = validateTableData({ ...ok, [field]: "emph" }, rows);
+    expect(r.errors).toEqual([
+      `config/data mismatch: ${field} is "emph" but no such column exists (columns: ["em","fn","g","lab","per","val"])`,
+    ]);
+  });
+});
