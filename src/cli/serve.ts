@@ -355,11 +355,21 @@ export function createRequestHandler(
     // GET /chart/<relpath>
     const CHART_PREFIX = "/chart/";
     if (pathname.startsWith(CHART_PREFIX)) {
-      const rel = decodeURIComponent(pathname.slice(CHART_PREFIX.length));
+      // A malformed escape (`%E0%A4%A`) makes decodeURIComponent throw, and this handler is
+      // synchronous: uncaught, it killed the whole serve process.
+      let rel: string;
+      try {
+        rel = decodeURIComponent(pathname.slice(CHART_PREFIX.length));
+      } catch {
+        res.writeHead(400, { "Content-Type": "text/plain" });
+        res.end("400 Bad Request");
+        return;
+      }
 
-      // Security: reject path traversal
+      // Security: reject path traversal, and serve only the spec files the index links to. Any
+      // other file under the root (a CSV, an unrelated YAML) is never read or parsed.
       const abs = path.resolve(rootDir, rel);
-      if (!abs.startsWith(rootDir + path.sep) && abs !== rootDir) {
+      if ((!abs.startsWith(rootDir + path.sep) && abs !== rootDir) || !SPEC_FILENAMES.has(path.basename(abs))) {
         res.writeHead(404, { "Content-Type": "text/plain" });
         res.end("404 Not Found");
         return;

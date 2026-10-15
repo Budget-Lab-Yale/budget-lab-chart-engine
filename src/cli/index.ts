@@ -7,6 +7,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, basename, extname, resolve, join } from "node:path";
 import { parseArgs } from "node:util";
+import type * as http from "node:http";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { validateSpec, validateChartData, validateChart } from "../spec/validate";
@@ -46,7 +47,9 @@ function usageText(): string {
     "  render   <spec.yaml> [-o <out.html>] [--eyebrow <text>] [--assets-base <url>]",
     "                                   render to HTML — self-contained, or linking shared assets",
     "  assets   -o <dir>                write the shared runtime + stylesheet",
-    "  serve    [dir] [--port <n>]      local review gallery (default port 5173)",
+    "  serve    [dir] [--port <n>] [--host <addr>]",
+    "                                   local review gallery (default 127.0.0.1:5173; pass",
+    "                                   --host 0.0.0.0 to let other machines reach it)",
     "  snapshot <spec.yaml> [--baseline <path>] [--update]",
     "                                   compare or update a PNG baseline snapshot",
     "",
@@ -574,7 +577,7 @@ export async function runSnapshot(
     };
   }
 
-  const diffOutPath = baselinePath.replace(/\.png$/i, ".diff.png");
+  const diffOutPath = snapshotDiffPath(baselinePath);
   const cmp = await comparePng(pngBuffer, baselineBuffer, { diffOutPath });
 
   if (cmp.match) {
@@ -583,7 +586,103 @@ export async function runSnapshot(
 
   return {
     exitCode: 1,
-    message: `Snapshot DIFFERS: ${cmp.diffPixels} px (wrote ${diffOutPath})`,
+    message: cmp.diffWritten
+      ? `Snapshot DIFFERS: ${cmp.diffPixels} px (wrote ${diffOutPath})`
+      : `Snapshot DIFFERS: image size differs from the baseline (no diff image written)`,
+  };
+}
+
+/** Where `snapshot` writes its diff image: `x.png` → `x.diff.png`, and any other path gets
+ *  `.diff.png` appended. Never the baseline itself: a bare `.png` replace left a suffix-less
+ *  `--baseline` path unchanged, and the first failing compare overwrote the baseline with the diff. */
+export function snapshotDiffPath(baselinePath: string): string {
+  return /\.png$/i.test(baselinePath)
+    ? baselinePath.replace(/\.png$/i, ".diff.png")
+    : `${baselinePath}.diff.png`;
+}
+
+// ---------------------------------------------------------------------------
+// serve: arguments and bind address
+// ---------------------------------------------------------------------------
+
+/** Loopback only. The served pages embed the full data rows of every spec under the root,
+ *  unpublished figures included, so reaching them from another machine is an explicit opt-in
+ *  (`--host`), never the default. */
+export const DEFAULT_SERVE_HOST = "127.0.0.1";
+
+export interface ServeArgs {
+  rootDir: string;
+  port: number;
+  host: string;
+}
+
+/** Parse the arguments after `serve`. Returns `{ error }` for a bad port. */
+export function parseServeArgs(args: string[]): ServeArgs | { error: string } {
+  const { positionals, values } = parseArgs({
+    args,
+    options: {
+      port: { type: "string" },
+      host: { type: "string" },
+    },
+    allowPositionals: true,
+  });
+  const port = values.port !== undefined ? parseInt(values.port, 10) : 5173;
+  if (Number.isNaN(port) || port < 1 || port > 65535) {
+    return { error: `tbl-chart serve: invalid port ${JSON.stringify(values.port)}` };
+  }
+  return { rootDir: resolve(positionals[0] ?? process.cwd()), port, host: values.host ?? DEFAULT_SERVE_HOST };
+}
+
+/** `http://<address>:<port>`, with an IPv6 address in brackets. */
+export function serveUrl(address: string, port: number): string {
+  return `http://${address.includes(":") ? `[${address}]` : address}:${port}`;
+}
+
+/** Listen on `host:port`; resolve to the URL of the address actually bound, reject on a listen
+ *  error (EADDRINUSE, an unknown host). */
+export function listenServe(server: http.Server, port: number, host: string): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, () => {
+      server.off("error", reject);
+      const addr = server.address();
+      resolvePromise(
+        addr && typeof addr === "object" ? serveUrl(addr.address, addr.port) : serveUrl(host, port),
+      );
+    });
+  });
+}
+
+export type ServeStart =
+  | { exitCode: 0; message: string; server: http.Server; url: string }
+  | { exitCode: 1; message: string };
+
+/** `tbl-chart serve` after argument parsing and the bundle read: build the server and listen on
+ *  `args.host` (127.0.0.1 unless `--host` was given). Returns the line to print; the caller keeps
+ *  the process alive, and a test closes `server`. */
+export async function startServe(args: ServeArgs, liveBundleJs: string): Promise<ServeStart> {
+  const { rootDir, port, host } = args;
+  const specs = findSpecs(rootDir);
+  const server = createServer({ rootDir, liveBundleJs, css: CHART_CSS });
+
+  let url: string;
+  try {
+    url = await listenServe(server, port, host);
+  } catch (err) {
+    return {
+      exitCode: 1,
+      message:
+        (err as NodeJS.ErrnoException).code === "EADDRINUSE"
+          ? `tbl-chart serve: port ${port} is already in use.\nTry a different port with --port <n>.`
+          : `tbl-chart serve: server error: ${(err as Error).message}`,
+    };
+  }
+  server.on("error", (err) => console.error(`tbl-chart serve: server error: ${err.message}`));
+  return {
+    exitCode: 0,
+    message: `Serving ${specs.length} spec${specs.length === 1 ? "" : "s"} from ${rootDir} at ${url}`,
+    server,
+    url,
   };
 }
 
@@ -712,19 +811,9 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   if (cmd === "serve") {
-    const { positionals, values } = parseArgs({
-      args: argv.slice(3),
-      options: {
-        port: { type: "string" },
-      },
-      allowPositionals: true,
-    });
-
-    const rootDir = resolve(positionals[0] ?? process.cwd());
-    const port = values.port !== undefined ? parseInt(values.port, 10) : 5173;
-
-    if (Number.isNaN(port) || port < 1 || port > 65535) {
-      console.error(`tbl-chart serve: invalid port ${JSON.stringify(values.port)}`);
+    const parsed = parseServeArgs(argv.slice(3));
+    if ("error" in parsed) {
+      console.error(parsed.error);
       return 1;
     }
 
@@ -742,34 +831,12 @@ export async function main(argv: string[]): Promise<number> {
       return 1;
     }
 
-    const specs = findSpecs(rootDir);
-    const server = createServer({ rootDir, liveBundleJs, css: CHART_CSS });
-
-    await new Promise<void>((resolvePromise, reject) => {
-      server.on("error", (err: NodeJS.ErrnoException) => {
-        if (err.code === "EADDRINUSE") {
-          console.error(
-            `tbl-chart serve: port ${port} is already in use.\n` +
-              `Try a different port with --port <n>.`,
-          );
-        } else {
-          console.error(`tbl-chart serve: server error: ${err.message}`);
-        }
-        reject(err);
-      });
-
-      server.listen(port, () => {
-        console.log(
-          `Serving ${specs.length} spec${specs.length === 1 ? "" : "s"} from ${rootDir} at http://localhost:${port}`,
-        );
-        resolvePromise();
-      });
-    }).catch(() => {
-      return;
-    });
-
-    // If server failed to start, error was already printed above; return non-zero.
-    if (!server.listening) return 1;
+    const started = await startServe(parsed, liveBundleJs);
+    if (started.exitCode !== 0) {
+      console.error(started.message);
+      return started.exitCode;
+    }
+    console.log(started.message);
 
     // Keep the process alive until interrupted.
     await new Promise<void>(() => {

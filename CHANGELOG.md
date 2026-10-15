@@ -33,6 +33,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   stack order. Pinning an area series from the keyboard keeps focus on its legend button. An area
   pin now fires `onLegendSelect` once; it fired once per pinned series plus once more, the extra
   calls carrying partial sets as the pins were re-applied.
+- `tbl-chart serve`: a malformed percent-escape in a `/chart/` URL (`/chart/%E0%A4%A`) now answers
+  400; it crashed the server. `/chart/` serves only `chart.yaml` and `table.yaml`: any other file
+  under the root answers 404 instead of being read and YAML-parsed.
+- `tbl-chart snapshot --baseline <path>` with no `.png` suffix: a failing compare overwrote the
+  baseline with the diff image. The diff now goes to `<path>.diff.png`. When the rendered image's
+  size differs from the baseline's, no diff image is written, and the message no longer says one was.
+
+### Changed
+- `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while
+  printing a `localhost` URL, so another machine on the same network could open every spec under
+  the root, data included. `--host <addr>` opts in to another address, and the printed URL is the
+  address actually bound.
 
 ### Removed
 - From the package entry: the `FacetInfo` type and `renderPane`'s fifth (`facetInfo`) parameter,
