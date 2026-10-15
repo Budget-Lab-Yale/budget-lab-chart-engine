@@ -24,6 +24,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   group is collapsed or expanded, and a collapse no longer rebuilds the table (the pressed toggle
   keeps focus). Sortable column headers keep their column-header role so screen readers announce
   `aria-sort`; the header label is now a button, which is what takes keyboard focus.
+- Live charts and small multiples: legend pins survive a resize and a title-selector reselect (they
+  were silently cleared, and `onLegendSelect` was not told). A redraw whose legend no longer has a
+  pinned row drops that pin and fires `onLegendSelect` once; on an area chart it also restores the
+  stack order. Pinning an area series from the keyboard keeps focus on its legend button. An area
+  pin now fires `onLegendSelect` once; it fired once per pinned series plus once more, the extra
+  calls carrying partial sets as the pins were re-applied.
 
 ### Removed
 - From the package entry: the `FacetInfo` type and `renderPane`'s fifth (`facetInfo`) parameter,

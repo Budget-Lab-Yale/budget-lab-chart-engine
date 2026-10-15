@@ -42,7 +42,7 @@ import { applyValueAffixes, formatNumericX, normalizeSpec } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
-import type { LegendHandle } from "./legend.js";
+import type { LegendFocus, LegendHandle, LegendPins, LegendState } from "./legend.js";
 import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./hover-classes.js";
 import { resolveColor } from "./palette.js";
@@ -192,8 +192,9 @@ export interface MountOptions {
    *  resize redraw, once after a title-selector change forces a redraw (for its color accent),
    *  and once after an area chart's legend-driven click-to-restack forces its own redraw
    *  (`phase: "restack"` — pinning/unpinning a series moves it to the bottom of the stack and
-   *  re-renders; guarded by `suppressRestack` so the pin-restoration loop that follows does not
-   *  re-enter this branch and double-fire). A small-multiples figure fires once PER PANE (each
+   *  re-renders; guarded by `suppressRestack` so the focus hand-back inside that redraw does not
+   *  re-enter this branch and double-fire; a reselect that drops a pinned series restacks too, so
+   *  it fires "reselect" then "restack"). A small-multiples figure fires once PER PANE (each
    *  call's `svg` is that pane's own), rather than once for the figure — there is no single
    *  wrapping SVG to report; small multiples has no restack feature, so `"restack"` never reaches
    *  that path. A bubbling `tbl-render` CustomEvent (same detail) also dispatches from the card
@@ -203,7 +204,8 @@ export interface MountOptions {
    *  blur, or the reset button — with the full active series set. A bubbling `tbl-legend-select`
    *  CustomEvent (same detail) also dispatches from the card root. Distinct from `onSelect`,
    *  which is the title-selector callback — this is the legend's own pin/dim gesture. No-op on a
-   *  chart with no legend. */
+   *  chart with no legend. Pins are carried across the mount's own redraws; a redraw whose legend
+   *  no longer has a pinned row drops it and fires this once with what remains. */
   onLegendSelect?: (ctx: { active: string[] }) => void;
   /** Reparent the floating hover-tooltip card into this element instead of the default
    *  `container.ownerDocument.body`. Opt-in, not the default: the card is positioned
@@ -239,6 +241,61 @@ function runHoverDetaches(detaches: HoverDetach[]): void {
       queueMicrotask(() => { throw e; });
     }
   }
+}
+
+/** What a redraw carries from the legend it is about to replace. Every draw() / drawGrid() rebuilds
+ *  the legend from scratch, so without this a resize or a title-selector change silently unpinned
+ *  everything (B5). */
+interface CarriedLegend {
+  state: LegendState;
+  focus: LegendFocus | null;
+}
+function carryLegend(handle: LegendHandle | null): CarriedLegend | null {
+  return handle ? { state: handle.state(), focus: handle.focused() } : null;
+}
+/** Anything to re-apply: a pin or a hover in any dimension. */
+function hasSelection({ pins, hovered }: LegendState): boolean {
+  return pinCount(pins) > 0 || hovered.series != null || hovered.annotation != null || hovered.shape != null;
+}
+/** True when the rebuilt legend holds fewer pins than were carried into it: a pinned key the new
+ *  render no longer has was dropped, and the host must be told. */
+function pinsDropped(carried: CarriedLegend | null, handle: LegendHandle | null): boolean {
+  if (!carried) return false;
+  return pinCount(carried.state.pins) > (handle ? pinCount(handle.state().pins) : 0);
+}
+function pinCount(p: LegendPins): number {
+  return p.series.length + p.annotations.length + p.shapes.length;
+}
+/** Attach `later` as `err.cause` when that slot is free. Best-effort only: never let annotating an
+ *  error replace the error itself. */
+function attachCause(err: unknown, later: unknown): void {
+  if (typeof err !== "object" || err === null) return;
+  try {
+    const withCause = err as { cause?: unknown };
+    if (withCause.cause === undefined) withCause.cause = later;
+  } catch { /* frozen/exotic error object — the first error still surfaces */ }
+}
+/** The tail of every redraw that rebuilt a legend: fire onRender, then report a dropped pin, then
+ *  hand keyboard focus back. A throwing onRender must not cost the host its drop notification, so its
+ *  error is CARRIED past the other two steps and rethrown unwrapped, with a throw from the
+ *  notification attached as its `.cause`. */
+function finishRedraw(fireRender: () => void, reportDrop: (() => void) | null, restoreFocus: () => void): void {
+  let first: { e: unknown } | null = null;
+  try {
+    fireRender();
+  } catch (e) {
+    first = { e };
+  }
+  if (reportDrop) {
+    try {
+      reportDrop();
+    } catch (e) {
+      if (first) attachCause(first.e, e);
+      else first = { e };
+    }
+  }
+  restoreFocus();
+  if (first) throw first.e;
 }
 
 // MIN_CHART_WIDTH (legend-layout.ts): below it the chart stops shrinking and the scroll wrapper
@@ -925,7 +982,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Area click-to-restack: pinned series move to the BOTTOM of the stack (in click order) so a
       // user can read them against zero; unpinning restores the default order. Driven off PINS
       // (not hover), so this only fires on an actual selection change. Re-renders the whole chart
-      // via draw() and re-applies the pins to the freshly built legend.
+      // via draw(), which carries the pins onto the freshly built legend.
       if (spec.chartType === "area" && !suppressRestack) {
         const pins = currentLegendHandle?.pinnedSeries() ?? [];
         const next = pins.length
@@ -938,60 +995,32 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           suppressRestack = true;
           lastWidth = -1; // force draw() past its same-width early return
           // A stuck `suppressRestack` silently disables every future restack on this mount — a
-          // permanent break, worse than any throw it could come from. There are THREE consumer
-          // callbacks between here and the reset that can throw, so every step below runs
-          // unconditionally and the errors are CARRIED rather than thrown as they happen:
+          // permanent break, worse than any throw it could come from — so it is reset in a
+          // `finally`. It stays true for the whole draw() on purpose: draw() carries the pins onto
+          // the fresh legend and may hand keyboard focus back to it, and the focus handler re-enters
+          // onHighlight, where the restack branch must skip rather than recurse.
           //
-          //  - draw() is caught, not try/finally'd. onRender fires at the tail of its "restack"
-          //    branch, after the render, the DOM swap, and the reassignment of
-          //    currentLegendHandle — so the re-pin below always runs against the CORRECT (fresh)
-          //    handle whether or not onRender threw.
-          //  - the re-pin loop itself calls legend.toggle → applyHighlight → onHighlight →
-          //    notify(onLegendSelect), which can throw too. This used to run inside the outer
-          //    `finally`, where a throw REPLACED the pending render error — JS discards the
-          //    original when a `finally` throws — so a consumer whose onRender and onLegendSelect
-          //    both threw saw only the legend error and lost the render failure entirely. Hence
-          //    the carried `renderError`: nothing is thrown until the cleanup is finished and both
-          //    outcomes are known.
-          //  - PER-TOGGLE catch: legend.ts's togglePin mutates its pin set and the legend DOM
-          //    BEFORE it notifies, so a consumer throw there says nothing about the legend's state.
-          //    Aborting the loop is what would desync the REMAINING pins from restackOrder, which
-          //    already names them all as bottom-of-stack. Every pin is restored regardless.
-          //
-          // `suppressRestack` stays true for the whole loop on purpose — each toggle re-enters
-          // onHighlight, and the restack branch above must skip rather than recurse — so the reset
-          // sits AFTER the loop, in its own finally, never before it.
-          //
-          // What surfaces: the FIRST error, unwrapped and identical to what the consumer threw (so
-          // `instanceof` and `.message` still hold at the catch site), with the later one attached
-          // as `.cause` when there is one and the slot is free. Nothing is swallowed.
+          // A throwing onRender (it fires at the tail of draw's "restack" branch, after the legend
+          // is rebuilt and the pins carried) must not cost the host its onLegendSelect for this pin.
+          // So the render error is CARRIED: the notification below still runs, and then the render
+          // error surfaces, unwrapped and identical to what the consumer threw (so `instanceof` and
+          // `.message` still hold at the catch site), with a throw from the notification attached as
+          // its `.cause` when that slot is free. Nothing is swallowed.
           let renderError: { e: unknown } | null = null;
           try {
             draw(card.clientWidth || target, currentLegendPos ?? legendPos, "restack");
           } catch (e) {
             renderError = { e };
-          }
-          const pinErrors: unknown[] = [];
-          try {
-            if (currentLegendHandle) {
-              for (const s of pins) {
-                try { currentLegendHandle.toggle(s); } catch (e) { pinErrors.push(e); }
-              }
-            }
           } finally {
             suppressRestack = false;
           }
-          const firstError = renderError ? renderError.e : pinErrors.length ? pinErrors[0] : null;
-          if (firstError != null) {
-            const later = renderError && pinErrors.length ? pinErrors[0] : null;
-            if (later != null && typeof firstError === "object") {
-              // Best-effort only: never let annotating an error replace the error itself.
-              try {
-                const withCause = firstError as { cause?: unknown };
-                if (withCause.cause === undefined) withCause.cause = later;
-              } catch { /* frozen/exotic error object — the first one still surfaces below */ }
+          if (renderError) {
+            try {
+              notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
+            } catch (later) {
+              attachCause(renderError.e, later);
             }
-            throw firstError;
+            throw renderError.e;
           }
           // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
           // Unreachable when draw() threw — the error above propagates past this point.
@@ -1022,10 +1051,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     } else if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
 
     // --- Legend layout ---
+    // Read before the old legend leaves the DOM: focus falls to <body> once it does.
+    const carried = carryLegend(currentLegendHandle);
     const shapeOpts = {
       shapeItems: shapeLegendItems ?? undefined,
       colorTitle: colorLegendTitle,
       shapeTitle: shapeLegendTitle,
+      state: carried?.state,
     };
     let legendHandle: LegendHandle | null = null;
     // A resize below LEGEND_RIGHT_MIN_CARD_WIDTH moves the legend to the top (and a timeline's can
@@ -1092,6 +1124,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     // Expose the freshly built legend handle for the area-restack re-render path (onHighlight).
     currentLegendHandle = legendHandle;
+    const dropped = pinsDropped(carried, legendHandle);
 
     currentLegendPos = legendPos;
 
@@ -1418,60 +1451,76 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       card.classList.remove("is-selectable");
     }
 
+    // The carried state reached the new legend without its onHighlight: dim the marks added since
+    // it was built (the hit paths above), and tell this draw's pill driver.
+    const carriedActive = legendHandle?.active() ?? new Set<string>();
+    if (carried && hasSelection(carried.state) && legendHandle) legendHandle.restyle();
+    if (carriedActive.size) pillDriver?.setActive(carriedActive);
+
     // onRender: at each of the four real re-render occasions this mount forces past draw()'s
     // same-width/same-legendPos guard above — mount/resize/reselect, and the area click-to-restack
     // redraw a few lines up ("restack"). The restack call passes its phase explicitly and is
-    // guarded by its own try/finally there, so this fires exactly once per user-visible restack,
-    // not once per pin the restoration loop re-toggles afterward (those re-entrant calls never
-    // reach a NEW draw()).
-    if (renderPhase) {
-      if (renderPhase === "mount") {
-        // Deferred: this IS mountChart's own initial call, still executing inside mountChart's
-        // own body — everything after it (requestAccentRedraw wiring, the scroll listener, the
-        // ResizeObserver, and the RETURN of the teardown closure) is still to come. A function
-        // cannot both let an exception propagate to its caller AND return a value to that same
-        // caller, so a throwing onRender here — unlike resize/reselect, which have no follow-up
-        // code in the closure that called draw(), and restack, which has its own try/finally
-        // below — would otherwise make mountChart() itself throw: the caller would never receive
-        // the teardown, and the ResizeObserver would never attach (chart rendered but left
-        // un-tearable-down and non-resizable). Queuing the notify lets mountChart() finish and
-        // return normally first; the throw still surfaces (uncaught, on its own microtask) rather
-        // than being swallowed — it just arrives slightly later than the other three phases.
-        //
-        // Guarded on `disposed`: a caller that tears the mount down before this microtask runs
-        // (a synchronous mount-then-teardown — React StrictMode's dev double-invoke does exactly
-        // this) must not have onRender fire afterward for a chart already disposed of — a logical
-        // contract state, not DOM detachment; teardown never removes the card from its container.
-        // Checked INSIDE the microtask (not before scheduling it) since `disposed` is only known
-        // at the time this callback actually runs.
-        //
-        // The svg is RE-READ from `currentSvg` inside the microtask rather than captured with this
-        // closure. Deferring means a synchronous re-render can land first — a host that changes a
-        // title selector immediately after mountChart() returns reaches requestAccentRedraw, whose
-        // draw() runs `canvas.replaceChildren(newSvg)` and notifies "reselect" synchronously — and
-        // the svg this closure was created with is by then DETACHED. Handing a consumer that node
-        // makes every DOM mutation its mount handler performs invisible: a silent no-op in the one
-        // callback that exists so a consumer can decorate the chart it just mounted.
-        //
-        // RE-TARGET rather than skip: "mount" means "the first notification for this mounted
-        // chart", and a consumer's one-time decoration must land SOMEWHERE or it never happens at
-        // all for the life of the chart. (Whether the label is exactly right in that sequence is a
-        // smaller complaint than never firing; a consumer that decorates on more than one phase is
-        // already handed the same fresh svg twice per redraw and has to be idempotent regardless.)
-        // Identity is read as `currentSvg`, the reference draw() assigns beside its own
-        // replaceChildren: `svg.parentNode === canvas` would answer the same question here but not
-        // in mountFigure, where each pane's svg lives in its own cell wrapper, and a draw counter
-        // would need threading and keeping in step to say no more than the live reference does.
-        // Deliberately NOT `svg.isConnected`: a mount into a detached container reports false on a
-        // perfectly current svg (most of the test suite mounts exactly that way).
-        queueMicrotask(() => {
-          if (disposed || !currentSvg) return;
-          notify(card, "tbl-render", { svg: currentSvg, phase: "mount" as const }, opts.onRender);
-        });
-      } else {
-        notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender);
+    // guarded by its own try/finally there, so this fires exactly once per user-visible restack
+    // (the carried pins and the focus hand-back never reach a NEW draw()).
+    const fireRender = (): void => {
+      if (renderPhase) {
+        if (renderPhase === "mount") {
+          // Deferred: this IS mountChart's own initial call, still executing inside mountChart's
+          // own body — everything after it (requestAccentRedraw wiring, the scroll listener, the
+          // ResizeObserver, and the RETURN of the teardown closure) is still to come. A function
+          // cannot both let an exception propagate to its caller AND return a value to that same
+          // caller, so a throwing onRender here — unlike resize/reselect, which have no follow-up
+          // code in the closure that called draw(), and restack, which has its own try/finally
+          // below — would otherwise make mountChart() itself throw: the caller would never receive
+          // the teardown, and the ResizeObserver would never attach (chart rendered but left
+          // un-tearable-down and non-resizable). Queuing the notify lets mountChart() finish and
+          // return normally first; the throw still surfaces (uncaught, on its own microtask) rather
+          // than being swallowed — it just arrives slightly later than the other three phases.
+          //
+          // Guarded on `disposed`: a caller that tears the mount down before this microtask runs
+          // (a synchronous mount-then-teardown — React StrictMode's dev double-invoke does exactly
+          // this) must not have onRender fire afterward for a chart already disposed of — a logical
+          // contract state, not DOM detachment; teardown never removes the card from its container.
+          // Checked INSIDE the microtask (not before scheduling it) since `disposed` is only known
+          // at the time this callback actually runs.
+          //
+          // The svg is RE-READ from `currentSvg` inside the microtask rather than captured with this
+          // closure. Deferring means a synchronous re-render can land first — a host that changes a
+          // title selector immediately after mountChart() returns reaches requestAccentRedraw, whose
+          // draw() runs `canvas.replaceChildren(newSvg)` and notifies "reselect" synchronously — and
+          // the svg this closure was created with is by then DETACHED. Handing a consumer that node
+          // makes every DOM mutation its mount handler performs invisible: a silent no-op in the one
+          // callback that exists so a consumer can decorate the chart it just mounted.
+          //
+          // RE-TARGET rather than skip: "mount" means "the first notification for this mounted
+          // chart", and a consumer's one-time decoration must land SOMEWHERE or it never happens at
+          // all for the life of the chart. (Whether the label is exactly right in that sequence is a
+          // smaller complaint than never firing; a consumer that decorates on more than one phase is
+          // already handed the same fresh svg twice per redraw and has to be idempotent regardless.)
+          // Identity is read as `currentSvg`, the reference draw() assigns beside its own
+          // replaceChildren: `svg.parentNode === canvas` would answer the same question here but not
+          // in mountFigure, where each pane's svg lives in its own cell wrapper, and a draw counter
+          // would need threading and keeping in step to say no more than the live reference does.
+          // Deliberately NOT `svg.isConnected`: a mount into a detached container reports false on a
+          // perfectly current svg (most of the test suite mounts exactly that way).
+          queueMicrotask(() => {
+            if (disposed || !currentSvg) return;
+            notify(card, "tbl-render", { svg: currentSvg, phase: "mount" as const }, opts.onRender);
+          });
+        } else {
+          notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender);
+        }
       }
-    }
+    };
+
+    // The drop is reported after onRender, which must be handed THIS draw's svg: on an area chart a
+    // dropped pin changes the stack order, and onHighlight restacks with a draw of its own.
+    finishRedraw(
+      fireRender,
+      dropped ? () => onHighlight(carriedActive) : null,
+      // currentLegendHandle, not legendHandle: that restack may have replaced the legend again.
+      () => { if (carried?.focus) currentLegendHandle?.focus(carried.focus); },
+    );
   };
 
   // Initial draw: we don't know the series count yet, so render first to get legendItems,
@@ -2503,6 +2552,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   let currentPaneSvgs: Array<SVGSVGElement | undefined> = [];
   // Every pane's hover attachment of the current draw — see mountChart's `hoverDetaches`.
   const hoverDetaches: HoverDetach[] = [];
+  // The legend of the current draw, read by the next one to carry its pins (see CarriedLegend).
+  let currentLegendHandle: LegendHandle | null = null;
 
   // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
   // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
@@ -2623,26 +2674,32 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       grid.appendChild(cell);
     }
     currentPaneSvgs = fig.panes.map((p) => (p.svg as SVGSVGElement | undefined) ?? undefined);
+    // Read before the old legend leaves the DOM: focus falls to <body> once it does.
+    const carried = carryLegend(currentLegendHandle);
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
     // Each pane registers its value-pill driver here; the legend fires them all on highlight.
     const pillDrivers: HighlightPillsHandle[] = [];
     const hasFigShape = !!(fig.shapeLegendItems && fig.shapeLegendItems.length);
+    const onHighlight = (active: Set<string>): void => {
+      for (const d of pillDrivers) d.setActive(active);
+      // onLegendSelect: same "however it changed" note as mountChart's identical dispatch —
+      // fires on hover/focus/blur too, not only a pin click; high-frequency, debounce-worthy.
+      notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
+    };
     const handle = fig.legendItems || hasFigShape
       ? renderLegend(legendSlot, fig.legendItems ?? [], {
           svg: grid,
-          onHighlight: (active) => {
-            for (const d of pillDrivers) d.setActive(active);
-            // onLegendSelect: same "however it changed" note as mountChart's identical dispatch —
-            // fires on hover/focus/blur too, not only a pin click; high-frequency, debounce-worthy.
-            notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
-          },
+          onHighlight,
           hooks: opts.hooks,
           shapeItems: fig.shapeLegendItems ?? undefined,
           colorTitle: fig.colorLegendTitle,
           shapeTitle: fig.shapeLegendTitle,
+          state: carried?.state,
         })
       : null;
+    currentLegendHandle = handle;
+    const dropped = pinsDropped(carried, handle);
     // Attach each pane's crosshair ALWAYS (single-series bar panes have no legend but still
     // need tooltips); selection click is gated on `handle` inside wireFigureSvg.
     card.classList.toggle("is-selectable", handle != null);
@@ -2705,6 +2762,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       drivers.push(driver ?? (() => {}));
     });
 
+    // As mountChart's draw(): the carried state reached the legend without its onHighlight.
+    const carriedActive = handle?.active() ?? new Set<string>();
+    if (carried && hasSelection(carried.state) && handle) handle.restyle();
+    if (carriedActive.size) for (const d of pillDrivers) d.setActive(carriedActive);
+
     // onRender: once PER PANE (there is no single wrapping SVG for a figure to report) at the
     // three real re-render occasions — mirrors mountChart's dispatch, gated the same way, INCLUDING
     // the "mount" deferral (mountFigure's own initial draw() call has the identical ResizeObserver/
@@ -2715,22 +2777,30 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // the pane SVGs were appended, before legendSlot.replaceChildren()) meant a synchronous
     // resize/reselect saw the PREVIOUS render's legend, and any DOM a consumer applied here was
     // wiped a few lines later.
-    if (renderPhase) {
-      fig.panes.forEach((pane, i) => {
-        if (!pane.svg) return;
-        if (renderPhase === "mount") {
-          // Guarded on `disposed`, and RE-READING the pane's live svg by index instead of capturing
-          // this render's -- see mountChart's identical dispatch comment for both.
-          queueMicrotask(() => {
-            const live = currentPaneSvgs[i];
-            if (disposed || !live) return;
-            notify(card, "tbl-render", { svg: live, phase: "mount" as const }, opts.onRender);
-          });
-        } else {
-          notify(card, "tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender);
-        }
-      });
-    }
+    const fireRender = (): void => {
+      if (renderPhase) {
+        fig.panes.forEach((pane, i) => {
+          if (!pane.svg) return;
+          if (renderPhase === "mount") {
+            // Guarded on `disposed`, and RE-READING the pane's live svg by index instead of capturing
+            // this render's -- see mountChart's identical dispatch comment for both.
+            queueMicrotask(() => {
+              const live = currentPaneSvgs[i];
+              if (disposed || !live) return;
+              notify(card, "tbl-render", { svg: live, phase: "mount" as const }, opts.onRender);
+            });
+          } else {
+            notify(card, "tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender);
+          }
+        });
+      }
+    };
+
+    finishRedraw(
+      fireRender,
+      dropped ? () => onHighlight(carriedActive) : null,
+      () => { if (carried?.focus) handle?.focus(carried.focus); },
+    );
   };
 
   const draw = (w: number, phase?: "mount" | "resize" | "reselect"): void => { drawGrid(w, phase); };
