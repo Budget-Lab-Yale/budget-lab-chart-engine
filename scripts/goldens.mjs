@@ -9,13 +9,13 @@
 //                            path for adding a NEW golden. Re-recording an existing golden is
 //                            forbidden by CLAUDE.md (Hard invariants), so "all" is never offered.
 //
-// Orphan guard: every *.golden.svg under test/ must be named (its file name, literally) in one of
-// the discovered test files. A golden nothing compares against guards nothing, and a renamed case
+// Orphan guard: every *.golden.svg under test/ must be named, as a quoted path relative to the test
+// file, in one of the discovered test files. A golden nothing compares against guards nothing, and a renamed case
 // would otherwise leave its old file behind looking like coverage.
 import { readdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { basename, join, relative, resolve, dirname } from "node:path";
+import { join, relative, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,12 +40,22 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-// The name must follow a path separator or a quote, so "bar.golden.svg" is not satisfied by a
-// reference to "stacked-bar.golden.svg".
-const named = (text, name) =>
-  new RegExp(`[/\\\\"'\`]${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(text);
+// Each quoted "….golden.svg" path in a golden test file, resolved against that file's directory, as
+// toMatchFileSnapshot resolves it. Matching resolved paths (not file names) keeps
+// fixtures/bar-grouped-horizontal.golden.svg and fixtures/export/bar-grouped-horizontal.golden.svg
+// from vouching for each other. Comment lines are skipped; a path built at run time (a template with
+// `${…}`) resolves to nothing on disk, so its golden is reported as an orphan rather than passed.
+const referenced = new Set(
+  sources.flatMap(({ f, text }) =>
+    text
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))
+      .flatMap((line) => [...line.matchAll(/["'`]([^"'`\s]*\.golden\.svg)["'`]/g)])
+      .map((m) => resolve(dirname(f), m[1])),
+  ),
+);
 const orphans = [...walk(join(root, "test"), ".golden.svg")]
-  .filter((g) => !sources.some(({ text }) => named(text, basename(g))))
+  .filter((g) => !referenced.has(resolve(g)))
   .map(rel);
 if (orphans.length > 0) {
   console.error("goldens: these goldens are not named in any golden test file (orphans):");
