@@ -24,9 +24,11 @@ Constraints that no single file states and that a reviewer cannot infer from a d
 any of these is a top-severity finding, not a nitpick.** Paste this section verbatim into code-review
 prompts (see the `gpt-review` skill). Add to it when a bug or a review reveals a new one.
 
-- **No `eval`, no `new Function`, anywhere.** The engine bundles into standalone HTML served under a
-  strict CSP. The `overlays[].fun` grammar is *parsed and interpreted* (`src/spec/expr.ts`); it is
-  never evaluated. (Plot's vendored DSV code contains a textual `new Function` the engine never
+- **No `eval`, no `new Function` in shipped code** — `src/` and everything bundled from it (`dist/`,
+  standalone HTML). The engine bundles into standalone HTML served under a strict CSP. Test harnesses
+  that execute generated page scripts inside jsdom (`test/serve.test.ts` `runOpenAll`) are outside
+  it: the invariant exists for the CSP of published pages. The `overlays[].fun` grammar is *parsed
+  and interpreted* (`src/spec/expr.ts`); it is never evaluated. (Plot's vendored DSV code contains a textual `new Function` the engine never
   reaches — do not "fix" it, and do not cite it as precedent.)
 - **Rendered output must stay byte-identical for every pre-existing spec, except by a named
   exception.** Golden SVG tests enforce it. A repin re-renders the entire published archive, so an

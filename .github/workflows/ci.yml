@@ -2,7 +2,7 @@ name: CI
 
 # Typecheck + test gate for the engine. `npm ci` runs the `prepare` script, which builds dist/.
 #
-# A browser IS needed. Four suites launch Chromium, and they are the ones measuring facts no other
+# A browser IS needed. Nine suites launch Chromium, and they are the ones measuring facts no other
 # kind of test can reach: whether an icon's ink is cut by its box, whether a hatch key reads as the
 # character it names, and whether a faceted clip confines marks to their own cell. Some of them
 # guard with `describe.skipIf(!HAS_BROWSER)`, so without a browser they pass CI by not running —
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
       - run: npm ci
       # The same test HAS_BROWSER makes: a drifted image tag would otherwise skip the browser
@@ -47,3 +47,5 @@ jobs:
           console.log(p);"
       - run: npm run typecheck
       - run: npm test
+      # Renders the built dist/ twice in Chromium and compares pixels; `npm ci` has built dist/.
+      - run: npm run snapshot:selftest
