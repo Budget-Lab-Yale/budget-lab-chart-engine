@@ -914,8 +914,8 @@ logo takes a row of its own at the top right, and the title starts below it. The
 note and source wrap at their spaces to the frame's width less its margins, so a single word wider
 than that (a long URL, say) is not broken and runs past it. An `x_axis_title` is centred and wraps to
 the same width, a word wider than it split. The legend always sits above the chart, whatever
-`legendPosition` says, its rows and any over-long label wrapped to fit — except a row a `legendKey`
-hook draws, whose markup is drawn as returned, unwrapped.
+`legendPosition` says, its rows and any over-long label wrapped to fit — except a row whose markup a
+`legendKey` hook changes, which is drawn as returned, unwrapped.
 
 `tbl-chart validate` passes but warns when a timeline has more than 20 events, when a horizontal one
 needs more than `max_rows` rows at its export width (the warning names the width), or when

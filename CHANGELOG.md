@@ -66,6 +66,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   a page with no layout, pinning an area series beside a right legend no longer narrows the chart.
 - Line charts with a single x value: the hover guide is drawn on the point (it was `x1="NaN"`), and
   the small-multiples coordinated cursor's guide on the point rather than at the left edge.
+- `overlays[].fun`: a function name inherited from JavaScript objects (`constructor(x)`,
+  `toString(x)`) is now a validation error naming the known functions. It passed validation and the
+  render threw.
+- PNG export with a `legendKey` hook that returns `ctx.rendered` unchanged: the download now matches
+  the one without the hook, as documented. The row was drawn unwrapped (a long label ran off the
+  frame) and took a single row in a right-hand legend column. Markup a hook changes is still drawn
+  as returned, unwrapped.
+- Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
+  `url("#p")`) no longer breaks the swatch markup.
 
 ### Changed
 - `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while

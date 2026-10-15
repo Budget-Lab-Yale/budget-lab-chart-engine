@@ -270,14 +270,20 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     // Precondition: the engine's own legend key wraps this label within the portrait frame.
     const plain = buildExportSvg(spec, rows);
     expect(labelTexts(plain).length).toBeGreaterThan(2);
-    // A hook returning the default markup unchanged draws it as one row: the export does not re-wrap
-    // markup it did not draw.
-    const hooked = buildExportSvg(spec, rows, { hooks: { legendKey: (ctx) => ctx.rendered } });
+    // A hook that CHANGES the markup (here, wraps it in a group of its own) has it drawn as one
+    // row: the export does not re-wrap markup it did not draw.
+    const hooked = buildExportSvg(spec, rows, {
+      hooks: { legendKey: (ctx) => `<g class="mine">${ctx.rendered}</g>` },
+    });
     const lines = labelTexts(hooked);
     expect(lines).toHaveLength(1);
     expect(lines[0]!.textContent).toBe(long);
-    expect(lines[0]!.closest("g")).not.toBeNull();
+    expect(lines[0]!.closest("g.mine")).not.toBeNull();
     expect(8 * long.length).toBeGreaterThan(num(hooked, "width"));
+    // `ctx.rendered` returned UNCHANGED is no hook at all: the export draws (and wraps) its own row,
+    // as CONFIG-SPEC's "simply return `ctx.rendered` unchanged" promises.
+    const passThrough = buildExportSvg(spec, rows, { hooks: { legendKey: (ctx) => ctx.rendered } });
+    expect(passThrough.outerHTML).toBe(plain.outerHTML);
   });
 
   it("centres the x-axis title on the portrait frame", () => {

@@ -17,6 +17,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
+import { resolveLegendPosition } from "../src/engine/legend-layout";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import type { RenderHooks } from "../src/spec/hooks";
@@ -170,5 +171,68 @@ describe("hooks.legendKey", () => {
     const a = buildExportSvg(SPEC, ROWS, {}).outerHTML;
     const b = buildExportSvg(SPEC, ROWS, { hooks: {} }).outerHTML;
     expect(b).toBe(a);
+  });
+});
+
+// CONFIG-SPEC promises a hook can "simply return `ctx.rendered` unchanged". On screen that is the
+// default row; in the export it used to be drawn as custom markup — unwrapped, one reserved row in
+// the right column, a nested <svg> instead of `g.tbl-icon` — so a long label ran off the frame in
+// the download only. A pass-through must export exactly what no hook exports.
+describe("hooks.legendKey — a pass-through hook exports identically to no hook", () => {
+  const LONG = "A very long series label that cannot possibly fit in a 160px legend column";
+  const stackedRows = (n: number): TidyRow[] =>
+    ["Q1", "Q2"].flatMap((time) =>
+      Array.from({ length: n }, (_, i) => ({
+        time,
+        series: i === n - 1 ? LONG : `s${i}`,
+        value: String(i + 1),
+      })),
+    ) as unknown as TidyRow[];
+  const longRows = ROWS.map((r) =>
+    (r as unknown as { series: string }).series === "B" ? { ...r, series: LONG } : r,
+  ) as unknown as TidyRow[];
+  const figRows = ["G1", "G2"].flatMap((grp) =>
+    ROWS.map((r) => ({ ...(r as unknown as Record<string, string>), grp })),
+  ) as unknown as TidyRow[];
+
+  const cases: Array<[string, ChartSpec, TidyRow[], Parameters<typeof buildExportSvg>[2]]> = [
+    ["top legend", SPEC, ROWS, {}],
+    ["top legend, framed, label wider than a row", SPEC, longRows, { frame: { width: 640, height: 480 } }],
+    [
+      "right-column legend (5-series stacked)",
+      { ...SPEC, chartType: "stacked" } as unknown as ChartSpec,
+      stackedRows(5),
+      {},
+    ],
+    [
+      "small-multiples figure legend",
+      {
+        ...SPEC,
+        columns: { x: "time", value: "value", series: "series", facet: "grp" },
+        small_multiples: { mode: "shared", columns: 2 },
+      } as unknown as ChartSpec,
+      figRows,
+      {},
+    ],
+  ];
+
+  it("precondition: the stacked case lays its legend out in the right-hand column", () => {
+    const [, spec, rows] = cases[2]!;
+    expect(resolveLegendPosition(spec, 5, rows)).toBe("right");
+  });
+
+  it.each(cases)("%s", (_name, spec, rows, opts) => {
+    let calls = 0;
+    const passThrough: RenderHooks = {
+      legendKey: (ctx) => {
+        calls++;
+        return ctx.rendered;
+      },
+    };
+    const plain = buildExportSvg(spec, rows, { ...opts }).outerHTML;
+    const hooked = buildExportSvg(spec, rows, { ...opts, hooks: passThrough }).outerHTML;
+    // Not vacuous: the hook really was offered rows.
+    expect(calls).toBeGreaterThan(0);
+    expect(hooked).toBe(plain);
   });
 });

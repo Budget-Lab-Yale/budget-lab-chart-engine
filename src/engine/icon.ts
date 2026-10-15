@@ -404,13 +404,17 @@ function attrsOf(s: IconPrimitive): Array<[string, string]> {
   }
 }
 
-/** An icon as SVG markup, for the tooltips (which build HTML strings). Empty for `none`. */
+/** An icon as SVG markup, for the tooltips (which build HTML strings). Empty for `none`.
+ *  Attribute values are escaped HERE, not in `attrsOf`: the DOM twin writes through `setAttribute`,
+ *  which needs the raw value. A colour like `url("#p")` passes isColorRef, and unescaped its quotes
+ *  closed the `style` attribute early. No house-palette value contains `& < > " '`, so escaping
+ *  leaves every existing icon's bytes unchanged. */
 export function iconSvgMarkup(icon: IconSpec): string {
   const shapes = iconShapes(icon);
   if (!shapes.length) return "";
   const w = iconWidth(icon);
   const body = shapes
-    .map((s) => `<${s.kind} ${attrsOf(s).map(([k, v]) => `${k}="${v}"`).join(" ")}/>`)
+    .map((s) => `<${s.kind} ${attrsOf(s).map(([k, v]) => `${k}="${escapeHtml(v)}"`).join(" ")}/>`)
     .join("");
   return (
     `<svg width="${w}" height="${ICON_BOX}" viewBox="0 0 ${w} ${ICON_BOX}" aria-hidden="true">` +

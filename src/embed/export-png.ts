@@ -15,6 +15,7 @@ import { resolveColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
 import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWidth } from "../engine/icon.js";
+import type { IconSpec } from "../engine/icon.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
@@ -86,6 +87,32 @@ const MIN_CHART_H = 160;
 // Legend
 // ---------------------------------------------------------------------------
 
+/**
+ * The export's `legendKey` call: the hook's markup for a row, or `null` to draw the default row.
+ *
+ * A hook that returns `ctx.rendered` unchanged counts as no hook. CONFIG-SPEC promises such a hook
+ * changes nothing, and on screen it does — the live row's HTML wraps under CSS. Drawn as custom
+ * markup here, the SVG twin is one unwrapped `<text>`: it skipped the export's own label wrapping,
+ * reserved a single row in the right-hand column, and ran a long label off the frame in the
+ * download only. Falling through to the default drawing is what makes the promise true.
+ */
+function exportLegendKey(
+  item: { label: string; color: string | undefined; series?: string },
+  icon: IconSpec,
+  hooks: RenderHooks | undefined,
+): string | null {
+  if (item.series == null || !hooks?.legendKey) return null;
+  const rendered = legendRowMarkupSvg(icon, item.label);
+  const custom = hooks.legendKey({
+    series: item.series,
+    label: item.label,
+    color: item.color,
+    medium: "svg",
+    rendered,
+  });
+  return custom === rendered ? null : custom;
+}
+
 function drawLegend(
   root: SVGElement,
   items: Array<{
@@ -144,16 +171,9 @@ function drawLegend(
     // innerHTML to an HTML string like legend.ts's `<span>`s creates XHTML-namespaced nodes that
     // the canvas rasterizer below (rasterize()) never paints -- correct on screen, invisible in
     // the download. `medium: "svg"` tells the hook which vocabulary is safe to return here.
-    // `null`/no hook falls through to the untouched default drawing.
-    const custom = item.series != null && hooks?.legendKey
-      ? hooks.legendKey({
-          series: item.series,
-          label: item.label,
-          color: item.color,
-          medium: "svg",
-          rendered: legendRowMarkupSvg(icon, item.label),
-        })
-      : null;
+    // `null`/no hook falls through to the untouched default drawing, and so does `ctx.rendered`
+    // returned unchanged (see `exportLegendKey`).
+    const custom = exportLegendKey(item, icon, hooks);
     // The wrap check below and the cursor advance at the end of this iteration both key off
     // `itemW` -- it must reflect what the hook ACTUALLY draws, not the untouched default, or a
     // hook that returns `ctx.rendered` plus a suffix (or otherwise-longer text) lays out fine in
@@ -283,15 +303,7 @@ function drawLegendColumn(
     if (customCache?.has(item)) {
       custom = customCache.get(item) ?? null;
     } else {
-      custom = item.series != null && hooks?.legendKey
-        ? hooks.legendKey({
-            series: item.series,
-            label: item.label,
-            color: item.color,
-            medium: "svg",
-            rendered: legendRowMarkupSvg(icon, item.label),
-          })
-        : null;
+      custom = exportLegendKey(item, icon, hooks);
       customCache?.set(item, custom);
     }
     if (custom != null) {

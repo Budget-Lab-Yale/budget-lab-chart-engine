@@ -19,6 +19,8 @@
 //   atom   := number | ident '(' args ')' | ident | '(' expr ')'
 //   args   := expr (',' expr)*
 
+import { ownValue } from "./own-key";
+
 export type Expr =
   | { k: "num"; v: number }
   | { k: "var"; name: string }
@@ -236,7 +238,9 @@ class Parser {
     if (t.t === "id") {
       if (this.peek()?.t !== "(") return { k: "var", name: t.v };
       this.expect("(");
-      const def = FUNCS[t.v];
+      // Own keys only: a bare `FUNCS[t.v]` resolves `constructor` / `toString` to an inherited
+      // Object.prototype member, which passed validation and then threw at render.
+      const def = ownValue(FUNCS, t.v);
       if (!def) {
         throw new ExprError(
           `unknown function ${JSON.stringify(t.v)} — known functions: ${EXPR_FUNCTION_NAMES.join(", ")}`,
@@ -303,7 +307,7 @@ export function evalExpression(ast: Expr, vars: Record<string, number>): number 
     case "var": {
       const v = Object.prototype.hasOwnProperty.call(vars, ast.name)
         ? vars[ast.name]
-        : EXPR_CONSTANTS[ast.name];
+        : ownValue(EXPR_CONSTANTS, ast.name);
       return v == null ? NaN : v;
     }
     case "neg":

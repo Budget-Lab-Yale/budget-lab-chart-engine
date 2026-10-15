@@ -123,6 +123,26 @@ describe("one geometry, two emitters", () => {
     }
   });
 
+  // `url("#p")` passes isColorRef, and its quotes ended the string emitter's `style="..."`
+  // attribute early — in the tooltip swatch and in a legendKey hook's `ctx.rendered` — while the DOM
+  // twin, writing through setAttribute, was unaffected. The two must agree on any colour string.
+  it("escapes attribute values in markup, so a quoted colour cannot break out of its attribute", () => {
+    for (const color of ['url("#p")', "var(--a&b)", 'x"<>&']) {
+      for (const { name, icon } of EVERY_SHAPE) {
+        // A hatch keeps its own resolved bands: resolveHatch refuses a ground it cannot read.
+        const hostile: IconSpec = { ...icon, color };
+        const fromMarkup = new DOMParser()
+          .parseFromString(iconSvgMarkup(hostile), "text/html")
+          .querySelector("svg")!;
+        const fromDom = iconSvgGroup(document, hostile)!;
+        expect(geometryOf(fromMarkup), `${name} / ${color}`).toEqual(geometryOf(fromDom));
+      }
+      const banded: IconSpec = { shape: "rect", colors: [color, "#58A3E7"] };
+      const fromMarkup = new DOMParser().parseFromString(iconSvgMarkup(banded), "text/html").querySelector("svg")!;
+      expect(geometryOf(fromMarkup), `banded / ${color}`).toEqual(geometryOf(iconSvgGroup(document, banded)!));
+    }
+  });
+
   it("keeps every exported hatch key inside the box WITHOUT relying on a clipping viewport", () => {
     // The defect, found downstream in a real PNG (interactives-staging, taxes-at-the-top, engine
     // 1.12.0): a `series_patterns: '/'` key rendered in the download as a tilted parallelogram

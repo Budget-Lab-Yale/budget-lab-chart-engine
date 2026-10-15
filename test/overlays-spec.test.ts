@@ -163,6 +163,18 @@ describe("overlays — expression checking at build time", () => {
     expect(err(check([{ fun: "wibble(x)" }]))).toMatch(/wibble/);
   });
 
+  // The function table is a plain object, so an Object.prototype name used to resolve to an
+  // inherited member: validation passed and the render threw `FUNCS[...].f is not a function`.
+  it.each(["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"])(
+    "rejects the inherited name %s() as an unknown function, naming the known ones",
+    (name) => {
+      const r = check([{ fun: `${name}(x)` }]);
+      expect(r.valid).toBe(false);
+      expect(err(r)).toMatch(new RegExp(`unknown function "${name}"`));
+      expect(err(r)).toContain(`known functions: ${EXPR_FUNCTION_NAMES.join(", ")}`);
+    },
+  );
+
   it("rejects a variable that is neither x, a constant, nor a declared param", () => {
     const r = check([{ fun: "b0 + b1*x", params: { b0: 1 } }]);
     expect(r.valid).toBe(false);
