@@ -132,6 +132,16 @@ describe("wrapping inside inline math", () => {
   });
 });
 
+/** Stand in for the webfont arriving: a canvas measurer whose glyph width changes when `loaded()`
+ *  is called. mount skips a re-render whose layout is unchanged, so a redraw is visible as a
+ *  replaced table only if the measurement actually moves, as it does in a browser. */
+function fontSwapMeasurer(): { loaded: () => void; restore: () => void } {
+  const real = HTMLCanvasElement.prototype.getContext;
+  let glyph = 7;
+  (HTMLCanvasElement.prototype as any).getContext = () => ({ font: "", measureText: (s: string) => ({ width: s.length * glyph }) });
+  return { loaded: () => { glyph = 8; }, restore: () => { HTMLCanvasElement.prototype.getContext = real; } };
+}
+
 describe("live: word-floored tables re-measure once the webfont loads", () => {
   // The first draw runs before the font is ready, so its word widths come from the fallback font.
   async function tableReplaced(spec: TableSpec): Promise<boolean> {
@@ -139,11 +149,13 @@ describe("live: word-floored tables re-measure once the webfont loads", () => {
     let resolve!: () => void;
     const ready = new Promise<void>((r) => { resolve = r; });
     Object.defineProperty(document, "fonts", { value: { status: "loading", ready }, configurable: true });
+    const font = fontSwapMeasurer();
     try {
       const c = document.createElement("div");
       document.body.appendChild(c);
       mountTable(c, { spec, rows: rowsOf([["r", "c", "Underreporting rises"]]) });
       const before = c.querySelector("table");
+      font.loaded();
       resolve();
       await ready;
       await Promise.resolve();
@@ -152,6 +164,7 @@ describe("live: word-floored tables re-measure once the webfont loads", () => {
       return before !== after;
     } finally {
       delete (document as any).fonts;
+      font.restore();
     }
   }
 
@@ -189,6 +202,7 @@ describe("live: the font redraw gate is evaluated per pane", () => {
     let resolve!: () => void;
     const ready = new Promise<void>((r) => { resolve = r; });
     Object.defineProperty(document, "fonts", { value: { status: "loading", ready }, configurable: true });
+    const font = fontSwapMeasurer();
     try {
       const rows = [
         { p: "A", row: "r", col: "c", value: "Underreporting rises" },
@@ -198,6 +212,7 @@ describe("live: the font redraw gate is evaluated per pane", () => {
       document.body.appendChild(c);
       mountTable(c, { spec: { ...SPEC, pane: "p", column_width: 40 }, rows });
       const before = c.querySelector("table");
+      font.loaded();
       resolve();
       await ready;
       await Promise.resolve();
@@ -205,6 +220,7 @@ describe("live: the font redraw gate is evaluated per pane", () => {
       c.remove();
     } finally {
       delete (document as any).fonts;
+      font.restore();
     }
   });
 });

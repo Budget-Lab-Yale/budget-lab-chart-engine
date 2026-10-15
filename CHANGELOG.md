@@ -17,6 +17,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   pointer rests on the chart no longer leaves its hover card on the page, and `onHover` /
   `tbl-hover` now report `null` when that ends a hover. Tearing down one chart leaves another
   chart's card alone. Treemaps already hid their card.
+- Live tables with `sort: true`: sorting a column orders each group by its own rows' values. Where
+  a row label repeated across groups (or two labels shared one `row_labels` display), every group
+  after the first was sorted on the first group's values.
+- Live tables with `sort: true`: the sort no longer resets when the card resizes or a collapsible
+  group is collapsed or expanded, and a collapse no longer rebuilds the table (the pressed toggle
+  keeps focus). Sortable column headers keep their column-header role so screen readers announce
+  `aria-sort`; the header label is now a button, which is what takes keyboard focus.
 
 ### Removed
 - From the package entry: the `FacetInfo` type and `renderPane`'s fifth (`facetInfo`) parameter,

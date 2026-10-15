@@ -11,6 +11,15 @@ import type { TableSpec } from "../spec/table-types";
 import { ownValue } from "../spec/own-key";
 import { appendRichHtml } from "./richtext";
 
+// The model row each rendered data <tr> was built from. `data-row` is the display label, which
+// repeats across groups (and `row_labels` can map two raw labels to one), so it is not an identity.
+const bodyRows = new WeakMap<Element, BodyRow>();
+
+/** The model row a data <tr> produced by renderTableHtml was rendered from (undefined otherwise). */
+export function bodyRowOf(tr: Element): BodyRow | undefined {
+  return bodyRows.get(tr);
+}
+
 /**
  * Build a semantic HTML <table> from a TableModel + TableLayout.
  * - <colgroup> sets per-column widths from layout (table-layout:fixed).
@@ -204,6 +213,7 @@ export function renderTableHtml(
       const row: BodyRow = entry.row;
       const tr = doc.createElement("tr");
       tr.setAttribute("data-row", row.label);
+      bodyRows.set(tr, row);
       // Always emitted: ancestor group tokens, consumed by mount.ts's collapse/expand wiring
       // regardless of spec.collapsible (cheap; matches the group <tr>'s data-group-parents).
       tr.setAttribute("data-group-parents", row.groupTokens.join(" "));

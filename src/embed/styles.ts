@@ -830,6 +830,21 @@ ${SELECTABLE_CURSOR_SELECTOR} {
   text-align: left;
 }
 
+/* Sortable leaf header (spec sort): mount.ts moves the label into a native button so the th keeps
+   its columnheader role and aria-sort. The button must not change how the label looks: inherited
+   type and alignment come from the th, and it fills the cell's content box like the bare label
+   did (a block-level button still shrinks to fit its text, hence the explicit width). */
+.tbl-table thead th .tbl-table-sort-btn {
+  all: unset;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+}
+.tbl-table thead th .tbl-table-sort-btn:focus-visible {
+  outline: 2px solid var(--tbl-navy);
+  outline-offset: 2px;
+}
+
 /* ---- Sub-label: displayed on its own line below the leaf header text ---- */
 .tbl-table-sublabel {
   display: block;
