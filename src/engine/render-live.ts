@@ -63,11 +63,10 @@ import type { HighlightPillsHandle, BandHoverCtx } from "./crosshair.js";
 import type { OverlayTooltipLine } from "./overlays.js";
 import type { BinLabelOpts, CalendarInterval } from "./histogram-label.js";
 import { renderSourceLine } from "./source-line.js";
-import { rowsToCsvBrowser } from "../data/csv-browser.js";
+import { rowsToCsv } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
 import { TBL, markerSymbolForSeries } from "./theme.js";
-import { TOTAL_SERIES_KEY } from "./series-keys.js";
 
 const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
 
@@ -392,100 +391,6 @@ function addLineHitPaths(svgEl: SVGSVGElement): void {
   }
 }
 
-// Net-total label legibility over dimmed bars.
-// The diverging net label (tbl-net-label) is white over a full-color segment. When the
-// segment behind it is dimmed (near-white), white text is illegible — so each label adapts
-// its color to the segment DIRECTLY behind it: dark when that segment is dimmed (or there is
-// no segment behind, i.e. the white background), white when the segment is active.
-const NET_LABEL_WHITE = "#FFFFFF";
-
-/**
- * Pure color decision for a net-total label. Factored out for unit testing (jsdom has no
- * layout, so the geometry-based behind-detection can't be exercised there).
- *   - behind segment dimmed  → dark  (legible over the near-white dimmed bar)
- *   - no segment behind it   → dark  (white would be invisible on the white background)
- *   - behind segment active  → white (the existing default over a full-color segment)
- */
-export function netLabelFill(behindDimmed: boolean, hasBehind: boolean): string {
-  return !hasBehind || behindDimmed ? TBL.color.heading : NET_LABEL_WHITE;
-}
-
-/**
- * Recolor every net-total label from the CURRENT dim state. Detection of the behind-series
- * is computed LIVE on each call (not cached), so geometry is always fresh even when the chart
- * first rendered off-screen or with zero geometry. We compare in SCREEN coordinates
- * (getBoundingClientRect): segment rects bake geometry into x/y attributes, but net-label
- * text marks are positioned by a transform, so only the post-layout client rect places both
- * in the same frame. A label's behind-series is the first non-Total segment rect whose
- * [left,right] × [top,bottom] contains the label's center — skipping zero-size rects (a
- * value=0 segment renders as zero-height; inclusive containment with y0===y1 can spuriously
- * match). No-op when there are no net labels (anything but a diverging/dot-mode stacked chart)
- * or in non-layout environments (jsdom: client rects are all zero → label box is zero → skip).
- * Called once after wiring (initial state) and on every highlight change via the legend's
- * onHighlight hook (which fires AFTER applyHighlight toggles the classes, so the read is fresh).
- * In the initial nothing-pinned state no segment is dimmed → all labels stay white regardless
- * of detection.
- */
-function recolorNetLabels(svg: SVGSVGElement): void {
-  const labels = svg.querySelectorAll<SVGTextElement>(
-    `g.tbl-net-label text[data-series="${TOTAL_SERIES_KEY}"]`,
-  );
-  if (!labels.length) return;
-
-  // Precompute extents for all non-Total segment rects, skipping zero-size ones.
-  const extents = Array.from(
-    svg.querySelectorAll<SVGRectElement>(
-      `rect[data-series]:not([data-series="${TOTAL_SERIES_KEY}"])`,
-    ),
-  ).flatMap((rect) => {
-    const b = rect.getBoundingClientRect();
-    // Skip zero-size rects: a value=0 segment renders as a zero-height rect; inclusive
-    // containment (cy>=y0 && cy<=y1) with y0===y1 can spuriously match a degenerate center.
-    if (!(b.width > 0 && b.height > 0)) return [];
-    return [{
-      series: rect.getAttribute("data-series") ?? "",
-      x0: b.left,
-      x1: b.right,
-      y0: b.top,
-      y1: b.bottom,
-    }];
-  });
-
-  labels.forEach((label) => {
-    const b = label.getBoundingClientRect();
-    let behind = "";
-    // Degenerate (zero-size) label box → no real layout (e.g. jsdom); skip hit-test and fall
-    // through to the dark default (both dimensions must be positive).
-    if (b.width > 0 && b.height > 0) {
-      const cx = b.left + b.width / 2;
-      const cy = b.top + b.height / 2;
-      for (const e of extents) {
-        if (cx >= e.x0 && cx <= e.x1 && cy >= e.y0 && cy <= e.y1) {
-          behind = e.series;
-          break;
-        }
-      }
-    }
-    const hasBehind = behind !== "";
-    let behindDimmed = false;
-    if (hasBehind) {
-      const rect = svg.querySelector<SVGRectElement>(
-        `rect[data-series="${cssAttrEscape(behind)}"]`,
-      );
-      behindDimmed = rect?.classList.contains("tbl-dimmed") ?? false;
-    }
-    // Use inline style so a future CSS fill rule on .tbl-net-label text can't override.
-    label.style.fill = netLabelFill(behindDimmed, hasBehind);
-  });
-}
-
-/** Minimal escaping for a data-series value used inside an attribute selector. Series names
- *  are author-supplied; escape quotes/backslashes so the selector stays valid. */
-function cssAttrEscape(value: string): string {
-  return value.replace(/(["\\])/g, "\\$1");
-}
-
-
 /** Format a numeric value for tooltip display. `decimals` (default 2) lets a tooltip be more
  *  precise than the axis — e.g. 4 for small magnitudes that round to 0.00 on a 2-decimal axis. */
 export function formatValue(v: number, affixes: ValueAffixes, decimals = 2): string {
@@ -616,7 +521,7 @@ function buildDownloadActions(
     const original = dataLabel.textContent ?? "Data";
     dataBtn.disabled = true;
     try {
-      const csv = rowsToCsvBrowser(rows);
+      const csv = rowsToCsv(rows);
       const blob = new Blob([csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = doc.createElement("a");
@@ -997,7 +902,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // the frame past the fit threshold re-decides it, because draw() re-runs this whole block.
     const chromePills = resolveValuePills(spec, netMode, false, segmentLabelsDropped ?? false);
     const onHighlight = (active: Set<string>): void => {
-      recolorNetLabels(svg);
       pillDriver?.setActive(active);
       // Area click-to-restack: pinned series move to the BOTTOM of the stack (in click order) so a
       // user can read them against zero; unpinning restores the default order. Driven off PINS
@@ -1169,11 +1073,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     // Expose the freshly built legend handle for the area-restack re-render path (onHighlight).
     currentLegendHandle = legendHandle;
-
-    // Set the initial label colors from the current (un-dimmed) state. No-op unless this is a
-    // diverging/dot-mode stacked chart (the only case with tbl-net-label elements). Detection
-    // of the behind-series is computed live inside recolorNetLabels on each call.
-    recolorNetLabels(svg);
 
     currentLegendPos = legendPos;
 
@@ -2001,8 +1900,8 @@ export function buildFigureHeader(
   };
 }
 
-/** Wire the crosshair + two-way selection onto one figure SVG (shared combined SVG or a
- *  per-pane mini-SVG). Dispatches the crosshair by `spec.xAxisType`:
+/** Wire the crosshair + two-way selection onto one figure pane's mini-SVG (both modes draw one
+ *  per pane). Dispatches the crosshair by `spec.xAxisType`:
  *   - continuous (line): `attachCrosshair` + the fat line hit-paths (thin strokes are hard to
  *     hit), and `resolveSeriesAtPoint` for clicks.
  *   - categorical (bar/stacked panes): `attachBandCrosshair` (mirrors mountChart's categorical
@@ -2706,7 +2605,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       ? renderLegend(legendSlot, fig.legendItems ?? [], {
           svg: grid,
           onHighlight: (active) => {
-            for (const p of fig.panes) if (p.svg) recolorNetLabels(p.svg);
             for (const d of pillDrivers) d.setActive(active);
             // onLegendSelect: same "however it changed" note as mountChart's identical dispatch —
             // fires on hover/focus/blur too, not only a pin click; high-frequency, debounce-worthy.

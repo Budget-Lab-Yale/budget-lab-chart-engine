@@ -284,7 +284,7 @@ describe("tables: author maps keyed by data", () => {
     } as unknown as TableSpec;
     const rws = [{ p: "toString", row: "r", metric: "constructor", value: "1" }] as unknown as TidyRow[];
     expect(resolveStubHeader(spec, "toString")).toBe("");
-    const layout = layoutTable(buildTableModel(spec, rws), { width: 800, measureText: (s) => s.length * 7, ...layoutOptionsFromSpec(spec) });
+    const layout = layoutTable(buildTableModel(spec, rws), { measureText: (s) => s.length * 7, ...layoutOptionsFromSpec(spec) });
     expect(layout.colW.every((w) => Number.isFinite(w))).toBe(true);
   });
 

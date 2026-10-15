@@ -27,7 +27,7 @@ const rows = [
 
 function build() {
   const model = buildTableModel(spec, rows);
-  const layout = layoutTable(model, { width: 800, measureText });
+  const layout = layoutTable(model, { measureText });
   return { model, layout };
 }
 
@@ -170,7 +170,7 @@ describe("layoutTable — banner width fit (bug #3)", () => {
 
   it("widens spanned columns so their sum ≥ the banner's required width", () => {
     const model = buildTableModel(wideSpec, wideRows);
-    const layout = layoutTable(model, { width: 800, measureText });
+    const layout = layoutTable(model, { measureText });
     // The three leaves all sit under the single banner.
     const sumColW = layout.colW.reduce((a, b) => a + b, 0);
     // required width = text + padX(16) + 2*spannerGap(8) = +32
@@ -201,20 +201,20 @@ describe("layoutTable — width + wrap config (5c)", () => {
 
   it("stub_width overrides the computed stub column width", () => {
     const model = buildTableModel(cfgSpec, cfgRows);
-    const layout = layoutTable(model, { width: 800, measureText, stubWidth: 300 });
+    const layout = layoutTable(model, { measureText, stubWidth: 300 });
     expect(layout.stubWidth).toBe(300);
     expect(layout.colX[0]).toBe(300);
   });
 
   it("column_width (single number) overrides every leaf colW", () => {
     const model = buildTableModel(cfgSpec, cfgRows);
-    const layout = layoutTable(model, { width: 800, measureText, columnWidth: 120 });
+    const layout = layoutTable(model, { measureText, columnWidth: 120 });
     layout.colW.forEach((w) => expect(w).toBe(120));
   });
 
   it("column_width (per-key map) overrides the named leaf only", () => {
     const model = buildTableModel(cfgSpec, cfgRows);
-    const layout = layoutTable(model, { width: 800, measureText, columnWidth: { x: 200 } });
+    const layout = layoutTable(model, { measureText, columnWidth: { x: 200 } });
     const idx = model.leaves.findIndex((l) => l.key === "x");
     expect(layout.colW[idx]).toBe(200);
   });
@@ -238,7 +238,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
     ] as any;
     const model = buildTableModel(dupSpec, dupRows);
     expect(model.leaves.map((l) => l.key)).toEqual(["presub", "postsub", "presub~1", "postsub~1"]);
-    const layout = layoutTable(model, { width: 800, measureText, columnWidth: { presub: 200 } });
+    const layout = layoutTable(model, { measureText, columnWidth: { presub: 200 } });
     model.leaves.forEach((leaf, i) => {
       if (leaf.lastValue === "presub") expect(layout.colW[i]).toBe(200);
       else expect(layout.colW[i]).not.toBe(200);
@@ -261,9 +261,8 @@ describe("layoutTable — width + wrap config (5c)", () => {
     // The leaf label "m" is short, but column_labels makes it long so it must wrap at width 60.
     longSpec.column_labels = { m: "A very long header label that needs wrapping" };
     const model = buildTableModel(longSpec, longRows);
-    const noWrap = layoutTable(model, { width: 800, measureText, columnWidth: { m: 60 } });
+    const noWrap = layoutTable(model, { measureText, columnWidth: { m: 60 } });
     const wrapped = layoutTable(model, {
-      width: 800,
       measureText,
       columnWidth: { m: 60 },
       headerMaxLines: 3,
@@ -286,10 +285,10 @@ describe("layoutTable — width + wrap config (5c)", () => {
       { row: "GDP", m: "x", v: "2" },
     ] as any;
     const model = buildTableModel(s, r);
-    const natural = layoutTable(model, { width: 800, measureText }); // sized to the longest label
+    const natural = layoutTable(model, { measureText }); // sized to the longest label
 
     // stub_wrap + stub_min_width: stub shrinks to the min, long label wraps, that row grows.
-    const wrapped = layoutTable(model, { width: 800, measureText, stubMinWidth: 120, stubWrap: true });
+    const wrapped = layoutTable(model, { measureText, stubMinWidth: 120, stubWrap: true });
     expect(wrapped.stubWidth).toBe(120);
     expect(wrapped.stubWidth).toBeLessThan(natural.stubWidth);
     const longRow = wrapped.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
@@ -301,7 +300,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
 
     // Without stub_wrap, stub_min_width is just a floor: a min wider than natural widens the stub;
     // labels never wrap.
-    const floored = layoutTable(model, { width: 800, measureText, stubMinWidth: natural.stubWidth + 80 });
+    const floored = layoutTable(model, { measureText, stubMinWidth: natural.stubWidth + 80 });
     expect(floored.stubWidth).toBe(natural.stubWidth + 80);
     const flooredRow = floored.rows.find((e) => "row" in e && e.row.label.startsWith("Annual")) as any;
     expect(flooredRow.stubLines).toBeUndefined();
@@ -309,7 +308,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
 
   it("assigns data-column widths even with stub_wrap on (Change A regression guard)", () => {
     const model = buildTableModel(cfgSpec, cfgRows);
-    const wrapped = layoutTable(model, { width: 800, measureText, stubWrap: true, stubMinWidth: 40 });
+    const wrapped = layoutTable(model, { measureText, stubWrap: true, stubMinWidth: 40 });
     // Every leaf still gets a positive computed width — stub_wrap must not collapse the data cols.
     expect(wrapped.colW.length).toBe(model.leaves.length);
     wrapped.colW.forEach((w) => expect(w).toBeGreaterThan(0));
@@ -317,7 +316,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
 
   it("honors column_width when stub_wrap is on", () => {
     const model = buildTableModel(cfgSpec, cfgRows);
-    const layout = layoutTable(model, { width: 800, measureText, stubWrap: true, stubMinWidth: 40, columnWidth: 90 });
+    const layout = layoutTable(model, { measureText, stubWrap: true, stubMinWidth: 40, columnWidth: 90 });
     layout.colW.forEach((w) => expect(w).toBe(90));
   });
 
@@ -336,7 +335,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
     const idx = model.leaves.findIndex((l) => l.lastValue === "notes");
     // Cap the column narrow and enable column_wrap: the long cell wraps to multiple lines.
     const layout = layoutTable(model, {
-      width: 800, measureText, columnWidth: { notes: 80 }, columnWrap: { notes: true },
+      measureText, columnWidth: { notes: 80 }, columnWrap: { notes: true },
     });
     const longRow = layout.rows.find((e) => "row" in e && e.row.label === "r1") as any;
     expect(longRow.cellLines?.[idx]?.length).toBeGreaterThan(1);
@@ -354,7 +353,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
     ] as any;
     const model = buildTableModel(brSpec, brRows);
     const idx = model.leaves.findIndex((l) => l.lastValue === "notes");
-    const layout = layoutTable(model, { width: 800, measureText });
+    const layout = layoutTable(model, { measureText });
     // Segments "aaaaaaaa" (8) and "bb" (2): natural width tracks the wider (8), not 8+2.
     // measureText = length*7; layout adds padX = 16.
     expect(layout.colW[idx]!).toBe(measureText("aaaaaaaa") + 16); // widest segment + padX
@@ -372,7 +371,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
       { row: "First line\\\\second line", m: "x", value: "1" },
     ] as any;
     const model = buildTableModel(brSpec, brRows);
-    const layout = layoutTable(model, { width: 800, measureText }); // no stub_wrap
+    const layout = layoutTable(model, { measureText }); // no stub_wrap
     const r = layout.rows.find((e) => "row" in e) as any;
     expect(r.stubLines).toEqual(["First line", "second line"]);
     expect(r.rect.h).toBeGreaterThan(layout.rowHeight);
@@ -381,7 +380,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
   it("fillWidth widens the data columns to a shared total, leaving the stub unchanged", () => {
     const { model, layout } = build();
     const target = layout.totalWidth + 200;
-    const filled = layoutTable(model, { width: 800, measureText, fillWidth: target });
+    const filled = layoutTable(model, { measureText, fillWidth: target });
     expect(filled.totalWidth).toBeCloseTo(target, 5);
     expect(filled.stubWidth).toBe(layout.stubWidth); // stub stays put
     const dataBefore = layout.colW.reduce((a, b) => a + b, 0);
@@ -389,7 +388,7 @@ describe("layoutTable — width + wrap config (5c)", () => {
     expect(dataAfter).toBeCloseTo(dataBefore + 200, 5); // data columns absorbed the extra
     expect(filled.totalHeight).toBe(layout.totalHeight);
     // fillWidth ≤ natural is a no-op.
-    const noop = layoutTable(model, { width: 800, measureText, fillWidth: layout.totalWidth - 50 });
+    const noop = layoutTable(model, { measureText, fillWidth: layout.totalWidth - 50 });
     expect(noop.totalWidth).toBe(layout.totalWidth);
   });
 });

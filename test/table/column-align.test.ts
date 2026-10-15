@@ -28,12 +28,12 @@ const ROWS = [
 
 function html(spec: TableSpec): HTMLTableElement {
   const m = buildTableModel(spec, ROWS);
-  const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+  const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
   return renderTableHtml(m, l, document, spec);
 }
 function svg(spec: TableSpec): SVGSVGElement {
   const m = buildTableModel(spec, ROWS);
-  const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+  const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
   return renderTableSvg(m, l, { document, spec, measure: measureText });
 }
 const colOf = (t: HTMLTableElement, key: string) =>
@@ -97,7 +97,7 @@ describe("column_align — PNG export (SVG)", () => {
   it("right-aligns a text cell at the cell's right inset", () => {
     const spec: TableSpec = { ...SPEC, column_align: { Value: "right" } };
     const m = buildTableModel(spec, ROWS);
-    const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+    const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
     const vi = m.leaves.findIndex((x) => x.lastValue === "Value");
     const s = renderTableSvg(m, l, { document, spec, measure: measureText });
     const t = cellTexts(s).find((e) => e.textContent === "100% / 50%")!;
@@ -108,7 +108,7 @@ describe("column_align — PNG export (SVG)", () => {
   it("left-aligns a numeric cell and its header at the left inset", () => {
     const spec: TableSpec = { ...SPEC, column_align: { Value: "left" } };
     const m = buildTableModel(spec, ROWS);
-    const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+    const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
     const vi = m.leaves.findIndex((x) => x.lastValue === "Value");
     const s = renderTableSvg(m, l, { document, spec, measure: measureText });
     const numText = (m.body.find((b) => b.kind === "row") as any).row.cells[vi].text as string;
@@ -123,7 +123,7 @@ describe("column_align — PNG export (SVG)", () => {
   it("centers a text cell on the column", () => {
     const spec: TableSpec = { ...SPEC, column_align: { Value: "center" } };
     const m = buildTableModel(spec, ROWS);
-    const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+    const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
     const vi = m.leaves.findIndex((x) => x.lastValue === "Value");
     const t = cellTexts(renderTableSvg(m, l, { document, spec, measure: measureText }))
       .find((e) => e.textContent === "100% / 50%")!;

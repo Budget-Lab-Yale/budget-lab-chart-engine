@@ -1,10 +1,12 @@
-// Shared jsdom hover harness for the two DEFAULT-CONFIGURATION hover test files
-// (hover-card-reach.test.ts, hover-claims-defaults.test.ts). Not a test file — `vitest.config.ts`
+// Shared jsdom hover harness. Written for the two DEFAULT-CONFIGURATION hover test files
+// (hover-card-reach.test.ts, hover-claims-defaults.test.ts) and now imported by many other hover,
+// figure and tooltip tests (grep `helpers/hover-harness`). Not a test file — `vitest.config.ts`
 // only collects `test/**/*.test.ts`, so this is imported, never run on its own.
 //
 // Everything here is measurement plumbing, not policy: no helper sets a spec field, so a test
 // cannot accidentally acquire a non-default dial from the harness. That matters because the class
-// of defect these two files gate is "a claim verified by a test that quietly turned a default off".
+// of defect the two default-configuration files gate is "a claim verified by a test that quietly
+// turned a default off".
 import { mountChart, type MountOptions } from "../../src/engine/render-live";
 import { CROSSHAIR_HIT_SELECTOR } from "../../src/engine/crosshair";
 import type { ChartSpec } from "../../src/spec/types";

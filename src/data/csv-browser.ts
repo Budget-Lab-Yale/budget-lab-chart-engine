@@ -1,8 +1,8 @@
 /**
- * Pure CSV serialization/parsing utilities — no Node.js dependencies.
- * These are re-exported from data/index.ts for library consumers;
- * this file exists so browser bundles can import rowsToCsv without pulling
- * in the node:fs/promises imports from data/load.ts.
+ * CSV serialisation with no Node.js dependencies — the single implementation of `rowsToCsv`.
+ * data/load.ts re-exports it (and data/index.ts re-exports load.ts) for library consumers;
+ * it lives here so browser bundles can import it without pulling in load.ts's
+ * node:fs/promises and node:path imports.
  */
 import type { TidyRow } from "./index.js";
 
@@ -22,7 +22,7 @@ function quoteCsvField(value: string): string {
  * a comma, a double-quote, or a newline. Output uses LF line endings and
  * ends with a trailing newline.
  */
-export function rowsToCsvBrowser(rows: TidyRow[]): string {
+export function rowsToCsv(rows: TidyRow[]): string {
   if (rows.length === 0) return "";
 
   // Build stable column order.

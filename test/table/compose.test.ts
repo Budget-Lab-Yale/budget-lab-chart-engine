@@ -92,7 +92,7 @@ describe("table composition — SVG export path: collapsed + reordered + emphasi
     let m = buildTableModel(SPEC, ROWS);
     const collapsed = new Set(["Americas"]);
     m = applyCollapse(m, collapsed);
-    const layout = layoutTable(m, { width: 600, measureText });
+    const layout = layoutTable(m, { measureText });
     const svg = renderTableSvg(m, layout, { document, spec: SPEC });
 
     // Emphasis: 1 visible emphasized row (Asia/Total) -> 1 stub rect + 1 cell rect.

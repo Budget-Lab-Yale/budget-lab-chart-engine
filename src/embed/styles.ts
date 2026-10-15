@@ -493,14 +493,6 @@ body {
 .figure-grid svg .tbl-dimmed {
   opacity: 0.15;
 }
-/* The diverging net-total LABEL is a wide text over the bar center; it is tagged with the
-   Total key so it DIMS with the dot, but it must not steal clicks from the segments beneath
-   it. Make it non-interactive so clicks fall through to the segment — only the small net
-   DOT (tbl-net-marker) selects Total. */
-.figure-canvas svg .tbl-net-label,
-.figure-grid svg .tbl-net-label {
-  pointer-events: none;
-}
 
 /* =========================================================================
  * Click-to-select cursor — only on interactive (has-legend) charts.

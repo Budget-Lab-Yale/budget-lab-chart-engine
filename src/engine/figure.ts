@@ -32,9 +32,6 @@ import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, SHARED_LABELLESS_MARGIN_LEFT, TBL_VA
 import type { SeriesHatch } from "./hatch";
 import type { OverlayTooltipLine } from "./overlays";
 
-// Re-exported for back-compat (the constant now lives in theme.ts so leaf modules can import it
-// without a module cycle through figure.ts).
-export { SHARED_LABELLESS_MARGIN_LEFT } from "./theme";
 
 /** The figure legend's `series_patterns` textures: for each series, the hatch the FIRST pane that
  *  paints it was painted with.
@@ -330,15 +327,14 @@ function orderedCategories(rows: TidyRow[], keyOf: (r: TidyRow) => string, spec:
  *  live grid and the PNG export). Given the TOTAL inner grid width `availW` (the width the row
  *  of panes spans, minus inter-column gaps already accounted for by the caller), the column
  *  count and the inter-column gap, compute:
- *   - `dataW`: the inner DATA/plot width, IDENTICAL for every column (so the series renders at
- *     the same apparent width in every pane);
  *   - `colWidths[c]`: each column's OUTER width — the leftmost (labeled) column is wider (it
  *     carries the full TBL_MARGIN_LEFT label gutter), the label-less columns are narrower (they
  *     only reserve SHARED_LABELLESS_MARGIN_LEFT);
  *   - `marginLeft[c]`: the per-column left margin (TBL_MARGIN_LEFT for col 0, the small margin
  *     otherwise) to thread into renderPane.
  *
- *  Width identity (per the brief):
+ *  Width identity, where `dataW` is the inner DATA/plot width, IDENTICAL for every column when
+ *  unweighted (so the series renders at the same apparent width in every pane):
  *    dataW    = (availW − LM − (C−1)·lm − C·R − (C−1)·G) / C
  *    colW[0]  = dataW + LM + R
  *    colW[c>0]= dataW + lm + R
@@ -350,7 +346,7 @@ export function sharedColumnWidths(
   gap: number,
   leftMargin: number = TBL_MARGIN_LEFT,
   weights?: number[],
-): { dataW: number; colWidths: number[]; marginLeft: number[] } {
+): { colWidths: number[]; marginLeft: number[] } {
   // The leftmost (labeled) column's left margin: the y-label gutter (TBL_MARGIN_LEFT) unless the
   // caller passes another.
   const LM = leftMargin;
@@ -365,18 +361,14 @@ export function sharedColumnWidths(
   const sumW = w.reduce((a, b) => a + (b > 0 ? b : 0), 0) || C;
   const colWidths: number[] = [];
   const marginLeft: number[] = [];
-  let firstDataW = totalDataW;
   for (let c = 0; c < C; c++) {
     const isLeft = c === 0;
     const ml = isLeft ? LM : lm;
     const dataW = (totalDataW * Math.max(0, w[c] as number)) / sumW;
-    if (c === 0) firstDataW = dataW;
     marginLeft.push(ml);
     colWidths.push(dataW + ml + R);
   }
-  // `dataW` retained for API compatibility (informational — col 0's data width; per-column widths
-  // now differ when weighted, so read colWidths/marginLeft for exact values).
-  return { dataW: firstDataW, colWidths, marginLeft };
+  return { colWidths, marginLeft };
 }
 
 /** PER-PANE-mode column widths. Unlike shared mode, EVERY pane draws its own y-axis, so every
@@ -452,9 +444,6 @@ export interface FigurePane {
 
 export interface FigureRenderResult {
   mode: "shared" | "per-pane";
-  /** Always undefined now — both modes are per-pane compositions (no combined SVG). Retained
-   *  for API/back-compat with callers that still check `combinedSvg in result`. */
-  combinedSvg?: SVGSVGElement;
   panes: FigurePane[];
   columns: number;
   rows: number;
@@ -934,7 +923,6 @@ export function renderFigure(
 
     return {
       mode: "per-pane",
-      combinedSvg: undefined,
       panes,
       columns,
       rows: gridRows,
@@ -963,8 +951,6 @@ export function renderFigure(
   //   2. y-axis tick LABELS show only on the leftmost column (col 0); panes with col > 0 keep
   //      their gridlines + plot area + left margin but hide the tick label text (so panes stay
   //      aligned and the same width).
-  // (The old Plot-faceting path — one combined SVG — is gone; combinedSvg is undefined for
-  // shared mode too.)
 
   // 1. Shared y-domain: probe EACH pane independently and UNION the per-pane domains. A single
   //    combined probe over all in-scope rows would, for STACKED bars, sum same-category rows
@@ -1116,7 +1102,6 @@ export function renderFigure(
 
   return {
     mode: "shared",
-    combinedSvg: undefined,
     panes,
     columns,
     rows: gridRows,

@@ -15,7 +15,6 @@ import { noteBreakLines } from "../table/richtext.js";
 import {
   W,
   MARGIN,
-  INNER_W,
   HEADING,
   MUTED,
   W_BOLD,
@@ -106,7 +105,7 @@ export function buildTableExportSvg(
   if (collapsedKeys.size > 0) {
     model = applyCollapse(model, collapsedKeys);
   }
-  const layout = layoutTable(model, { width: INNER_W, measureText, ...layoutOptionsFromSpec(spec) });
+  const layout = layoutTable(model, { measureText, ...layoutOptionsFromSpec(spec) });
 
   // Frame width: standard frame, widened if the table itself is wider than the inner content box.
   const width = Math.max(MIN_TABLE_FRAME, layout.totalWidth + MARGIN * 2);

@@ -1194,10 +1194,11 @@ export function assemblePlot({
 
   const sectionGapRanges = sectionGaps ? spreadSections(svg, { before: sectionGaps.before, gapPx: sectionGaps.px }) : [];
 
-  svg.dataset.marginLeft = String((plotOpts.marginLeft as number) ?? 0);
-  svg.dataset.marginRight = String((plotOpts.marginRight as number) ?? 8);
-  svg.dataset.marginTop = String((plotOpts.marginTop as number) ?? 18);
-  svg.dataset.marginBottom = String((plotOpts.marginBottom as number) ?? 28);
+  // tblPlotDefaults always sets all four margins, so plotOpts carries a number for each.
+  svg.dataset.marginLeft = String(plotOpts.marginLeft as number);
+  svg.dataset.marginRight = String(plotOpts.marginRight as number);
+  svg.dataset.marginTop = String(plotOpts.marginTop as number);
+  svg.dataset.marginBottom = String(plotOpts.marginBottom as number);
 
   // Facet-aware chrome collapse: when the layer faceted the categories onto `fx` (grouped
   // bars), Plot repeated the gridlines / zero baseline / y-tick labels inside every facet.
@@ -1215,8 +1216,8 @@ export function assemblePlot({
       Number(svg.getAttribute("height")) || (plotOpts.height as number) + sectionGapTotal || 400;
     collapseFacetChromeY(svg, {
       height: svgHeight,
-      marginTop: (plotOpts.marginTop as number) ?? 18,
-      marginBottom: (plotOpts.marginBottom as number) ?? 24,
+      marginTop: plotOpts.marginTop as number,
+      marginBottom: plotOpts.marginBottom as number,
       ...(sectionGapRanges.length ? { sectionGaps: sectionGapRanges } : {}),
     });
   }

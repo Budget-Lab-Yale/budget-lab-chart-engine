@@ -15,7 +15,7 @@ import { csvFixtureReader } from "../helpers/csv";
 const parseCsv = csvFixtureReader(import.meta.url);
 
 // Shared layout knobs: fixed width + a deterministic char-width measurer (no canvas in jsdom).
-const layoutOpts = { width: 720, measureText: (s: string) => s.length * 7 };
+const layoutOpts = { measureText: (s: string) => s.length * 7 };
 
 // Count of distinct HeaderCells across all tiers (== expected header <text> nodes).
 function headerCellCount(model: ReturnType<typeof buildTableModel>): number {
@@ -218,7 +218,7 @@ describe("renderTableSvg — golden bodies", () => {
     };
     const rows = [{ row: "r", metric: "m", value: "1.0" }] as unknown as TidyRow[];
     const model = buildTableModel(spec, rows);
-    const layout = layoutTable(model, { width: 720, measureText: (s: string) => s.length * 7, columnWidth: { m: 60 }, headerMaxLines: 3 });
+    const layout = layoutTable(model, { measureText: (s: string) => s.length * 7, columnWidth: { m: 60 }, headerMaxLines: 3 });
     const svg = renderTableSvg(model, layout, { document, spec });
     // The leaf header <text> should carry multiple <tspan> lines, ≤ 3.
     const leafText = Array.from(svg.querySelectorAll("g.tbl-table-header text")).find(

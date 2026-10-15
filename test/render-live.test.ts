@@ -2,7 +2,7 @@
 //
 // Tests for the embed live-render layer: mountChart + buildStandaloneHtml.
 import { describe, it, expect } from "vitest";
-import { mountChart, computeChartHeight, netLabelFill, formatValue } from "../src/engine/render-live";
+import { mountChart, computeChartHeight, formatValue } from "../src/engine/render-live";
 import { renderLegend } from "../src/engine/legend";
 import { buildStandaloneHtml } from "../src/embed/bundle-standalone";
 import { CHART_CSS } from "../src/embed/styles";
@@ -1123,25 +1123,6 @@ describe("formatValue tooltip precision", () => {
   it("carries both affixes, with the prefix inside the minus sign", () => {
     expect(formatValue(1200, { prefix: "$", suffix: " bn" })).toBe("$1200.00 bn");
     expect(formatValue(-5, { prefix: "$", suffix: "" })).toBe("-$5.00");
-  });
-});
-
-describe("netLabelFill (pure color decision)", () => {
-  const DARK = "#1A1A2E"; // tokens.structural.text_heading
-  const WHITE = "#FFFFFF";
-
-  it("dimmed behind segment → dark", () => {
-    expect(netLabelFill(true, true)).toBe(DARK);
-  });
-
-  it("active behind segment → white", () => {
-    expect(netLabelFill(false, true)).toBe(WHITE);
-  });
-
-  it("no segment behind (over white background) → dark", () => {
-    expect(netLabelFill(false, false)).toBe(DARK);
-    // hasBehind=false wins regardless of the dimmed flag.
-    expect(netLabelFill(true, false)).toBe(DARK);
   });
 });
 

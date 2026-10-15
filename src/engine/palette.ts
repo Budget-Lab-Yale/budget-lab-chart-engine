@@ -53,7 +53,7 @@ const TONAL_TIERS = ["50", "100", "200", "300", "400", "500", "600", "700"] as c
  *  resolved colour (the engine resolves everything to hex before it reaches the marks) step along
  *  the same hue instead of guessing in colour space — see hatch.ts `defaultHatchStroke`.
  *  Keyed upper-case; the generated tokens are upper-case hex. */
-export const TONAL_BY_HEX: ReadonlyMap<string, { family: string; tiers: string[]; index: number }> =
+const TONAL_BY_HEX: ReadonlyMap<string, { family: string; tiers: string[]; index: number }> =
   (() => {
     const m = new Map<string, { family: string; tiers: string[]; index: number }>();
     for (const [family, scale] of Object.entries(

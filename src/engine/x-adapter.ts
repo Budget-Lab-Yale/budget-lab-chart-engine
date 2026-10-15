@@ -22,7 +22,9 @@ export interface XOpts {
   markerToX: (m: { x: string }) => number | Date | string | null;
   /** Plot `x` scale options (numeric supplies an explicit domain). */
   xPlotOpts?: Record<string, unknown>;
-  /** Crosshair x parse/format overrides; undefined = crosshair auto-detects. */
+  /** Crosshair x parse/format. Every continuous adapter (numeric, temporal, quarterly) sets both;
+   *  only the categorical adapter leaves them undefined, and a categorical chart never reaches
+   *  attachCrosshair (it is dispatched to the catline or band crosshair first). */
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
 }
@@ -226,10 +228,10 @@ export function makeXAdapter(
               : undefined,
           axisMarks: tblTemporalXAxis(xDomain, tickWidth, bottomGutter, sharedX?.scale, ticks),
           markerToX: (m) => parseDate(m.x),
-          // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
-          // crosshair's `new Date(string)` auto-detect — that parses YYYY-MM-DD as UTC and then
-          // formats in local time, shifting "2022-01-01" to "Dec 2021" in negative-offset zones
-          // (and mis-snapping the guide). Default to a single-line "%b %Y" to match the axis —
+          // Use the SAME local-midnight parse as the chart's line points (parseDate), not
+          // `new Date(string)` — that parses YYYY-MM-DD as UTC and then formats in local time,
+          // shifting "2022-01-01" to "Dec 2021" in negative-offset zones (and mis-snapping the
+          // guide). Default to a single-line "%b %Y" to match the axis —
           // which is wrong only when the data is finer than the ticks (a daily series has every
           // point in a month sharing one label), hence spec.tooltip_x_format.
           tooltipXParse: (v) => +parseDate(v),

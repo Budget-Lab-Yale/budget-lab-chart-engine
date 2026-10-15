@@ -17,7 +17,6 @@ const common = {
   target: "es2022",
   sourcemap: true,
   logLevel: "info",
-  define: { __ENGINE_VERSION__: JSON.stringify(version) },
 };
 
 // CLI: bundle for Node, keep dependencies external (resolved from node_modules).

@@ -4,6 +4,14 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+- From the package entry: the `FacetInfo` type and `renderPane`'s fifth (`facetInfo`) parameter,
+  the dormant shared-mode Plot-faceting path they drove; `render()`, a dispatcher nothing in the
+  engine called (use `renderChart`, or `renderFigure` for a `small_multiples` spec); and
+  `FigureRenderResult.combinedSvg`, which was always `undefined`.
+
 ## [1.18.0] - 2026-10-14
 
 ### Added

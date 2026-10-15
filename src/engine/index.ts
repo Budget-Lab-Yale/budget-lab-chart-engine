@@ -1602,11 +1602,9 @@ export function renderChart(
   };
 }
 
-// Figure orchestrator (small multiples). Imported here for the `render` dispatcher; figure.ts
-// imports renderPane/buildLegendItems back from this module (ES-module cycle is safe — both
-// references resolve at call time, not at module evaluation).
-import { renderFigure } from "./figure";
-import type { FigureRenderResult } from "./figure";
+// Figure orchestrator (small multiples), re-exported for library consumers; figure.ts imports
+// renderPane/buildLegendItems back from this module (ES-module cycle is safe — both references
+// resolve at call time, not at module evaluation).
 export { renderFigure } from "./figure";
 export type { FigureRenderResult, FigurePane } from "./figure";
 // Timeline renderer: the same safe cycle — marks/timeline.ts imports buildColorMap back from here.
@@ -1614,16 +1612,3 @@ import { renderTimeline } from "./marks/timeline";
 // Treemap renderer: the same safe cycle — marks/treemap.ts imports buildColorMap back from here.
 import { renderTreemap } from "./marks/treemap";
 import type { TreemapTileInfo } from "./marks/treemap";
-
-/** Top-level dispatcher: a `small_multiples` spec renders a multi-panel figure (renderFigure),
- *  everything else renders a single chart (renderChart), a horizontal chart's facets included
- *  (they draw as groups, normalizeSpec). render-live/export switch to this in
- *  B6/B7; for now both renderChart and renderFigure stay exported and callable directly. */
-export function render(
-  spec: ChartSpec,
-  rows: TidyRow[],
-  opts: RenderOptions = {},
-): RenderResult | FigureRenderResult {
-  spec = normalizeSpec(spec);
-  return spec.small_multiples ? renderFigure(spec, rows, opts) : renderChart(spec, rows, opts);
-}

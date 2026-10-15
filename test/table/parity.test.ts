@@ -138,7 +138,7 @@ function render(spec: TableSpec, rows: TidyRow[]): Rendered {
   // model, measurer and spec options; none of these specs collapse a group). Used for column edges
   // and band rects only; the width check below proves it is the same layout.
   const layout = layoutTable(buildTableModel(spec, rows), {
-    width: 720, measureText: makeMeasureText(), ...layoutOptionsFromSpec(spec),
+    measureText: makeMeasureText(), ...layoutOptionsFromSpec(spec),
   });
   expect(Number(body.getAttribute("width"))).toBe(layout.totalWidth);
   expect(Number(body.getAttribute("height"))).toBe(layout.totalHeight);

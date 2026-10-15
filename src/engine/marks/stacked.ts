@@ -41,8 +41,8 @@ import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING, VBA
 // The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
 const SINGLE_SLOT = "_v";
 
-// Plot classNames on the net-dot and net-label mark groups, so a post-render `tagging`
-// pass can find their <circle>/<text> elements and stamp them with TOTAL_SERIES_KEY.
+// Plot className on the net-dot mark group, so a post-render `tagging` pass can find its
+// <circle> elements and stamp them with TOTAL_SERIES_KEY.
 export const NET_DOT_CLASS = "tbl-net-marker";
 
 // Net-dot radius: standalone chart, and a smaller radius for (narrow) small-multiples panes.

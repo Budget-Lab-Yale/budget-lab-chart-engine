@@ -85,7 +85,7 @@ export function layoutPanes(
     let model = buildTableModel(spec, p.rows);
     if (collapsedKeys) model = applyCollapse(model, collapsedKeys);
     model.stubHeader = resolveStubHeader(spec, p.value);
-    return { p, model, layout: layoutTable(model, { width: 720, measureText, ...opts }) };
+    return { p, model, layout: layoutTable(model, { measureText, ...opts }) };
   });
   const sharedStub = Math.max(...natural.map((n) => n.layout.stubWidth));
   const sharedTotal = Math.max(...natural.map((n) => sharedStub + (n.layout.totalWidth - n.layout.stubWidth)));
@@ -94,7 +94,6 @@ export function layoutPanes(
   return natural.map(({ p, model }) => {
     const m = fill ? { ...model, footnotes: [] } : model;
     const layout = layoutTable(m, {
-      width: 720,
       measureText,
       ...opts,
       stubWidth: sharedStub,

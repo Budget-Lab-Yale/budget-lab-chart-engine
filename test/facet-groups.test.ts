@@ -8,7 +8,7 @@
 // export and the height model — and validation rejects every setting that only means something for
 // panes. Vertical charts keep their panes (their goldens guard that).
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { render, renderChart, renderFigure } from "../src/engine/index";
+import { renderChart, renderFigure } from "../src/engine/index";
 import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { INNER_W } from "../src/embed/figure-chrome";
@@ -84,12 +84,9 @@ describe("a horizontal chart's facets draw as groups, exactly as sections", () =
       const faceted = make(FACETED, type);
       const sectioned = make(SECTIONED, type);
 
-      it("renderChart and render() draw one chart, identical to the sectioned spec", () => {
+      it("renderChart draws one chart, identical to the sectioned spec", () => {
         const want = (renderChart(sectioned, ROWS, { width: 720 }).svg as SVGSVGElement).outerHTML;
         expect((renderChart(faceted, ROWS, { width: 720 }).svg as SVGSVGElement).outerHTML).toBe(want);
-        const r = render(faceted, ROWS, { width: 720 });
-        expect("panes" in r).toBe(false);
-        expect(((r as { svg: SVGSVGElement }).svg).outerHTML).toBe(want);
       });
 
       it("the group titles are the pane titles, in pane_order", () => {
@@ -178,7 +175,6 @@ describe("validation: settings that only mean something for panes", () => {
     const both = { ...bar, columns: { ...bar.columns, section: "m" } };
     expect(errs(both).join("\n")).toMatch(/columns\.facet and columns\.section are both set/);
     expect(() => renderChart(both as ChartSpec, ROWS)).toThrow(/columns\.facet and columns\.section are both set/);
-    expect(() => render(both as ChartSpec, ROWS)).toThrow(/columns\.facet and columns\.section are both set/);
     expect(() => mountChart(document.createElement("div"), { spec: both as ChartSpec, rows: ROWS, width: INNER_W })).toThrow(
       /columns\.facet and columns\.section are both set/,
     );
@@ -237,6 +233,8 @@ describe("validation: settings that only mean something for panes", () => {
       ["a", "b"].flatMap((cat) => [{ pane, cat, m: "Before", v: "3" }, { pane, cat, m: "After", v: "4" }]),
     ) as unknown as TidyRow[];
     expect(validateChart(vertical, vRows).errors).toEqual([]);
-    expect("panes" in render(vertical as ChartSpec, vRows, { width: 720 })).toBe(true);
+    const host = document.createElement("div");
+    mountChart(host, { spec: vertical as ChartSpec, rows: vRows, width: INNER_W });
+    expect(host.querySelectorAll(".figure-grid .figure-pane").length).toBe(2);
   });
 });

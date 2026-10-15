@@ -8,7 +8,8 @@
 // This is the headless engine path (engine/index.ts → assemblePlot) running under jsdom,
 // so it also proves the render is deterministic and DOM-document-injectable for SSR.
 import { describe, it, expect } from "vitest";
-import { renderChart, renderFigure, render, TOTAL_SERIES_KEY } from "../src/engine/index";
+import { renderChart, renderFigure, TOTAL_SERIES_KEY } from "../src/engine/index";
+import { mountChart } from "../src/engine/render-live";
 import type { FigureRenderResult, FigurePane } from "../src/engine/index";
 import { buildStackedMarks } from "../src/engine/marks/stacked";
 import type { PreparedRow, MarkLayers } from "../src/engine/marks/index";
@@ -1451,7 +1452,6 @@ describe("golden figure — shared-mode small multiples (renderFigure, rewritten
 
     // Shared mode is now a per-pane composition: NO combined SVG, one SVG per pane.
     expect(fig.mode).toBe("shared");
-    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(4);
     expect(fig.columns).toBe(2);
     expect(fig.rows).toBe(2);
@@ -1630,22 +1630,16 @@ describe("golden figure — shared-mode small multiples (renderFigure, rewritten
       .toBe((shared.panes[0]!.svg as SVGSVGElement).querySelectorAll('g[aria-label="bar"] rect').length);
   });
 
-  it("render() dispatches: small_multiples -> figure, else -> single chart", () => {
-    const figRows = parseCsv("./fixtures/facet-regions.csv");
-    const fig = render(FIGURE_SPEC, figRows, { width: 720, height: 460, document }) as FigureRenderResult;
-    expect(fig.mode).toBe("shared");
-    // Shared mode no longer produces a combined SVG; it is a per-pane composition.
-    expect(fig.combinedSvg).toBeUndefined();
-    expect(fig.panes.length).toBe(4);
+  it("mountChart dispatches: small_multiples -> figure grid, else -> single chart", () => {
+    const fig = document.createElement("div");
+    mountChart(fig, { spec: FIGURE_SPEC, rows: parseCsv("./fixtures/facet-regions.csv"), width: 720 });
+    expect(fig.querySelectorAll(".figure-grid .figure-pane").length).toBe(4);
 
-    // No small_multiples → renderChart's RenderResult (a single `svg`, no `combinedSvg`).
-    const single = render(GRADS_SPEC, parseCsv("./fixtures/grads-recent.csv"), {
-      width: 720,
-      height: 400,
-      document,
-    });
-    expect("combinedSvg" in single).toBe(false);
-    expect((single as { svg: SVGSVGElement }).svg.tagName.toLowerCase()).toBe("svg");
+    // No small_multiples → the single-chart mount: one canvas SVG, no pane grid.
+    const single = document.createElement("div");
+    mountChart(single, { spec: GRADS_SPEC, rows: parseCsv("./fixtures/grads-recent.csv"), width: 720 });
+    expect(single.querySelector(".figure-grid")).toBeNull();
+    expect(single.querySelectorAll(".figure-canvas > svg").length).toBe(1);
   });
 });
 
@@ -1691,7 +1685,6 @@ describe("golden figure — per-pane small multiples (renderFigure, task B5)", (
 
     // Per-pane mode: no combined SVG; one SVG per pane.
     expect(fig.mode).toBe("per-pane");
-    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(4);
     // Pane order follows pane_order.
     expect(fig.panes.map((p) => p.value)).toEqual(["Small", "Medium", "Large", "Huge"]);
@@ -1736,12 +1729,10 @@ describe("golden figure — per-pane small multiples (renderFigure, task B5)", (
     expect(a).toBe(b);
   });
 
-  it("render() dispatches a per-pane spec to the figure path", () => {
-    const rows = parseCsv("./fixtures/facet-perpane.csv");
-    const fig = render(PERPANE_SPEC, rows, { width: 720, height: 460, document }) as FigureRenderResult;
-    expect(fig.mode).toBe("per-pane");
-    expect(fig.combinedSvg).toBeUndefined();
-    expect(fig.panes.length).toBe(4);
+  it("mountChart dispatches a per-pane spec to the figure grid", () => {
+    const host = document.createElement("div");
+    mountChart(host, { spec: PERPANE_SPEC, rows: parseCsv("./fixtures/facet-perpane.csv"), width: 720 });
+    expect(host.querySelectorAll(".figure-grid .figure-pane").length).toBe(4);
   });
 });
 
@@ -1790,7 +1781,6 @@ describe("golden figure — per-pane bar small multiples (renderFigure, task B8)
 
     // Per-pane mode: no combined SVG; one SVG per pane, in pane_order.
     expect(fig.mode).toBe("per-pane");
-    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(4);
     expect(fig.panes.map((p) => p.value)).toEqual(["Northeast", "Midwest", "South", "West"]);
     expect(fig.panes.map((p) => p.title)).toEqual(["Northeast", "Midwest", "South", "West"]);
@@ -1825,7 +1815,6 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
     const fig = renderFigure(STACKED_FIGURE_SPEC, rows, { width: 360, height: 240, document });
 
     expect(fig.mode).toBe("per-pane");
-    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(2);
     expect(fig.panes.map((p) => p.value)).toEqual(["Plan A", "Plan B"]);
 

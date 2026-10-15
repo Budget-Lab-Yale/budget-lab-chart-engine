@@ -313,7 +313,7 @@ function parseMath(s: string, out: RichRun[], onUnsupported?: (cmd: string) => v
 
     if (c === "_" || c === "^") {
       // Scripts with no preceding atom (rare): attach to an empty base.
-      attachScript(s, i, c, out, onUnsupported, flatten);
+      applyScripts(s, i, out, onUnsupported, flatten);
       i = skipScripts(s, i);
       continue;
     }
@@ -382,11 +382,6 @@ function applyScripts(s: string, i: number, out: RichRun[], onUnsupported?: (cmd
     out.push({ kind: "super", text: sup.text, italic: sup.italic });
   }
   return i;
-}
-
-/** Variant of applyScripts for scripts with no base atom (attach to an implicit empty base). */
-function attachScript(s: string, i: number, _first: string, out: RichRun[], onUnsupported?: (cmd: string) => void, flatten = false): void {
-  applyScripts(s, i, out, onUnsupported, flatten);
 }
 
 /** Advance past a run of `_`/`^` script groups (used when scripts had no base). */

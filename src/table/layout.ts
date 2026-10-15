@@ -13,12 +13,9 @@ import { TBL } from "../engine/theme";
 import { richWidth, hasBreak, splitBreaks, splitRichWords } from "./richtext";
 
 export interface LayoutOptions {
-  width: number;
   measureText: (s: string, fontPx: number, weight: number) => number;
   /** Fixed px width for the stub column (overrides the computed width). */
   stubWidth?: number;
-  /** When true, size the stub to the longest label (no wrapping). */
-  stubNowrap?: boolean;
   /** Fixed px width for data columns: a single number (all leaves) or per-leaf-key map. */
   columnWidth?: number | Record<string, number>;
   /** Allow body data cells to wrap within their column width: `true` (all leaves) or a per-leaf-key
@@ -162,7 +159,6 @@ export function columnAlignOf(spec: TableSpec | undefined, leafValue: string): C
 export function layoutOptionsFromSpec(spec: TableSpec): Partial<LayoutOptions> {
   return {
     ...(spec.stub_width != null ? { stubWidth: spec.stub_width } : {}),
-    ...(spec.stub_nowrap != null ? { stubNowrap: spec.stub_nowrap } : {}),
     ...(spec.column_width != null ? { columnWidth: spec.column_width } : {}),
     ...(spec.column_wrap != null ? { columnWrap: spec.column_wrap } : {}),
     ...(spec.header_max_lines != null ? { headerMaxLines: spec.header_max_lines } : {}),

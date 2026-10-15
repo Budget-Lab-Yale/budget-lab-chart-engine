@@ -10,7 +10,7 @@ import { renderTableHtml } from "./render-html.js";
 import { splitPanes, layoutPanes } from "./panes.js";
 import { buildFigureHeader } from "../engine/render-live.js";
 import { renderSourceLine } from "../engine/source-line.js";
-import { rowsToCsvBrowser } from "../data/csv-browser.js";
+import { rowsToCsv } from "../data/csv-browser.js";
 import { exportTablePng } from "../embed/export-table-png.js";
 import { makeMeasureText } from "./measure.js";
 import { noteBreakLines } from "./richtext.js";
@@ -60,7 +60,7 @@ function buildTableDownloadActions(
     const original = dataLabel.textContent ?? "Data";
     dataBtn.disabled = true;
     try {
-      const csv = rowsToCsvBrowser(rows);
+      const csv = rowsToCsv(rows);
       const blob = new Blob([csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = doc.createElement("a");
@@ -504,10 +504,11 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
   let applyVis: (() => void) | undefined; // re-applies visibility on the CURRENT table DOM
   let syncCollapseAll: (() => void) | undefined; // re-syncs the chrome button label
 
-  /** Render (or re-render) the table at the given width, then re-wire interactivity. */
-  function draw(width: number): void {
+  /** Render (or re-render) the table, then re-wire interactivity. The width the callers pass is
+   *  not read: layoutTable sizes the table to its content, not to the card. */
+  function draw(_width: number): void {
     const model = buildTableModel(spec, rows);
-    const layout = layoutTable(model, { width, measureText, ...layoutOptionsFromSpec(spec) });
+    const layout = layoutTable(model, { measureText, ...layoutOptionsFromSpec(spec) });
     const table = renderTableHtml(model, layout, doc, spec);
     canvasScroll.replaceChildren(table);
     if (spec.collapsible && !collapseSeeded) {
