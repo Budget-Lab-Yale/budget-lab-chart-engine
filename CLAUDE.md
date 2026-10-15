@@ -28,8 +28,9 @@ prompts (see the `gpt-review` skill). Add to it when a bug or a review reveals a
   standalone HTML). The engine bundles into standalone HTML served under a strict CSP. Test harnesses
   that execute generated page scripts inside jsdom (`test/serve.test.ts` `runOpenAll`) are outside
   it: the invariant exists for the CSP of published pages. The `overlays[].fun` grammar is *parsed
-  and interpreted* (`src/spec/expr.ts`); it is never evaluated. (Plot's vendored DSV code contains a textual `new Function` the engine never
-  reaches — do not "fix" it, and do not cite it as precedent.)
+  and interpreted* (`src/spec/expr.ts`); it is never evaluated. (Plot's vendored DSV code contains a
+  textual `new Function` the engine never reaches — do not "fix" it, and do not cite it as
+  precedent.)
 - **Rendered output must stay byte-identical for every pre-existing spec, except by a named
   exception.** Golden SVG tests enforce it. A repin re-renders the entire published archive, so an
   unconditional behaviour change alters already-published figures at once. **A moved golden means
@@ -41,6 +42,9 @@ prompts (see the `gpt-review` skill). Add to it when a bug or a review reveals a
   either the change is gated or the goldens provably never covered it. A waiver granted without that
   archive scan is not a waiver — that is the gap that left the 1.14.0 axis-domain waiver correct in
   substance but unverified in process.
+  Goldens are verified with `npm run goldens`, which cannot write snapshots; a local `npm test` run
+  is not evidence that output is unchanged if it could have written one. A new golden is recorded
+  only with `npm run goldens:record`.
 - **`CONFIG-SPEC.md` is vendored verbatim by `budget-lab-charts` and gated in its CI.** A statement in
   it that the code does not honour is a real defect shipped to figure authors, not a docs nit. Five
   false claims were found in it during 1.12.0, several added in good faith by describing what someone

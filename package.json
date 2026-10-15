@@ -23,6 +23,8 @@
     "prepare": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "goldens": "node scripts/goldens.mjs",
+    "goldens:record": "node scripts/goldens.mjs record",
     "test:watch": "vitest",
     "snapshot:selftest": "node scripts/snapshot-selftest.mjs"
   },
