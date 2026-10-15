@@ -59,7 +59,7 @@ import {
   attachPointHover,
   attachHighlightPills,
 } from "./crosshair.js";
-import type { HighlightPillsHandle, BandHoverCtx } from "./crosshair.js";
+import type { HighlightPillsHandle, BandHoverCtx, HoverDetach } from "./crosshair.js";
 import type { OverlayTooltipLine } from "./overlays.js";
 import type { BinLabelOpts, CalendarInterval } from "./histogram-label.js";
 import { renderSourceLine } from "./source-line.js";
@@ -177,8 +177,9 @@ export interface MountOptions {
    *  cannot diverge between the screen and the downloaded PNG. */
   hooks?: RenderHooks;
   /** Fires with the hovered category and its per-series values whenever a categorical bar/stacked
-   *  crosshair (standalone or a small-multiples pane) resolves one, and with `null` on
-   *  pointer-leave so a consumer drawing its own hover card knows when to clear it. Values come
+   *  crosshair (standalone or a small-multiples pane) resolves one, and with `null` when the hover
+   *  ends — on pointer-leave, and when a redraw or teardown ends the hovered chart's wiring under a
+   *  still pointer — so a consumer drawing its own hover card knows when to clear it. Values come
    *  straight from the crosshair's own resolver (`resolveCategorySeriesValues` in crosshair.ts) —
    *  never re-derived here — and fire even when `chrome.tooltip: false` suppresses the engine's
    *  own card, or the pane is a coordinated small-multiples pane with no card of its own: the
@@ -224,6 +225,20 @@ export interface MountOptions {
 function notify<T>(card: HTMLElement, type: string, detail: T, cb?: (detail: T) => void): void {
   cb?.(detail);
   card.dispatchEvent(new CustomEvent(type, { detail, bubbles: true }));
+}
+
+/** Run, then forget, every hover detach handle a draw collected (crosshair.ts `HoverDetach`) — before
+ *  each redraw and on teardown. A detach can reach a consumer's `onHover` (its `null`), and a throw
+ *  there must not abort the redraw or teardown that called this: it is re-thrown on its own
+ *  microtask, surfaced rather than swallowed, as the deferred "mount" onRender is. */
+function runHoverDetaches(detaches: HoverDetach[]): void {
+  for (const detach of detaches.splice(0)) {
+    try {
+      detach();
+    } catch (e) {
+      queueMicrotask(() => { throw e; });
+    }
+  }
 }
 
 // MIN_CHART_WIDTH (legend-layout.ts): below it the chart stops shrinking and the scroll wrapper
@@ -796,9 +811,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // --- chart controller: re-render at the container width on resize ---
   let lastWidth = -1;
   let currentOverlay: OverlayEl | null = null;
-  // Treemap only: hides the hover card a draw left showing. The card sits outside the svg, so a
-  // redraw or unmount under a still pointer would otherwise strand it (Ruling 21).
-  let hideTreemapHover: (() => void) | null = null;
+  // Every hover attachment of the current draw (treemap's included). The card sits outside the svg,
+  // so a redraw or unmount under a still pointer would otherwise strand it (Ruling 21; B2).
+  const hoverDetaches: HoverDetach[] = [];
   // The svg CURRENTLY in the canvas, re-read (not captured) by the deferred "mount" onRender
   // dispatch below — see it for why. Null between a failed render and the next successful one:
   // draw()'s catch replaces the canvas with a .figure-error and there is no live svg to report.
@@ -841,8 +856,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const target = chartTarget(outerWidth, legendPos);
     if (target === lastWidth && legendPos === currentLegendPos) return;
     lastWidth = target;
-    hideTreemapHover?.();
-    hideTreemapHover = null;
+    runHoverDetaches(hoverDetaches);
+    // The detach can end a hover, and a consumer may unmount from that onHover(null) / tbl-hover,
+    // synchronously. Drawing on would wire fresh hover onto a disposed mount.
+    if (disposed) return;
 
     // Color accent feed: resolve the active title-selector option's color (raw
     // ColorRef → engine/palette.resolveColor), fresh on every draw() so a selection change picks
@@ -1084,10 +1101,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     } else if (spec.chartType === "treemap") {
       // Per-tile hover: outline + dim, and the card unless chrome.tooltip is false. That flag
       // suppresses only the card, as on every chart type (CONFIG-SPEC `chrome.tooltip`).
-      hideTreemapHover = attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer });
+      hoverDetaches.push(attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer }));
     } else if (spec.chartType === "scatter") {
       // Scatter: per-point hover (no shared-x guide — points aren't aligned on x).
-      attachPointHover(svg, scatterPointHoverOptions({
+      hoverDetaches.push(attachPointHover(svg, scatterPointHoverOptions({
         spec,
         pointOrder: pointOrder ?? dataInScope,
         colors,
@@ -1099,11 +1116,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         overlayTooltips,
         tooltipContainer,
         chromeTooltip,
-      }));
+      })));
     } else if (spec.chartType === "dotplot") {
       // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
       // value). Reuses the categorical-line crosshair — no bars required.
-      attachCategoricalLineCrosshair(svg, {
+      hoverDetaches.push(attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -1116,7 +1133,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         centersFromMarks: true,
         showTooltip: chromeTooltip,
         tooltipHook: opts.hooks?.tooltip,
-      });
+      }));
       if (chromePills) {
         pillDriver = attachHighlightPills(svg, {
           rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -1133,7 +1150,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // ring / ink / filled). Reuses the categorical crosshair with orientation.
       const dbMarkers = new Map(seriesOrder.map((s) => [s, ownValue(spec.series_marker, s) ?? "filled"] as const));
       const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
-      attachCategoricalLineCrosshair(svg, {
+      hoverDetaches.push(attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
@@ -1151,12 +1168,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         tooltipHook: opts.hooks?.tooltip,
         // Horizontal: the row strip runs under the label, which accents — as on a horizontal bar.
         ...(isHorizontalDumbbell(spec) ? { regionFromLeftEdge: true, accentLabel: true } : {}),
-      });
+      }));
     } else if (spec.xAxisType === "categorical" && (spec.chartType === "line" || spec.chartType === "area")) {
       // Categorical-x LINE or AREA: resolve the category from the x-axis labels (no bars) and show
       // a guide + tooltip. Area takes this path, not the band crosshair below, because the band
       // crosshair resolves the category from bar rects an area chart does not draw.
-      attachCategoricalLineCrosshair(svg, {
+      hoverDetaches.push(attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -1169,7 +1186,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         tooltipHook: opts.hooks?.tooltip,
         // Stacked area: a Total row, as the temporal attachCrosshair call below.
         ...(spec.chartType === "area" ? { showTotal: true } : {}),
-      });
+      }));
     } else if (spec.xAxisType === "categorical") {
       // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
       // band (xScaleField === "fx" for vertical grouped, or `fy` for horizontal grouped/sectioned
@@ -1231,7 +1248,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       const useTooltip = hoverMode === "tooltip";
       const totalRow = resolveTotalRow(spec, netMode, hoverMode);
       let secondaryDriver: ((key: unknown, active?: boolean) => void) | null = null;
-      attachBandCrosshair(svg, {
+      hoverDetaches.push(attachBandCrosshair(svg, {
         tooltipContainer,
         rows: bandRows,
         isStacked,
@@ -1262,7 +1279,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
                 secondaryDriver?.(cat, true);
               },
             }),
-      });
+      }));
       if (chromePills) {
         pillDriver = attachHighlightPills(svg, {
           rows: bandRows,
@@ -1301,7 +1318,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     } else if (spec.chartType === "histogram") {
       // Histogram: continuous numeric/temporal x, but BINNED bars — resolve the bin under the
       // cursor by x-extent (not a snapped point) and show a per-bin tooltip headed by the bin range.
-      attachHistogramHover(svg, {
+      hoverDetaches.push(attachHistogramHover(svg, {
         tooltipContainer,
         rows: dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y })),
         colors,
@@ -1315,9 +1332,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         // for it gave a blue key over `bar_color: violet` bins.
         icons: seriesIcons,
         showTooltip: chromeTooltip,
-      });
+      }));
     } else {
-      attachCrosshair(svg, {
+      hoverDetaches.push(attachCrosshair(svg, {
         tooltipContainer,
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
         xField: "time",
@@ -1337,7 +1354,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         showTotal: spec.chartType === "area",
         overlays: overlayTooltips,
         showTooltip: chromeTooltip,
-      });
+      }));
     }
 
     currentOverlay?._ro?.disconnect();
@@ -1554,7 +1571,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   return () => {
     disposed = true;
-    hideTreemapHover?.();
+    runHoverDetaches(hoverDetaches);
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
@@ -1969,6 +1986,9 @@ function wireFigureSvg(
      *  every pane's tooltip-creating attach call below (mirrors mountChart's identical
      *  `tooltipContainer` const). */
     tooltipContainer: HTMLElement;
+    /** Receives this pane's hover detach handle (crosshair.ts `HoverDetach`); mountFigure runs every
+     *  pane's before each redraw and on teardown, as mountChart does its own. */
+    onHoverDetach: (detach: HoverDetach) => void;
   },
 ): ((key: unknown, active?: boolean) => void) | undefined {
   // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
@@ -2009,7 +2029,7 @@ function wireFigureSvg(
     // NOT emitOnly: every pane shows its own hover TOOLTIP (dot swatches matching the legend) — the
     // dumbbell reads values via the tooltip, not in-place pills. `onResolve` still fires (it runs
     // before the emitOnly gate), so hovering one pane drives the coordinated band echo on the others.
-    attachCategoricalLineCrosshair(svg, {
+    ctx.onHoverDetach(attachCategoricalLineCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       ...dbOpts,
@@ -2018,7 +2038,7 @@ function wireFigureSvg(
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
       ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
-    });
+    }));
     if (dbUseCoord) {
       return attachSecondaryCategoricalLineCursor(svg, dbOpts) as (key: unknown, active?: boolean) => void;
     }
@@ -2049,7 +2069,7 @@ function wireFigureSvg(
     // Multi-series dot plots dodge horizontally; the coordinated dots/labels must use the same
     // offsets so they land over the actual points (panes dodge at the pane gap).
     const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
-    attachCategoricalLineCrosshair(svg, {
+    ctx.onHoverDetach(attachCategoricalLineCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -2064,7 +2084,7 @@ function wireFigureSvg(
       tooltipHook: ctx.hooks?.tooltip,
       facet: ctx.facet,
       ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
-    });
+    }));
     if (chromePills) {
       ctx.onPillDriver?.(
         attachHighlightPills(svg, {
@@ -2094,7 +2114,7 @@ function wireFigureSvg(
     return undefined;
   }
   if (ctx.spec.chartType === "scatter") {
-    attachPointHover(svg, scatterPointHoverOptions({
+    ctx.onHoverDetach(attachPointHover(svg, scatterPointHoverOptions({
       spec: ctx.spec,
       pointOrder: ctx.pointOrder ?? ctx.dataInScope,
       colors: ctx.colors,
@@ -2106,7 +2126,7 @@ function wireFigureSvg(
       ...(ctx.overlayTooltips ? { overlayTooltips: ctx.overlayTooltips } : {}),
       tooltipContainer: ctx.tooltipContainer,
       chromeTooltip,
-    }));
+    })));
     return undefined;
   }
 
@@ -2129,7 +2149,7 @@ function wireFigureSvg(
     // Categorical-x LINE or AREA pane: resolve the category from the x-axis labels (no bars — the
     // band branch below reads bar rects, so an area pane there drew no card). Coordinated panes
     // hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
-    attachCategoricalLineCrosshair(svg, {
+    ctx.onHoverDetach(attachCategoricalLineCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -2144,7 +2164,7 @@ function wireFigureSvg(
       // As mountChart's call. Reaches only a pane that hovers with a card (emitOnly builds none).
       ...(ctx.spec.chartType === "area" ? { showTotal: true } : {}),
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
-    });
+    }));
     if (handle) {
       // Lines are thin; fat hit-paths + tagged dots let clicks resolve the series.
       addLineHitPaths(svg);
@@ -2197,7 +2217,7 @@ function wireFigureSvg(
     const totalRow = resolveTotalRow(ctx.spec, ctx.netMode, hoverMode);
     const coord = useCoord && !useTooltip;
     const echoWithCard = useCoord && useTooltip;
-    attachBandCrosshair(svg, {
+    ctx.onHoverDetach(attachBandCrosshair(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
@@ -2226,7 +2246,7 @@ function wireFigureSvg(
         : echoWithCard
           ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) }
           : {}),
-    });
+    }));
     if (handle) {
       // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
       svg.querySelectorAll<SVGElement>(".tbl-band-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
@@ -2312,7 +2332,7 @@ function wireFigureSvg(
     const histCoord =
       ctx.onResolve != null && (ctx.spec.small_multiples?.mode ?? "shared") !== "per-pane";
     const histRows = ctx.dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y }));
-    attachHistogramHover(svg, {
+    ctx.onHoverDetach(attachHistogramHover(svg, {
       tooltipContainer: ctx.tooltipContainer,
       ...(ctx.icons ? { icons: ctx.icons } : {}),
       rows: histRows,
@@ -2323,7 +2343,7 @@ function wireFigureSvg(
       label: histogramBinLabelOpts(ctx.spec),
       showTooltip: chromeTooltip,
       ...(histCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
-    });
+    }));
     if (histCoord) {
       return attachSecondaryHistogramCursor(svg, {
         rows: histRows,
@@ -2338,7 +2358,7 @@ function wireFigureSvg(
     return undefined;
   }
 
-  attachCrosshair(svg, {
+  ctx.onHoverDetach(attachCrosshair(svg, {
     tooltipContainer: ctx.tooltipContainer,
     rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
     xField: "time",
@@ -2357,7 +2377,7 @@ function wireFigureSvg(
     ...(ctx.overlayTooltips ? { overlays: ctx.overlayTooltips } : {}),
     showTooltip: chromeTooltip,
     ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
-  });
+  }));
   if (handle) {
     // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
     addLineHitPaths(svg);
@@ -2481,6 +2501,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // "mount" onRender dispatch below; see mountChart's identical dispatch comment. Emptied by a
   // failed render, which replaces the grid with a .figure-error and leaves no live pane at all.
   let currentPaneSvgs: Array<SVGSVGElement | undefined> = [];
+  // Every pane's hover attachment of the current draw — see mountChart's `hoverDetaches`.
+  const hoverDetaches: HoverDetach[] = [];
 
   // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
   // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
@@ -2546,6 +2568,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
     const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
     if (sig === lastSig) return;
+    runHoverDetaches(hoverDetaches);
+    // As mountChart's draw(): a consumer may unmount from the onHover(null) the detach just sent.
+    if (disposed) return;
     // Inline-selector accent (parity with mountChart's draw()): recolor every pane's bars to the
     // active option's color. renderFigure forwards accentColor to each pane's renderChart, which
     // applies it to single/no-series bars (category_colors still overrides; multi-series unchanged).
@@ -2674,6 +2699,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         hooks: opts.hooks,
         facet: pane.value,
         onHover: hoverNotifier,
+        onHoverDetach: (d) => hoverDetaches.push(d),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
       drivers.push(driver ?? (() => {}));
@@ -2733,6 +2759,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
 
   return () => {
     disposed = true;
+    runHoverDetaches(hoverDetaches);
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     closeTitleSelectors();

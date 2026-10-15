@@ -127,7 +127,49 @@ export function getSharedTooltip(doc: Document, parent: HTMLElement = doc.body):
   return tip;
 }
 
-export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): void {
+/** What every hover attach returns (treemap-hover's too): undo the attachment. It removes the
+ *  attachment's listeners, hides the shared card only if this attachment is the one showing it, and
+ *  ends a hover in progress (`onResolve(null)`, and `onHover(null)` where wired) so a consumer
+ *  learns the hover is over. The card lives outside the svg, so a redraw or unmount under a still
+ *  pointer would otherwise strand it: the hit rect's pointerleave never fires once its svg is gone.
+ *  render-live calls every handle before each redraw and on teardown. */
+export type HoverDetach = () => void;
+
+const NO_DETACH: HoverDetach = () => {};
+
+// The attachment that last showed each shared card. The card is shared per parent (above), so a
+// detach that hid it unconditionally would hide ANOTHER chart's card: chart A torn down while the
+// pointer sits on chart B. A pointerleave hide needs no check -- a pointer leaves A before it can
+// reach B -- so the attach functions here consult this only on detach.
+const tooltipOwners = new WeakMap<HTMLElement, object>();
+
+/** The card half of one hover attachment: `show` makes it visible and records this attachment as
+ *  its owner; `release` hides it only while this attachment still owns it. */
+export function tooltipOwnership(tip: HTMLElement | null): { show: () => void; release: () => void } {
+  const owner = {};
+  return {
+    show: () => {
+      if (!tip) return;
+      tooltipOwners.set(tip, owner);
+      tip.style.opacity = "1";
+    },
+    release: () => {
+      if (!tip || tooltipOwners.get(tip) !== owner) return;
+      tooltipOwners.delete(tip);
+      tip.style.opacity = "0";
+    },
+  };
+}
+
+/** Add each listener to `target`; returns the function that removes them again. */
+export function listen(target: EventTarget, listeners: Record<string, EventListener>): () => void {
+  for (const [type, fn] of Object.entries(listeners)) target.addEventListener(type, fn);
+  return () => {
+    for (const [type, fn] of Object.entries(listeners)) target.removeEventListener(type, fn);
+  };
+}
+
+export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): HoverDetach {
   const {
     rows,
     xField = "time",
@@ -140,7 +182,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   const yFormat =
     opts.yFormat ??
     ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
-  if (!svgEl || !rows?.length) return;
+  if (!svgEl || !rows?.length) return NO_DETACH;
 
   const vb = svgEl.viewBox?.baseVal;
   const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
@@ -198,6 +240,8 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   svgEl.appendChild(hit);
 
   const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
+  const card = tooltipOwnership(tip);
+  let active = false;
 
   function snapX(svgX: number): number | null {
     if (svgX < ml || svgX > ml + plotW) return null;
@@ -223,6 +267,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
       hide();
       return;
     }
+    active = true;
     opts.onResolve?.(snap);
     if (emitOnly) return;
     const gx = xToPx(snap);
@@ -272,7 +317,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     const win = svgEl.ownerDocument.defaultView!;
     const vw = win.innerWidth;
     const vh = win.innerHeight;
-    tip!.style.opacity = "1";
+    card.show();
     let left = evt.clientX + offset;
     let top = evt.clientY + offset;
     if (left + tip!.offsetWidth + 4 > vw) left = evt.clientX - tip!.offsetWidth - offset;
@@ -283,16 +328,26 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     tip!.style.top = `${top}px`;
   }
 
-  function hide(): void {
+  /** `detaching`: release the card rather than hide it, so another chart's card is left alone. */
+  function hide(detaching = false): void {
+    active = false;
     if (guide) guide.setAttribute("opacity", "0");
-    if (tip) tip.style.opacity = "0";
+    if (detaching) card.release();
+    else if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
   }
 
   hit.style.pointerEvents = "all";
-  hit.addEventListener("pointermove", update as EventListener);
-  hit.addEventListener("pointerleave", hide);
-  hit.addEventListener("pointerdown", update as EventListener);
+  const unlisten = listen(hit, {
+    pointermove: update as EventListener,
+    pointerleave: () => hide(),
+    pointerdown: update as EventListener,
+  });
+  return () => {
+    unlisten();
+    if (active) hide(true);
+    else card.release();
+  };
 }
 
 /** One tooltip key, for every tooltip path.
@@ -1036,8 +1091,8 @@ function readCategoryFills(
  * rect geometry, shows a tooltip with per-series values and (for stacked) a Total
  * row, and draws a translucent area highlight over the hovered category's band.
  */
-export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOptions): void {
-  if (!svgEl || !opts.rows?.length) return;
+export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOptions): HoverDetach {
+  if (!svgEl || !opts.rows?.length) return NO_DETACH;
 
   const horizontal = opts.orientation === "horizontal";
 
@@ -1084,6 +1139,8 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   svgEl.appendChild(hit);
 
   const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
+  const card = tooltipOwnership(tip);
+  let active = false;
 
   // Bar tooltips: colour each series' swatch from the bar's ACTUAL rendered fill (bar_color /
   // accent / category_colors / a waterfall's per-direction palette), not the series' base colour —
@@ -1195,6 +1252,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
 
     if (!category) { hide(); return; }
 
+    active = true;
     opts.onResolve?.(category);
     // Fires from the SAME resolver the tooltip card below reads (resolveCategorySeriesValues) —
     // BEFORE the emitOnly/tip gates, so a coordinated small-multiples pane and `chrome.tooltip:
@@ -1243,7 +1301,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     const win = svgEl.ownerDocument.defaultView!;
     const vw = win.innerWidth;
     const vh = win.innerHeight;
-    tip!.style.opacity = "1";
+    card.show();
     let left = evt.clientX + offset;
     let top = evt.clientY + offset;
     if (left + tip!.offsetWidth + 4 > vw) left = evt.clientX - tip!.offsetWidth - offset;
@@ -1254,18 +1312,28 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     tip!.style.top = `${top}px`;
   }
 
-  function hide(): void {
+  /** `detaching`: release the card rather than hide it, so another chart's card is left alone. */
+  function hide(detaching = false): void {
+    active = false;
     if (hl) hl.setAttribute("opacity", "0");
     accenter?.restore();
-    if (tip) tip.style.opacity = "0";
+    if (detaching) card.release();
+    else if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
     opts.onHover?.(null);
   }
 
   hit.style.pointerEvents = "all";
-  hit.addEventListener("pointermove", update as EventListener);
-  hit.addEventListener("pointerleave", hide);
-  hit.addEventListener("pointerdown", update as EventListener);
+  const unlisten = listen(hit, {
+    pointermove: update as EventListener,
+    pointerleave: () => hide(),
+    pointerdown: update as EventListener,
+  });
+  return () => {
+    unlisten();
+    if (active) hide(true);
+    else card.release();
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1484,11 +1552,11 @@ function buildHistogramGeom(
   return { bins, W, H, ml, mr, mt, mb, xToPx, spans, renderedFills };
 }
 
-export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverOptions): void {
-  if (!svgEl || !opts.rows?.length) return;
+export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverOptions): HoverDetach {
+  if (!svgEl || !opts.rows?.length) return NO_DETACH;
 
   const geom = buildHistogramGeom(svgEl, opts.rows);
-  if (!geom) return;
+  if (!geom) return NO_DETACH;
   const { bins, W, H, mt, mb, spans, renderedFills } = geom;
   const emitOnly = opts.emitOnly ?? false;
 
@@ -1522,6 +1590,8 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
   svgEl.appendChild(hit);
 
   const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
+  const card = tooltipOwnership(tip);
+  let active = false;
 
   // Re-coloured ONCE, not per pointermove: `renderedFills` is read from the bars at attach time, so
   // a `bar_color` histogram's key is settled before the first hover. (This is where that colour is
@@ -1552,6 +1622,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     const idx = resolveHistogramBinIndex(spans, svgX);
     if (idx == null) { hide(); return; }
     const bin = bins[idx]!;
+    active = true;
 
     // Emit the bin CENTER (a DATA-x value) so echo panes re-resolve their own bin. Must be the
     // center, not an edge: bars are edge-to-edge (bins[k-1].x1 === bins[k].x0) and
@@ -1576,7 +1647,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     const win = svgEl.ownerDocument.defaultView!;
     const vw = win.innerWidth;
     const vh = win.innerHeight;
-    tip!.style.opacity = "1";
+    card.show();
     let left = evt.clientX + offset;
     let top = evt.clientY + offset;
     if (left + tip!.offsetWidth + 4 > vw) left = evt.clientX - tip!.offsetWidth - offset;
@@ -1587,16 +1658,26 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     tip!.style.top = `${top}px`;
   }
 
-  function hide(): void {
+  /** `detaching`: release the card rather than hide it, so another chart's card is left alone. */
+  function hide(detaching = false): void {
+    active = false;
     if (hl) hl.setAttribute("opacity", "0");
-    if (tip) tip.style.opacity = "0";
+    if (detaching) card.release();
+    else if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
   }
 
   hit.style.pointerEvents = "all";
-  hit.addEventListener("pointermove", update as EventListener);
-  hit.addEventListener("pointerleave", hide);
-  hit.addEventListener("pointerdown", update as EventListener);
+  const unlisten = listen(hit, {
+    pointermove: update as EventListener,
+    pointerleave: () => hide(),
+    pointerdown: update as EventListener,
+  });
+  return () => {
+    unlisten();
+    if (active) hide(true);
+    else card.release();
+  };
 }
 
 /**
@@ -3032,8 +3113,8 @@ export interface CategoricalLineOptions {
  * single charts get a guide + tooltip, coordinated figure panes pass `emitOnly` (hit-test + emit
  * only, the secondary renderer draws). No bar rects required.
  */
-export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: CategoricalLineOptions): void {
-  if (!svgEl || !opts.rows?.length) return;
+export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: CategoricalLineOptions): HoverDetach {
+  if (!svgEl || !opts.rows?.length) return NO_DETACH;
   const emitOnly = opts.emitOnly ?? false;
   const yFormat =
     opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
@@ -3094,6 +3175,8 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   svgEl.appendChild(hit);
 
   const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
+  const card = tooltipOwnership(tip);
+  let active = false;
   const accenter = opts.accentLabel && horizontal && hl ? labelAccenter(svgEl) : null;
   let centers: Array<{ category: string; cx: number }> | null = null;
   // Re-coloured ONCE, not per pointermove: `opts.renderedFills` is handed in already resolved and
@@ -3114,6 +3197,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       : (evt.clientX - rect.left) * (W / rect.width);
     const category = nearestCategory(centers, svgCoord);
     if (!category) { hide(); return; }
+    active = true;
     opts.onResolve?.(category);
     if (emitOnly) return;
     const idx = centers.findIndex((c) => c.category === category);
@@ -3152,7 +3236,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     });
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
-    tip!.style.opacity = "1";
+    card.show();
     let left = evt.clientX + offset;
     let top = evt.clientY + offset;
     if (left + tip!.offsetWidth + 4 > win.innerWidth) left = evt.clientX - tip!.offsetWidth - offset;
@@ -3160,17 +3244,27 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     tip!.style.left = `${Math.max(4, left)}px`;
     tip!.style.top = `${Math.max(4, top)}px`;
   }
-  function hide(): void {
+  /** `detaching`: release the card rather than hide it, so another chart's card is left alone. */
+  function hide(detaching = false): void {
+    active = false;
     if (guide) guide.setAttribute("opacity", "0");
     if (hl) hl.setAttribute("opacity", "0");
     accenter?.restore();
-    if (tip) tip.style.opacity = "0";
+    if (detaching) card.release();
+    else if (tip) tip.style.opacity = "0";
     opts.onResolve?.(null);
   }
   hit.style.pointerEvents = "all";
-  hit.addEventListener("pointermove", update as EventListener);
-  hit.addEventListener("pointerleave", hide);
-  hit.addEventListener("pointerdown", update as EventListener);
+  const unlisten = listen(hit, {
+    pointermove: update as EventListener,
+    pointerleave: () => hide(),
+    pointerdown: update as EventListener,
+  });
+  return () => {
+    unlisten();
+    if (active) hide(true);
+    else card.release();
+  };
 }
 
 /**
@@ -3656,10 +3750,12 @@ export interface PointHoverOptions {
  * hover. No guide / snapping — a scatter's points aren't aligned on a shared x, so each marker
  * is its own hover target. The color legend's hover-dim continues to work independently.
  */
-export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions): void {
-  if (!svgEl || !opts.points?.length) return;
+export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions): HoverDetach {
+  if (!svgEl || !opts.points?.length) return NO_DETACH;
   const doc = svgEl.ownerDocument;
   const tip = opts.showTooltip === false ? null : getSharedTooltip(doc, opts.tooltipContainer);
+  const card = tooltipOwnership(tip);
+  const unlisteners: Array<() => void> = [];
   const xFormat = opts.xFormat ?? ((v: number) => `${v}`);
   const yFormat = opts.yFormat ?? ((v: number) => `${v}`);
   const markers = svgEl.querySelectorAll<SVGElement>(opts.selector);
@@ -3724,11 +3820,18 @@ export function attachPointHover(svgEl: SVGSVGElement, opts: PointHoverOptions):
         yFormat,
       );
       tip.innerHTML = html;
-      tip.style.opacity = "1";
+      card.show();
       place(evt);
     };
-    el.addEventListener("pointerenter", show as EventListener);
-    el.addEventListener("pointermove", place as EventListener);
-    el.addEventListener("pointerleave", () => { if (tip) tip.style.opacity = "0"; });
+    unlisteners.push(listen(el, {
+      pointerenter: show as EventListener,
+      pointermove: place as EventListener,
+      pointerleave: () => { if (tip) tip.style.opacity = "0"; },
+    }));
   });
+  // A scatter point reports no onResolve / onHover, so the card is the only thing to end.
+  return () => {
+    for (const off of unlisteners) off();
+    card.release();
+  };
 }

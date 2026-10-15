@@ -13,6 +13,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - Categorical-x line and area hover with multi-word categories whose axis labels wrap onto two
   lines: the card now shows the category and its values (it showed the two lines run together and
   no values), and the coordinated cursor draws on every pane (it drew nothing).
+- Live charts: tearing down a mount, or a redraw (resize, title-selector reselect), while the
+  pointer rests on the chart no longer leaves its hover card on the page, and `onHover` /
+  `tbl-hover` now report `null` when that ends a hover. Tearing down one chart leaves another
+  chart's card alone. Treemaps already hid their card.
 
 ### Removed
 - From the package entry: the `FacetInfo` type and `renderPane`'s fifth (`facetInfo`) parameter,

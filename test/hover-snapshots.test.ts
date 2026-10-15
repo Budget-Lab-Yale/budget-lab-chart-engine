@@ -392,11 +392,11 @@ describe("hover snapshots — every family, standalone and 2-pane, at one fixed 
 });
 
 // ---------------------------------------------------------------------------
-// B2 (review 2026-10-15): teardown leaves the hover card showing and never sends onHover(null).
+// B2 (review 2026-10-15): teardown left the hover card showing and never sent onHover(null).
 // The condition each case asserts: after hover then teardown(), no card is shown, and if onHover
-// received a payload, the last call is null. Today only the treemap honours the card half
-// (Ruling 21); for the others these are `it.fails` until the lifecycle fix (plan T2.2) lands,
-// when they flip to `it`.
+// received a payload, the last call is null. Every hover attach now returns a detach handle that
+// render-live runs on teardown and before each redraw; the treemap had its own since Ruling 21.
+// Sharing, redraw and listener removal are in hover-detach.test.ts.
 // ---------------------------------------------------------------------------
 
 function teardownLeavesNothing(cell: Cell): void {
@@ -411,7 +411,7 @@ function teardownLeavesNothing(cell: Cell): void {
 // Every cell where the hover shows a card or sends an onHover payload, so there is something for
 // teardown to clear. Cells with neither (a coordinated pane of a family onHover does not reach)
 // would pass vacuously and are left out. The last test below checks this list against the cells.
-const B2_FAILS_TODAY = [
+const B2_CELLS = [
   "line (temporal) · standalone",
   "line (categorical x) · standalone",
   "area (temporal) · standalone",
@@ -443,12 +443,12 @@ const B2_FAILS_TODAY = [
 ];
 
 describe("B2: teardown() hides the hover card and sends onHover(null)", () => {
-  for (const key of B2_FAILS_TODAY) {
+  for (const key of B2_CELLS) {
     const cell = cells.find((c) => c.key === key)!;
-    it.fails(`B2: ${key}`, () => teardownLeavesNothing(cell));
+    it(`B2: ${key}`, () => teardownLeavesNothing(cell));
   }
 
-  it("B2: treemap · standalone (already hides its card on teardown, Ruling 21)", () => {
+  it("B2: treemap · standalone (hid its card on teardown before the others, Ruling 21)", () => {
     const cell = cells.find((c) => c.key === "treemap · standalone")!;
     const { m } = hoverCell(cell);
     expect(cardShown(), "precondition: the treemap hover shows a card").toBe(true);
@@ -457,8 +457,8 @@ describe("B2: teardown() hides the hover card and sends onHover(null)", () => {
   });
 
   it("the B2 list is exactly the cells whose hover leaves something for teardown to clear", () => {
-    // An `it.fails` also passes when the test throws for an unrelated reason (a missed hover, a
-    // misspelt key). This pins the precondition: every listed cell shows a card or sends an
+    // A cell whose hover shows nothing passes the teardown check vacuously (a missed hover, a
+    // fixture change). This pins the precondition: every listed cell shows a card or sends an
     // onHover payload, and no other non-treemap cell does.
     const live = cells
       .filter((cell) => {
@@ -467,6 +467,6 @@ describe("B2: teardown() hides the hover card and sends onHover(null)", () => {
         return cell.fam.slug !== "treemap" && (cardShown() || hovers.some((h) => h !== null));
       })
       .map((c) => c.key);
-    expect(live.sort()).toEqual([...B2_FAILS_TODAY].sort());
+    expect(live.sort()).toEqual([...B2_CELLS].sort());
   });
 });
