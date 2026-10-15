@@ -465,6 +465,33 @@ function addLineHitPaths(svgEl: SVGSVGElement): void {
   }
 }
 
+/**
+ * Two-way selection: clicking a mark PINS its series through the legend handle. Used by mountChart
+ * and by every figure pane in wireFigureSvg; the two paths wired this separately and drifted (a
+ * standalone categorical line got no hit-paths, histogram and dumbbell panes got no click at all).
+ *
+ * The hover overlay (`CROSSHAIR_HIT_SELECTOR`) is a transparent full-SVG rect on top of the marks,
+ * so the click lands on it; `resolveSeriesAtPoint` hit-tests through it with `elementsFromPoint`.
+ * The overlay sets its cursor inline, which beats the `.is-selectable` CSS rule, so it is
+ * overridden to `pointer` here. `lineHitPaths`: add the fat hit-paths for thin line strokes.
+ * Live DOM only; renderChart and the PNG export never call this. Records `svg` in
+ * `CLICK_TO_PIN_SVGS`, which mountFigure reads to decide `.is-selectable`.
+ */
+const CLICK_TO_PIN_SVGS = new WeakSet<SVGSVGElement>();
+function wireClickToPin(
+  svg: SVGSVGElement,
+  handle: LegendHandle,
+  opts: { lineHitPaths: boolean },
+): void {
+  if (opts.lineHitPaths) addLineHitPaths(svg);
+  svg.querySelectorAll<SVGElement>(CROSSHAIR_HIT_SELECTOR).forEach((el) => { el.style.cursor = "pointer"; });
+  svg.addEventListener("click", (evt) => {
+    const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
+    if (series) handle.toggle(series);
+  });
+  CLICK_TO_PIN_SVGS.add(svg);
+}
+
 /** Format a numeric value for tooltip display. `decimals` (default 2) lets a tooltip be more
  *  precise than the axis — e.g. 4 for small magnitudes that round to 0.00 on a 2-decimal axis. */
 export function formatValue(v: number, affixes: ValueAffixes, decimals = 2): string {
@@ -1429,23 +1456,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // click lands on that overlay, not the bar — hit-test THROUGH it with
     // elementsFromPoint and find the first [data-series] mark beneath the cursor.
     if (legendHandle && !isPoint) {
-      const handle = legendHandle; // capture the non-null value for the click closure
       card.classList.add("is-selectable");
-      // Line charts: the visible lines are thin ~2px strokes that elementsFromPoint rarely
-      // hits. Add transparent fat hit-paths (per series, below the crosshair overlay) so
-      // clicking ON or NEAR a line resolves its series. Gated to the continuous-x (line)
-      // case; bars resolve directly off the rect geometry and don't need this.
-      if (spec.xAxisType !== "categorical") {
-        addLineHitPaths(svg);
-      }
-      // The crosshair sets the hit overlay's cursor inline (crosshair/default), which would
-      // win over the .is-selectable CSS rule. Override it to `pointer` so the click
-      // affordance shows across the whole plot when selection is on.
-      svg.querySelectorAll<SVGElement>(".tbl-crosshair-hit, .tbl-band-crosshair-hit")
-        .forEach((el) => { el.style.cursor = "pointer"; });
-      svg.addEventListener("click", (evt) => {
-        const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-        if (series) handle.toggle(series);
+      // Line strokes are thin: fat hit-paths on a continuous-x chart and on a categorical line or
+      // area (the pane path's rule). Bars resolve directly off the rect geometry.
+      wireClickToPin(svg, legendHandle, {
+        lineHitPaths:
+          spec.xAxisType !== "categorical" || spec.chartType === "line" || spec.chartType === "area",
       });
     } else {
       card.classList.remove("is-selectable");
@@ -2088,6 +2104,8 @@ function wireFigureSvg(
       facet: ctx.facet,
       ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     }));
+    // The dots carry data-series: no hit-paths.
+    if (handle) wireClickToPin(svg, handle, { lineHitPaths: false });
     if (dbUseCoord) {
       return attachSecondaryCategoricalLineCursor(svg, dbOpts) as (key: unknown, active?: boolean) => void;
     }
@@ -2214,15 +2232,8 @@ function wireFigureSvg(
       ...(ctx.spec.chartType === "area" ? { showTotal: true } : {}),
       ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
     }));
-    if (handle) {
-      // Lines are thin; fat hit-paths + tagged dots let clicks resolve the series.
-      addLineHitPaths(svg);
-      svg.querySelectorAll<SVGElement>(".tbl-catline-hit").forEach((el) => { el.style.cursor = "pointer"; });
-      svg.addEventListener("click", (evt) => {
-        const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-        if (series) handle.toggle(series);
-      });
-    }
+    // Lines are thin; fat hit-paths + tagged dots let clicks resolve the series.
+    if (handle) wireClickToPin(svg, handle, { lineHitPaths: true });
     if (useCoord) {
       return attachSecondaryCategoricalLineCursor(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -2296,14 +2307,8 @@ function wireFigureSvg(
           ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) }
           : {}),
     }));
-    if (handle) {
-      // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
-      svg.querySelectorAll<SVGElement>(".tbl-band-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
-      svg.addEventListener("click", (evt) => {
-        const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-        if (series) handle.toggle(series);
-      });
-    }
+    // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
+    if (handle) wireClickToPin(svg, handle, { lineHitPaths: false });
     if (chromePills) {
       const pills = attachHighlightPills(svg, {
         rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -2393,6 +2398,8 @@ function wireFigureSvg(
       showTooltip: chromeTooltip,
       ...(histCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
     }));
+    // Bins carry data-series, as bars do: no hit-paths.
+    if (handle) wireClickToPin(svg, handle, { lineHitPaths: false });
     if (histCoord) {
       return attachSecondaryHistogramCursor(svg, {
         rows: histRows,
@@ -2427,15 +2434,8 @@ function wireFigureSvg(
     showTooltip: chromeTooltip,
     ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
   }));
-  if (handle) {
-    // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
-    addLineHitPaths(svg);
-    svg.querySelectorAll<SVGElement>(".tbl-crosshair-hit").forEach((el) => { el.style.cursor = "pointer"; });
-    svg.addEventListener("click", (evt) => {
-      const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-      if (series) handle.toggle(series);
-    });
-  }
+  // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
+  if (handle) wireClickToPin(svg, handle, { lineHitPaths: true });
   if (useCoord) {
     return attachSecondaryLineCursor(svg, {
       rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
@@ -2701,8 +2701,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     currentLegendHandle = handle;
     const dropped = pinsDropped(carried, handle);
     // Attach each pane's crosshair ALWAYS (single-series bar panes have no legend but still
-    // need tooltips); selection click is gated on `handle` inside wireFigureSvg.
-    card.classList.toggle("is-selectable", handle != null);
+    // need tooltips); selection click is gated on `handle` inside wireFigureSvg, and
+    // `.is-selectable` is set below from the panes that were actually wired.
 
     // Coordinated cursor: hovering one pane echoes a secondary cursor on every OTHER pane at the
     // same x. Default on for multi-pane figures; `coordinated_cursor: false` disables. The bus
@@ -2761,6 +2761,12 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       });
       drivers.push(driver ?? (() => {}));
     });
+    // Not `handle != null`: dot-plot and scatter panes get no click wiring (nor do their standalone
+    // charts), so a legend alone would advertise a click that does nothing.
+    card.classList.toggle(
+      "is-selectable",
+      fig.panes.some((pane) => pane.svg != null && CLICK_TO_PIN_SVGS.has(pane.svg)),
+    );
 
     // As mountChart's draw(): the carried state reached the legend without its onHighlight.
     const carriedActive = handle?.active() ?? new Set<string>();

@@ -33,6 +33,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   stack order. Pinning an area series from the keyboard keeps focus on its legend button. An area
   pin now fires `onLegendSelect` once; it fired once per pinned series plus once more, the extra
   calls carrying partial sets as the pins were re-applied.
+- Live charts, click to pin: a standalone categorical-x line chart now pins a series on a click
+  within a few pixels of its line, and shows a pointer cursor, as its small-multiples panes already
+  did (a click had to land on the 2px stroke itself). Standalone dumbbells and multi-series
+  histograms, which already pinned on click, now show the pointer too.
+  Small-multiples histogram and dumbbell panes now pin a series when a bin or dot is clicked, with
+  the pointer cursor; they ignored the click. Small-multiples dot plots and scatters no longer mark
+  the card selectable, since their panes do not pin on click. Static SVG and PNG output is unchanged.
 - `tbl-chart serve`: a malformed percent-escape in a `/chart/` URL (`/chart/%E0%A4%A`) now answers
   400; it crashed the server. `/chart/` serves only `chart.yaml` and `table.yaml`: any other file
   under the root answers 404 instead of being read and YAML-parsed.

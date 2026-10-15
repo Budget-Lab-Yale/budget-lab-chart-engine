@@ -36,6 +36,6 @@
 </div>
 # pane 0 (hovered)
 <rect class="tbl-catline-hl" fill="#BBBBBB" y="18" height="360" opacity="0.12" style="pointer-events: none;" x="100" width="275"/>
-<rect class="tbl-catline-hit" x="0" y="0" width="720" height="400" fill="transparent" style="cursor: crosshair; pointer-events: all;"/>
+<rect class="tbl-catline-hit" x="0" y="0" width="720" height="400" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
 # onHover (last payload)
 (no onHover call)

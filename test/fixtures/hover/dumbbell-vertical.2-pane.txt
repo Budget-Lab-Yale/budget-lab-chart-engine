@@ -36,11 +36,11 @@
 </div>
 # pane 0 (hovered)
 <rect class="tbl-catline-hl" fill="#BBBBBB" y="18" height="280" opacity="0.12" style="pointer-events: none;" x="76" width="155"/>
-<rect class="tbl-catline-hit" x="0" y="0" width="432" height="320" fill="transparent" style="cursor: crosshair; pointer-events: all;"/>
+<rect class="tbl-catline-hit" x="0" y="0" width="432" height="320" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
 <g class="tbl-coord" opacity="0" style="pointer-events: none;"/>
 # pane 1
 <rect class="tbl-catline-hl" fill="#BBBBBB" y="18" height="280" opacity="0" style="pointer-events: none;"/>
-<rect class="tbl-catline-hit" x="0" y="0" width="390" height="320" fill="transparent" style="cursor: crosshair; pointer-events: all;"/>
+<rect class="tbl-catline-hit" x="0" y="0" width="390" height="320" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
 <g class="tbl-coord" opacity="1" style="pointer-events: none;">
   <rect class="tbl-coord-region" x="34" y="18" width="155" height="280" fill="#BBBBBB" opacity="0.12"/>
 </g>
