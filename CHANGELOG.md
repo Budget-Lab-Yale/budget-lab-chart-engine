@@ -75,6 +75,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   as returned, unwrapped.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
+- CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
+  - Colors: lists the forms validation accepts (hex of 3 to 8 digits, named CSS functions with
+    unchecked contents, Plot's CSS keywords) in place of "any CSS color passes through". `yellowgreen`
+    is rejected; `#12345` passes and is ignored by the browser (a filled mark inherits
+    `currentColor`, a line is not drawn) and fails at render under a texture; `"Blue"` is the CSS
+    keyword, not the palette's blue. Color fields elsewhere now point to that section rather than
+    saying "named color or `#hex`".
+  - Series textures: validation catches only some unreadable grounds under a texture; others (for
+    example a wrong-length hex, `rgb(foo, bar)`, `category_colors`) pass and fail at render.
+  - Table inline math: `\$` is a dollar sign only in text parsed for math. In the PNG export,
+    multi-line text can be parsed line by line, so `\$` can keep its backslash on a line without
+    math; the table's `notes` line is never parsed.
+  - Hooks: what a throwing `legendKey` (out of `mountChart` on the first draw, no teardown, no
+    resize redraw, and on a standalone chart no title-selector redraw) and `tooltip` (on hover only;
+    a card from an earlier move stays with its old content) actually do. The old account said both
+    were retried on the next resize.
+  - Hooks: `legendKey` receives `__annotation:<label>` as `ctx.series` on annotation rows, and markup
+    a hook changes is exported unwrapped on every chart type, not only timelines.
+  - `barStack.netLabelColor` and `valueLabels.signed` are documented as accepted with no effect.
+  - Shading: `side` is measured against `baseline`, not zero.
+  - Rug: tracks group by label within bands and within shading (explicit tracks never), painted in
+    the first entry's color, while the legend chip keys every entry's color; the full-cover
+    validation error only catches a track inside one later interval.
+  - Keying annotations: which same-label rows merge (fills always; lines only with the same dash, in
+    the first line's color), the row order includes `overlays` (before `xAxis`), and a no-`series`
+    shading chip shows every series' tint, painted or not.
+  - `columns.category` works on every chart type but `timeline` and `treemap`, not only dumbbells.
+  - `MountOptions.height`: honoured by a standalone chart; ignored by timelines, treemaps,
+    small-multiples figures and the PNG download.
+  - Now documented: the `waterfall` block (`colors.increase`/`decrease`/`total`, `connectors`,
+    `connectorColor`), `category_order`, table `collapsible.control`, `category_colors` on
+    waterfalls, and the dumbbell gap label's default of 1 decimal place.
 
 ### Changed
 - `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while

@@ -1,5 +1,5 @@
-// The single contract for one chart. The ajv JSON-schema (schema.ts) and the engine
-// both derive from this. One chart = one spec (no figure/tracker/nav wrapper).
+// The single contract for one chart. The ajv JSON-schema (schema.ts) is kept in step with this by
+// hand (nothing generates either from the other). One chart = one spec (no figure/tracker/nav wrapper).
 //
 // Ported and reduced from the AI Labor Market Tracker's chart-block schema
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md), which supported `line` only. `chartType`
@@ -81,7 +81,8 @@ export type HatchChar = "/" | "\\" | "|" | "-" | "+" | "x";
  *  `label` (see XAxisMarker/YAxisMarker/PointCallout `label`). Absent → falls back to the
  *  chart's value-axis tick format (yAxis markers, points) or the raw x string (xAxis markers). */
 export interface ValueFormat {
-  /** Fixed decimal places. Default 2. */
+  /** Fixed decimal places. The default depends on the reader: 2 for an annotation's `{value}`,
+   *  1 for a dumbbell's gap label (marks/dumbbell.ts), 0 on a treemap. */
   decimals?: number;
   /** Text prepended to the formatted number. */
   prefix?: string;
@@ -260,8 +261,9 @@ export interface SeriesStyle {
  *  independent and paint in list order, so several regions may cover one series with different
  *  tints — overlapping fills deliberately compound their opacity.
  *
- *  The baseline is zero when zero lies inside the resolved y-domain, else the nearer domain edge,
- *  so a fill never leaves the frame. `side` always keys off ZERO, never off that clamped baseline. */
+ *  The fill runs to `baseline` (default 0), drawn clamped into the resolved y-domain so a fill never
+ *  leaves the frame. `side` is measured against `baseline` as written, never against zero or that
+ *  clamped edge (marks/line.ts). */
 export interface ShadeRegion {
   /** Series to fill under. Omitted → every in-scope series gets its own region, each in its own color. */
   series?: string;
@@ -475,9 +477,9 @@ export interface SmallMultiplesConfig {
 export interface ColumnMap {
   /** Column holding the x value (any xAxisType). Default "time". */
   x?: string;
-  /** Dumbbell charts: the categorical axis column (income group, etc.). A synonym for `x` — the
-   *  dumbbell's categorical axis IS the engine's x/y band, so `category` resolves onto the same
-   *  role bars read via `x`. `x` still works; `category` wins when both are set. */
+  /** A synonym for `x`, named for the dumbbell's categorical axis (income group, etc.) but read on
+   *  every chart type: `resolveColumns` (columns.ts) resolves it onto the x role whatever the
+   *  chartType. `category` wins when both are set. A timeline or treemap rejects it. */
   category?: string;
   /** Column holding the numeric value. Default "value". */
   value?: string;
@@ -672,8 +674,8 @@ export interface ChartSpec {
    *  or a list in the axis' grammar (`"2001"`, `"2001-01-01"`, `"2001Q1"`, a number). Thinned to
    *  every k-th value when the labels would overlap. Absent → the axis picks its own ticks. */
   x_ticks?: "data" | Array<string | number>;
-  /** Dumbbell charts: category render order along the categorical axis — a synonym for `x_order`
-   *  (order-only, never filters). `category_order` wins when both are set. See `categoryOrderFor`. */
+  /** A synonym for `x_order` (order-only, never filters), named for the dumbbell's categorical axis
+   *  but read wherever `x_order` is. `category_order` wins when both are set. See `categoryOrderFor`. */
   category_order?: string[];
   /** Categorical x: raw category value → display label, used in the hover CARD's header
    *  (e.g. "1" → "1st Decile"). Lets that card read more verbosely than the compact axis ticks.
@@ -747,7 +749,8 @@ export interface ChartSpec {
    *  to "horizontal" (see dumbbell-orientation.ts). */
   orientation?: "vertical" | "horizontal";
   /** In-bar value labels. `decimals` fixes the label precision; omitted ⇒ the minimum precision
-   *  the data needs, capped at 2 (so raw floats don't print 15 digits). */
+   *  the data needs, capped at 2 (so raw floats don't print 15 digits). `signed` is accepted and
+   *  read by nothing. */
   valueLabels?: { show?: boolean; signed?: boolean; decimals?: number };
   /** Stacked-bar display options. */
   barStack?: {
@@ -764,6 +767,7 @@ export interface ChartSpec {
     netDisplay?: "auto" | "text" | "dot" | "none";
     /** Monochrome override: render all segments using shades of one base color. */
     mono?: { base: ColorRef };
+    /** Accepted and read by nothing: the net label it coloured is gone. */
     netLabelColor?: "white" | "black";
     /** Normalize each bar to 100 % (0–1 scale). */
     normalize?: boolean;

@@ -72,12 +72,15 @@ export function flattenOverWhite(color: string, opacity: number): string {
 }
 
 /**
- * The swatch tints for a `shading` region — one per fill it will actually paint, in series order.
+ * The swatch tints for a `shading` region, in series order: one per series the region COVERS, which
+ * is not always one per fill it paints.
  *
  * A region with an explicit `color` paints that one color. Otherwise it takes its SERIES' color, and
- * a region naming no series paints one fill per in-scope series, each in that series' color — so on
- * a three-series chart this returns three tints, and the row is keyed by all three rather than by
- * whichever happened to be first.
+ * a region naming no series covers every in-scope series, each in that series' color — so on a
+ * three-series chart this returns three tints, and the row is keyed by all three rather than by
+ * whichever happened to be first. The tints come from the chart's series, not from which fills are
+ * painted: a series whose line never reaches the region's side gets no fill (marks/line.ts skips it)
+ * but still has its tint here.
  *
  * `solid` (a rug-flagged region) keys by the block's full-strength hue; everything else keys by the
  * tint the fill paints — its hue composited over white at `fillOpacity`.
@@ -147,9 +150,12 @@ function fillRow(label: string, swatchColors: string[]): LegendItem {
 
 /**
  * The annotation-derived legend rows, in order: bands → shading → xAxis rules → yAxis rules →
- * explicit `rug.tracks`. Rows dedupe by (label, swatch shape, color, dashed) — first occurrence
- * wins — so the three recession bands of a michez-rule chart collapse to one "US recessions" row,
- * while two same-label entries drawn differently still get a row each.
+ * explicit `rug.tracks` (overlays sit between shading and xAxis). Rows merge by (label, swatch shape,
+ * dashed) — NOT by color — so the three recession bands of a michez-rule chart collapse to one
+ * "US recessions" row. Merged FILL rows keep every distinct tint (a banded chip); a merged LINE row
+ * keeps the first entry's color and the later one's is dropped. A fill and a line, or a dashed and a
+ * solid line, under one label stay separate rows. See the merge loop at the end, and CONFIG-SPEC
+ * "one row per label" (gated by test/config-spec-claims.test.ts).
  *
  * Rows are interactive in their OWN selection dimension (`annotation: true`, matched through
  * `data-annotation` rather than `data-series`): hovering or pinning one lights up every chart

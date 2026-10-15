@@ -442,8 +442,12 @@ export function legendRowMarkup(icon: IconSpec, label: string): string {
  *  `XMLSerializer` -> `Image` -> `canvas.drawImage`, export-png.ts's `rasterize()` — never
  *  paints: correct on screen, invisible in the download. This draws the same row from the same
  *  `iconSvgMarkup`/`iconShapes(icon)` description, but in the SVG vocabulary a hook can safely
- *  return into that `<g>`. Position matches `drawLegend`'s own default layout (icon at the
- *  origin, label GAP=6 to its right, vertically centred in the ICON_BOX). */
+ *  return into that `<g>`. It is one line: icon at the origin, label GAP=6 to its right, baseline
+ *  near the foot of the ICON_BOX. That matches the export's default row only for a label the
+ *  export would not wrap; the default row is drawn separately (`g.tbl-icon`, label wrapped in a
+ *  right-hand column, a framed export or a portrait timeline). So a hook that returns this string
+ *  unchanged is drawn as the DEFAULT row (`exportLegendKey` in export-png.ts), and only changed
+ *  markup is placed as returned, unwrapped. */
 export function legendRowMarkupSvg(icon: IconSpec, label: string): string {
   const GAP = 6;
   const labelX = iconWidth(icon) + GAP;

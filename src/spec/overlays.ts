@@ -30,7 +30,7 @@ export function overlayDashed(o: Overlay): boolean {
 }
 
 /** True when a data-derived overlay (`method`/`column`) is fit PER SERIES (the default) rather than
- *  pooled across all series (`by: "all"`). A per-series fit is already keyed by the series' own
+ *  pooled across all series (`by: "none"`). A per-series fit is already keyed by the series' own
  *  legend color, so its overlay legend row takes the neutral tint instead — one row cannot key N
  *  colours and a concept at once. Exported (rather than re-derived at each call site) for the same
  *  reason `overlayDashed` is: engine/overlays.ts's own geometry and annotation-legend.ts's legend
