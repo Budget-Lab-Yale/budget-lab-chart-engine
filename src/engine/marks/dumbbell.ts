@@ -10,6 +10,7 @@
 import { Plot } from "../vendor";
 import { TBL } from "../theme";
 import { resolveColor } from "../palette";
+import { minMax } from "../util";
 import { ownValue } from "../../spec/own-key";
 import { isHorizontalDumbbell } from "../../spec/dumbbell-orientation";
 import {
@@ -157,7 +158,8 @@ export function buildDumbbellMarks(
             Number.isFinite(d._y as number),
         )
         .map((d) => d._y as number);
-      return { cat, lo: vals.length ? Math.min(...vals) : 0, hi: vals.length ? Math.max(...vals) : 0, n: vals.length };
+      const [lo, hi] = vals.length ? minMax(vals) : [0, 0];
+      return { cat, lo, hi, n: vals.length };
     })
     .filter((c) => c.n >= 2 && c.lo !== c.hi);
 

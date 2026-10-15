@@ -28,6 +28,28 @@ export function withoutRepeatedOrderEntries(spec: ChartSpec): ChartSpec {
   return out ?? spec;
 }
 
+/** `[Math.min(...values), Math.max(...values)]` without the spread. A spread passes every element
+ *  as a call argument, and past roughly 125k of them V8 throws RangeError (call stack overflow), so
+ *  a histogram of microdata or a long line chart with CI bounds failed to render (B7). Use this, not
+ *  a spread, for any list whose length grows with the data.
+ *
+ *  The semantics are Math.min/max's EXACTLY, not d3.min/max's, so every call site keeps its empty
+ *  and NaN behaviour: an empty list gives `[Infinity, -Infinity]`; any NaN (after the same ToNumber
+ *  coercion Math.min applies, so `undefined` counts as NaN and `null` as 0) makes both NaN; and -0
+ *  sorts below +0, so `[-0, 0]` gives `[-0, 0]`. d3.min/max instead skip NaN and return undefined
+ *  for an empty list. `Math.min(a, ...xs)` is `Math.min(a, minMax(xs)[0])`. */
+export function minMax(values: Iterable<number>): [number, number] {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const raw of values) {
+    const v = +raw;
+    if (v !== v) return [NaN, NaN];
+    if (v < lo || (v === 0 && lo === 0 && Object.is(v, -0))) lo = v;
+    if (v > hi || (v === 0 && hi === 0 && Object.is(hi, -0))) hi = v;
+  }
+  return [lo, hi];
+}
+
 /** HTML-escape a value for safe interpolation into innerHTML (tooltip/legend). */
 export function escapeHtml(s: unknown): string {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>

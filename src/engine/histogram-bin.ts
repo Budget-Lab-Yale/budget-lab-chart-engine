@@ -1,6 +1,7 @@
 // Pure, deterministic histogram binning: thresholds + aggregation + normalization. No DOM, no Plot,
 // no Date.now/random. Operates on already-parsed numeric x (temporal callers pass epoch-ms and
 // usually explicit `thresholds` from calendarEdges/temporal helpers).
+import { minMax } from "./util";
 
 export interface BinnedRow { series: string; _x0: number; _x1: number; _y: number; _facet?: string }
 export interface BinInput { series: string; x: number; weight?: number; _facet?: string }
@@ -31,7 +32,7 @@ function autoBinCount(values: number[]): number {
 
 export function computeThresholds(values: number[], spec: BinSpec): number[] {
   if (spec.thresholds && spec.thresholds.length >= 2) return spec.thresholds;
-  let [min, max] = spec.domain ?? [Math.min(...values), Math.max(...values)];
+  let [min, max] = spec.domain ?? minMax(values);
   if (!Number.isFinite(min) || !Number.isFinite(max)) { min = 0; max = 1; }
   if (max <= min) return [min, min + 1]; // zero-range → single unit bin
   const width = spec.binWidth != null && spec.binWidth > 0
@@ -88,7 +89,7 @@ export function temporalThresholds(
   valuesMs: number[], binWidth: number | string | undefined, bins: number | undefined,
   domain: [number, number] | undefined,
 ): number[] {
-  const [min, max] = domain ?? [Math.min(...valuesMs), Math.max(...valuesMs)];
+  const [min, max] = domain ?? minMax(valuesMs);
   if (typeof binWidth === "string") {
     if (["day", "week", "month", "quarter", "year"].includes(binWidth)) {
       return calendarEdges(min, max, binWidth as "day");

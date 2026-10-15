@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ## [Unreleased]
 
 ### Fixed
+- Large data: a histogram of more than about 125,000 observations, or a numeric- or temporal-x
+  chart whose rows (with a line chart's CI bounds) pass about 125,000 values, now renders. It threw
+  `RangeError: Maximum call stack size exceeded`. Standalone and small-multiples both.
 - Small multiples with a categorical x-axis, line marks and a legend: the hover cursor no longer
   drops out when the pointer is within a few pixels of a line. The invisible click targets that let
   a click on a line pin its series were stacked above the hover area instead of below it.

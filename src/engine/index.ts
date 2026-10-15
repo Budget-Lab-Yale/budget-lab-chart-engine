@@ -41,7 +41,7 @@ import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers, MarkContext } from "./marks/index";
 import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, markerSymbolForSeries } from "./theme";
-import { resolveValueAffixes, isTruthyFlag, formatNumericX, normalizeSpec } from "./util";
+import { resolveValueAffixes, isTruthyFlag, formatNumericX, normalizeSpec, minMax } from "./util";
 import { buildAnnotationLegendItems } from "./annotation-legend";
 import { type SeriesHatch } from "./hatch";
 import { rugAllowance } from "../spec/rug";
@@ -898,7 +898,7 @@ function assemblePaneResult(
     )
     .filter((v): v is number => Number.isFinite(v as number));
   const xExtent: [number, number] | undefined = xExtentVals.length
-    ? [Math.min(...xExtentVals), Math.max(...xExtentVals)]
+    ? minMax(xExtentVals)
     : undefined;
 
   // Y-axis: fold CI band bounds into the computed range when present, plus any horizontal
@@ -1064,10 +1064,10 @@ function assemblePaneResult(
       };
       if (finite.length) {
         if (reversed) {
-          const dataMin = Math.min(...finite);
+          const dataMin = minMax(finite)[0];
           if (dataMin < yMax) yMax = widen(dataMin, Math.floor, (m) => m <= dataMin);
         } else {
-          const dataMax = Math.max(...finite);
+          const dataMax = minMax(finite)[1];
           if (dataMax > yMax) yMax = widen(dataMax, Math.ceil, (m) => m >= dataMax);
         }
       }
