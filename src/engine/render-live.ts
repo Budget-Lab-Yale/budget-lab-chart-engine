@@ -44,7 +44,7 @@ import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import { RUG_CLASS } from "./rug.js";
-import { CROSSHAIR_HIT_SELECTOR } from "./crosshair.js";
+import { CROSSHAIR_HIT_SELECTOR } from "./hover-classes.js";
 import { resolveColor } from "./palette.js";
 import { resolveTooltipIcons, type IconSpec } from "./icon.js";
 import {
@@ -330,9 +330,11 @@ function rugStripTop(svgEl: SVGSVGElement): number | null {
  * carry a ~14px stroke with `pointer-events: stroke`, so the cursor is hit-tested
  * within ~7px of the line.
  *
- * Z-order: the crosshair appends its `.tbl-crosshair-hit` overlay LAST
- * (pointer-events:all, topmost) so hover works. We insert each hit-path BELOW that
- * overlay (before the first `.tbl-crosshair-hit`). The click handler resolves the series
+ * Z-order: the crosshair appends its hover overlay LAST (pointer-events:all, topmost) so hover
+ * works. We insert each hit-path BELOW that overlay (before the first `CROSSHAIR_HIT_SELECTOR`
+ * match, so every family's overlay counts: a categorical-line pane's is `.tbl-catline-hit`, and a
+ * list without it appended the hit-paths ABOVE it, where they took the pointer within ~7px of
+ * every line and the overlay's pointerleave cleared the hover). The click handler resolves the series
  * via `elementsFromPoint` (the whole stack, not the event target), so it pierces the
  * transparent overlay and finds the fat hit-path's `data-series`. The hover (pointermove
  * on the overlay) is unaffected because the overlay stays on top.
@@ -347,7 +349,7 @@ function rugStripTop(svgEl: SVGSVGElement): number | null {
  */
 function addLineHitPaths(svgEl: SVGSVGElement): void {
   const NS = "http://www.w3.org/2000/svg";
-  const overlay = svgEl.querySelector(".tbl-crosshair-hit");
+  const overlay = svgEl.querySelector(CROSSHAIR_HIT_SELECTOR);
   // A per-series `method`/`column` overlay on a line chart lands in this same
   // `g[aria-label="line"]` namespace (marks/overlay.ts): Plot.line wraps it in its own
   // `g[aria-label="line"]`, nesting the mark's `g.tbl-overlay-line` INSIDE that — so the base

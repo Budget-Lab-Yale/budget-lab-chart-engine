@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ## [Unreleased]
 
+### Fixed
+- Small multiples with a categorical x-axis, line marks and a legend: the hover cursor no longer
+  drops out when the pointer is within a few pixels of a line. The invisible click targets that let
+  a click on a line pin its series were stacked above the hover area instead of below it.
+- Categorical-x line and area hover with multi-word categories whose axis labels wrap onto two
+  lines: the card now shows the category and its values (it showed the two lines run together and
+  no values), and the coordinated cursor draws on every pane (it drew nothing).
+
 ### Removed
 - From the package entry: the `FacetInfo` type and `renderPane`'s fifth (`facetInfo`) parameter,
   the dormant shared-mode Plot-faceting path they drove; `render()`, a dispatcher nothing in the

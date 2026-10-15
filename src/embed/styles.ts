@@ -15,6 +15,17 @@
 
 import { TOKENS_CSS } from "../theme/tokens";
 import { ICON_BOX } from "../engine/icon";
+import { CROSSHAIR_HIT_CLASSES } from "../engine/hover-classes";
+
+/** The click-to-select cursor rule's targets: the marks plus every hover overlay, from the one
+ *  list crosshair.ts appends (a hand-kept list here had dropped two of the four). */
+const SELECTABLE_CURSOR_SELECTOR = [".figure-canvas", ".figure-grid"]
+  .flatMap((scope) =>
+    ["[data-series]", ...CROSSHAIR_HIT_CLASSES.map((c) => `.${c}`)].map(
+      (target) => `.figure-card.is-selectable ${scope} svg ${target}`,
+    ),
+  )
+  .join(",\n");
 
 // Color custom properties (--tbl-navy, --tbl-text-*, etc.) come from TOKENS_CSS, generated
 // verbatim from the Style-Guide palette so the HTML/CSS matches the SVG side exactly. Only
@@ -501,12 +512,7 @@ body {
  * marks, so its cursor wins where they overlap; give it the same pointer cursor so the
  * affordance is consistent across the whole plot when selection is on.
  * ========================================================================= */
-.figure-card.is-selectable .figure-canvas svg [data-series],
-.figure-card.is-selectable .figure-canvas svg .tbl-crosshair-hit,
-.figure-card.is-selectable .figure-canvas svg .tbl-band-crosshair-hit,
-.figure-card.is-selectable .figure-grid svg [data-series],
-.figure-card.is-selectable .figure-grid svg .tbl-crosshair-hit,
-.figure-card.is-selectable .figure-grid svg .tbl-band-crosshair-hit {
+${SELECTABLE_CURSOR_SELECTOR} {
   cursor: pointer;
 }
 

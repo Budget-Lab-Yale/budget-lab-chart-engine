@@ -1728,13 +1728,9 @@ function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null 
   return readLinearScale(svgEl, "y");
 }
 
-/** Every transparent hover hit-rect this module appends, in one selector. Exported because a
- *  caller that needs to bound the hover area (render-live clamps it above the x-axis rug strip)
- *  must reach ALL of them — the per-chart-type attach functions each add their own, and a partial
- *  list silently leaves one chart type unbounded. Keep in sync with the `hit.classList.add` calls
- *  below. */
-export const CROSSHAIR_HIT_SELECTOR =
-  ".tbl-crosshair-hit, .tbl-band-crosshair-hit, .tbl-hist-hover-hit, .tbl-catline-hit";
+/** Every transparent hover hit-rect this module appends, in one selector. Re-exported from the
+ *  leaf `hover-classes.ts` (see there) for the callers that already import it from here. */
+export { CROSSHAIR_HIT_CLASSES, CROSSHAIR_HIT_SELECTOR } from "./hover-classes";
 
 const COORD_NS = "http://www.w3.org/2000/svg";
 /** Dark text for value labels on bars/stacked + the active x-axis value (matches bar value labels). */
@@ -2819,8 +2815,26 @@ export function attachSecondaryBandCursor(
 // helpers. The hovered x is keyed by the category string, exactly like the band path.
 
 /** Read the categorical x-axis label centers (one row of labels below the plot): category → cx
- *  in SVG user coords. Screen-space measurement; empty without layout (jsdom). */
-function readCategoryCentersFromAxis(svgEl: SVGSVGElement, plotBottom: number): Array<{ category: string; cx: number }> {
+ *  in SVG user coords. Screen-space measurement; empty without layout (jsdom).
+ *
+ *  A label's text is mapped back to one of `categories` (the rows' `_xc` values), because the
+ *  label is not always the category verbatim: a wrapped label is two `<tspan>`s and `textContent`
+ *  joins them with no space ("Lowest incomehouseholds"), which matched no row, so the card listed
+ *  no values and a coordinated pane drew nothing. An exact match wins; otherwise the comparison
+ *  ignores whitespace, as `findAxisLabelBox` does. Text that matches no category is kept as read. */
+function readCategoryCentersFromAxis(
+  svgEl: SVGSVGElement,
+  plotBottom: number,
+  categories: ReadonlyArray<string | undefined>,
+): Array<{ category: string; cx: number }> {
+  const squash = (s: string): string => s.replace(/\s+/g, "");
+  const exact = new Set<string>();
+  const bySquashed = new Map<string, string>();
+  for (const c of categories) {
+    if (!c) continue;
+    exact.add(c);
+    if (!bySquashed.has(squash(c))) bySquashed.set(squash(c), c);
+  }
   const svgRect = svgEl.getBoundingClientRect();
   if (!svgRect.width || !svgRect.height) return [];
   const vb = svgEl.viewBox?.baseVal;
@@ -2835,7 +2849,8 @@ function readCategoryCentersFromAxis(svgEl: SVGSVGElement, plotBottom: number): 
     const r = t.getBoundingClientRect();
     if (!r.width) continue;
     if ((r.top - svgRect.top) * sy < plotBottom - 2) continue; // x-axis labels sit below the plot
-    const category = (t.textContent ?? "").trim();
+    const text = (t.textContent ?? "").trim();
+    const category = exact.has(text) ? text : (bySquashed.get(squash(text)) ?? text);
     if (!category || seen.has(category)) continue;
     seen.add(category);
     out.push({ category, cx: ((r.left + r.right) / 2 - svgRect.left) * sx });
@@ -3091,7 +3106,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     if (!centers)
       centers = opts.centersFromMarks
         ? readCategoryCentersFromMarks(svgEl, horizontal ? "y" : "x")
-        : readCategoryCentersFromAxis(svgEl, plotBottom);
+        : readCategoryCentersFromAxis(svgEl, plotBottom, opts.rows.map((r) => r._xc));
     if (!centers.length) return;
     // Resolve the category by the cursor's position ALONG the category axis (y for horizontal).
     const svgCoord = horizontal
@@ -3215,7 +3230,7 @@ export function attachSecondaryCategoricalLineCursor(
     if (!centers)
       centers = opts.centersFromMarks
         ? readCategoryCentersFromMarks(svgEl, horizontal ? "y" : "x")
-        : readCategoryCentersFromAxis(svgEl, mt + plotH);
+        : readCategoryCentersFromAxis(svgEl, mt + plotH, opts.rows.map((r) => r._xc));
     const c = centers.find((x) => x.category === category);
     const vals = valByCat.get(category);
     if (!c || !vals) { g.setAttribute("opacity", "0"); return; }
