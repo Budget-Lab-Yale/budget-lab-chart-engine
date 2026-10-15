@@ -1319,7 +1319,7 @@ no callback wired through JavaScript at mount time.
 |---|---|---|---|
 | Hover | `onHover` | `attachBandCrosshair` only — categorical bar/stacked band crosshairs, standalone and faceted. **Not** wired for line, scatter, histogram, dot-plot, dumbbell, categorical-line, or treemap charts; those report nothing, which is not the same as "no hover occurred." | Fires on every `pointermove`, and once more with `null` when the hover ends: on pointer-leave, and when a redraw (a resize, or a title-selector reselect) or the mount's teardown ends the hovered chart's wiring under a still pointer. (The area click-to-restack also redraws, but an area chart has no `onHover`.) Consumers wanting less than that should debounce/throttle themselves. |
 | Render | `onRender` | Once per mount, once per width-driven resize, once per title-selector reselect, and once per area-chart click-to-restack (a reselect that drops a pinned series from an area chart restacks it too, firing `"reselect"` then `"restack"`). `ctx.phase` is `"mount" \| "resize" \| "reselect" \| "restack"`. A small-multiples figure fires once **per pane**. | **The `"mount"` phase is asynchronous** — it fires one microtask after `mountChart()` returns, so a consumer's `onRender` cannot itself throw back into `mountChart()`'s caller. `"resize"`/`"reselect"`/`"restack"` fire synchronously, inside the redraw that caused them. A mount torn down before that microtask runs never fires it at all. `ctx.svg` is always the svg **on screen** when the callback runs: a re-render that lands inside that microtask gap (a title-selector change made immediately after `mountChart()` returns) fires `"reselect"` first, and the `"mount"` call that follows reports the new svg rather than the superseded one. |
-| Legend select | `onLegendSelect` | Any chart with a legend. Reports the full active/dimmed series set. | Fires on a pin (click), **and also on hover, focus, blur, and the reset button** — issue #30's own gloss for this is "pin/**dim**", so hover-firing is intended, not a bug. A consumer that only cares about pins should debounce or de-duplicate. Pins survive the mount's own redraws (a resize, a title-selector reselect). A redraw whose legend no longer has a pinned row drops that pin and fires once with the active set that remains, even when that redraw's `onRender` throws. |
+| Legend select | `onLegendSelect` | Any chart with a legend. Reports the full active/dimmed series set. | Fires on a pin (click), **and also on hover, focus, blur, and the reset button** — issue #30's own gloss for this is "pin/**dim**", so hover-firing is intended, not a bug. A consumer that only cares about pins should debounce or de-duplicate. Pins survive the mount's own redraws (a resize, a title-selector reselect). A redraw whose legend no longer has a pinned row drops that pin and fires once with the active set that remains, even when that redraw's `onRender` throws, unless that `onRender` tore the mount down. |
 
 **`onHover`'s payload** is `{ category, series, values }`, plus `facet` in a small-multiples pane
 and `section` on a chart with `columns.section` (or a horizontal chart's `columns.facet`, whose
@@ -1331,6 +1331,20 @@ their `x_labels` / `section_labels` display names. A chart without sections has 
 `mountChart`.** A published figure has no host callback to gate on, so this is what lets a page
 observe it at all — but it is also a real behavioural change on every categorical-chart hover for
 an existing embedder that mounts charts today and has never looked at these events.
+
+**A torn-down mount fires nothing further.** Once the teardown `mountChart` returned has been
+called, from anywhere, including inside one of these callbacks or `onSelect`, the mount fires no
+`onHover`, `onRender`, `onLegendSelect` or `onSelect` and none of their bubbling events. A callback
+and its event are one notification: a teardown from inside a callback withholds that callback's own
+`tbl-*` / `tbl-title-select` event too. The one exception is the end of a hover the teardown itself
+causes: with the pointer on the chart, the teardown sends `onHover(null)` and its bubbling
+`tbl-hover` with `detail: null`, both, including when it was called from inside another callback.
+Teardown leaves the card on the page, so this covers a click on its legend or title selector too.
+A teardown from inside a hook (`tickLabel`, `afterRender` or `legendKey` during a redraw,
+`tooltip` during a hover) or from inside `onHover` stops the redraw or hover where it is: nothing
+further is drawn and no hover card is shown. After `tickLabel` or `afterRender` the previous chart
+stays; after `legendKey` the new chart is already in place, without its legend.
+`test/live-lifecycle.test.ts` and `test/hover-detach.test.ts` gate it.
 
 #### `tooltipContainer`
 

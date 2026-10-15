@@ -223,10 +223,44 @@ export interface MountOptions {
 /** Fire `type`'s host callback (if any) then a bubbling CustomEvent of the same name from `card`,
  *  with the same `detail` — the `tbl-title-select` pattern (below), generalised for `onHover` /
  *  `onRender` / `onLegendSelect`, each of which needs the identical callback-then-bubbling-event
- *  shape at more than one call site. */
-function notify<T>(card: HTMLElement, type: string, detail: T, cb?: (detail: T) => void): void {
+ *  shape at more than one call site.
+ *
+ *  A disposed mount notifies nothing: `isDisposed` is read before the callback, and again between
+ *  the callback and the event, since the callback itself may tear the mount down (the two are ONE
+ *  notification). The single exception is `allowDisposed`, which only the teardown's own
+ *  hover-ending null passes (hoverNotifierFor); it is delivered whole, callback and event. */
+function notify<T>(
+  card: HTMLElement,
+  type: string,
+  detail: T,
+  cb: ((detail: T) => void) | undefined,
+  isDisposed: () => boolean,
+  allowDisposed = false,
+): void {
+  const gate = allowDisposed ? () => false : isDisposed;
+  if (gate()) return;
   cb?.(detail);
+  if (gate()) return;
   card.dispatchEvent(new CustomEvent(type, { detail, bubbles: true }));
+}
+
+/** The mount's `onHover` / `tbl-hover` notifier. Unchanged while the mount is live. Once it is
+ *  disposed, the only thing it passes on is ONE null ending a hover the host was told about: the
+ *  teardown's own. runHoverDetaches runs the detaches one at a time, so while the first sends that
+ *  null a sibling pane's hover is still wired, and a hover the consumer starts there from inside
+ *  the callback (and the null its own detach then sends) must not reach the host. */
+function hoverNotifierFor(
+  card: HTMLElement,
+  onHover: ((ctx: BandHoverCtx | null) => void) | undefined,
+  isDisposed: () => boolean,
+): (ctx: BandHoverCtx | null) => void {
+  let hostHovering = false;
+  return (ctx) => {
+    const teardownEnd = isDisposed() && ctx === null && hostHovering;
+    if (isDisposed() && !teardownEnd) return;
+    hostHovering = ctx !== null;
+    notify(card, "tbl-hover", ctx, onHover, isDisposed, teardownEnd);
+  };
 }
 
 /** Run, then forget, every hover detach handle a draw collected (crosshair.ts `HoverDetach`) — before
@@ -263,6 +297,15 @@ function pinsDropped(carried: CarriedLegend | null, handle: LegendHandle | null)
   if (!carried) return false;
   return pinCount(carried.state.pins) > (handle ? pinCount(handle.state().pins) : 0);
 }
+/** A failed draw's message, as text: it can carry a data cell or a host hook's words, and a
+ *  non-Error throw has no `.message`. */
+function drawErrorNode(doc: Document, e: unknown): HTMLElement {
+  const el = doc.createElement("div");
+  el.className = "figure-error";
+  const message = (e as { message?: unknown } | null)?.message;
+  el.textContent = typeof message === "string" ? message : String(e);
+  return el;
+}
 function pinCount(p: LegendPins): number {
   return p.series.length + p.annotations.length + p.shapes.length;
 }
@@ -278,13 +321,23 @@ function attachCause(err: unknown, later: unknown): void {
 /** The tail of every redraw that rebuilt a legend: fire onRender, then report a dropped pin, then
  *  hand keyboard focus back. A throwing onRender must not cost the host its drop notification, so its
  *  error is CARRIED past the other two steps and rethrown unwrapped, with a throw from the
- *  notification attached as its `.cause`. */
-function finishRedraw(fireRender: () => void, reportDrop: (() => void) | null, restoreFocus: () => void): void {
+ *  notification attached as its `.cause`. A host that tore the mount down from onRender gets
+ *  neither of the other two; one that tore it down from the drop report gets no focus hand-back. */
+function finishRedraw(
+  fireRender: () => void,
+  reportDrop: (() => void) | null,
+  restoreFocus: () => void,
+  isDisposed: () => boolean,
+): void {
   let first: { e: unknown } | null = null;
   try {
     fireRender();
   } catch (e) {
     first = { e };
+  }
+  if (isDisposed()) {
+    if (first) throw first.e;
+    return;
   }
   if (reportDrop) {
     try {
@@ -294,7 +347,8 @@ function finishRedraw(fireRender: () => void, reportDrop: (() => void) | null, r
       else first = { e };
     }
   }
-  restoreFocus();
+  // The drop report reaches onLegendSelect, which may tear the mount down too.
+  if (!isDisposed()) restoreFocus();
   if (first) throw first.e;
 }
 
@@ -828,7 +882,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // onHover: forwarded into attachBandCrosshair below as the crosshair's own notifier — see
   // BandCrosshairOptions.onHover. Fires the host callback then the bubbling `tbl-hover` event,
   // from whatever the crosshair already resolved (never re-derived here).
-  const hoverNotifier = (ctx: BandHoverCtx | null): void => notify(card, "tbl-hover", ctx, opts.onHover);
+  const hoverNotifier = hoverNotifierFor(card, opts.onHover, () => disposed);
   // Set by the returned teardown, checked by the deferred "mount" onRender dispatch below — a
   // synchronous mount-then-teardown (React StrictMode's dev double-invoke, or any fast unmount)
   // would otherwise fire onRender for a chart that has already been disposed. "Disposed" is a
@@ -862,6 +916,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           onSelect: opts.onSelect,
           seriesColors: spec.series_colors,
           afterChange: () => requestAccentRedraw?.(),
+          isDisposed: () => disposed,
         }
       : undefined,
   );
@@ -894,6 +949,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   // --- chart controller: re-render at the container width on resize ---
   let lastWidth = -1;
+  // The card width the last successful draw was given: where a redraw falls back to when the card
+  // reports no width of its own (no layout, or a hidden tab). Not `lastWidth`, which is the CHART
+  // width — beside a right legend, the legend column narrower.
+  let lastOuterWidth = 0;
   let currentOverlay: OverlayEl | null = null;
   // Every hover attachment of the current draw (treemap's included). The card sits outside the svg,
   // so a redraw or unmount under a still pointer would otherwise strand it (Ruling 21; B2).
@@ -917,6 +976,15 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let currentSeriesNames: string[] = [];
 
 
+  /** Take down the right-legend column (its legend with it) and put the canvas back in the card. */
+  const dropRightColumn = (): void => {
+    if (!rightLegendSlot) return;
+    const bodyWrapper = rightLegendSlot.parentElement as HTMLElement;
+    card.insertBefore(canvasScroll, bodyWrapper);
+    bodyWrapper.remove();
+    rightLegendSlot = null;
+  };
+
   /** The width the chart is drawn at on a card `outerWidth` wide with the legend at `legendPos`. */
   const chartTarget = (outerWidth: number, legendPos: "top" | "right"): number => {
     // For right-legend, the chart width is computed from the OUTER card width (stable),
@@ -939,7 +1007,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   ): void => {
     const target = chartTarget(outerWidth, legendPos);
     if (target === lastWidth && legendPos === currentLegendPos) return;
-    lastWidth = target;
     runHoverDetaches(hoverDetaches);
     // The detach can end a hover, and a consumer may unmount from that onHover(null) / tbl-hover,
     // synchronously. Drawing on would wire fresh hover onto a disposed mount.
@@ -971,10 +1038,29 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         ...(accentColor ? { accentColor } : {}),
       });
     } catch (e) {
-      canvas.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
+      if (disposed) return; // a hook (tickLabel, valueLabel, afterRender) tore the mount down
+      canvas.replaceChildren(drawErrorNode(doc, e));
       currentSvg = null;
+      // The last good draw's y-axis labels and legend describe a chart that is gone; left up, the
+      // labels float over the message and the legend still pins against a detached svg. Its pins
+      // are kept (currentLegendHandle) so a recovered draw carries them.
+      currentOverlay?._ro?.disconnect();
+      currentOverlay?.remove();
+      currentOverlay = null;
+      legendSlot.replaceChildren();
+      dropRightColumn();
+      card.classList.remove("is-selectable");
+      // Invalidated, not merely left uncommitted: a resize back to the last GOOD width must not be
+      // skipped as unchanged while the error is on screen. Any next width retries.
+      lastWidth = -1;
       return;
     }
+    // renderChart runs the user's hooks (tickLabel, valueLabel, afterRender) synchronously; one may
+    // have torn the mount down. Stop before touching the card again. Same after renderLegend below
+    // (legendKey).
+    if (disposed) return;
+    lastWidth = target;
+    lastOuterWidth = outerWidth;
     const {
       svg, legendItems, seriesKeyRows, seriesLabels, seriesOrder, colors, valueAffixes,
       xAxisTitle, dataInScope, tooltipXParse, tooltipXFormat, legendVisualOrder, netMode,
@@ -1006,6 +1092,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const chromePills = resolveValuePills(spec, netMode, false, segmentLabelsDropped ?? false);
     const onHighlight = (active: Set<string>): void => {
       pillDriver?.setActive(active);
+      // teardown() leaves the legend on the page; a disposed mount restacks and reports nothing.
+      if (disposed) return;
       // Area click-to-restack: pinned series move to the BOTTOM of the stack (in click order) so a
       // user can read them against zero; unpinning restores the default order. Driven off PINS
       // (not hover), so this only fires on an actual selection change. Re-renders the whole chart
@@ -1035,20 +1123,24 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           // its `.cause` when that slot is free. Nothing is swallowed.
           let renderError: { e: unknown } | null = null;
           try {
-            draw(card.clientWidth || target, currentLegendPos ?? legendPos, "restack");
+            draw(card.clientWidth || lastOuterWidth, currentLegendPos ?? legendPos, "restack");
           } catch (e) {
             renderError = { e };
           } finally {
             suppressRestack = false;
           }
           if (renderError) {
-            try {
-              notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
-            } catch (later) {
-              attachCause(renderError.e, later);
+            if (!disposed) {
+              try {
+                notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect, () => disposed);
+              } catch (later) {
+                attachCause(renderError.e, later);
+              }
             }
             throw renderError.e;
           }
+          // A consumer may have torn the mount down from that draw's onRender.
+          if (disposed) return;
           // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
           // Unreachable when draw() threw — the error above propagates past this point.
           const newSvg = canvas.querySelector("svg");
@@ -1059,7 +1151,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // focus/blur, or the reset button (legend.ts's applyHighlight runs onHighlight for all of
       // them; see its own comment). High-frequency: a bare mouse hover fires this, not only a
       // click, so a consumer wiring this up will likely want to debounce.
-      notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
+      notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect, () => disposed);
     };
     // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
     // legend (the color legend still drives hover-dim, which is independent of the crosshair).
@@ -1094,12 +1186,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // rebuild inserts relative to canvasScroll, which was still inside the old wrapper.
     if (rightLegendSlot) {
       const hasLegend = !!legendItems || !!(shapeLegendItems && shapeLegendItems.length);
-      if (legendPos !== "right" || !hasLegend) {
-        const bodyWrapper = rightLegendSlot.parentElement as HTMLElement;
-        card.insertBefore(canvasScroll, bodyWrapper);
-        bodyWrapper.remove();
-        rightLegendSlot = null;
-      }
+      if (legendPos !== "right" || !hasLegend) dropRightColumn();
     }
     if (legendItems || (shapeLegendItems && shapeLegendItems.length)) {
       if (legendPos === "right") {
@@ -1127,7 +1214,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           onHighlight,
           hooks: opts.hooks,
           ...shapeOpts,
+          abandoned: () => disposed,
         });
+        if (disposed) return; // legendKey tore the mount down
         // Add the vertical-layout class to the rendered legend element (use the handle's
         // element directly rather than re-querying the slot).
         legendHandle?.element.classList.add("tbl-legend--vertical");
@@ -1141,7 +1230,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           onHighlight,
           hooks: opts.hooks,
           ...shapeOpts,
+          abandoned: () => disposed,
         });
+        if (disposed) return; // legendKey tore the mount down
       }
     } else if (spec.chartType === "timeline") {
       // Drawn lanes name the categories and a vertical render may draw one track instead, so a
@@ -1521,10 +1612,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           // perfectly current svg (most of the test suite mounts exactly that way).
           queueMicrotask(() => {
             if (disposed || !currentSvg) return;
-            notify(card, "tbl-render", { svg: currentSvg, phase: "mount" as const }, opts.onRender);
+            notify(card, "tbl-render", { svg: currentSvg, phase: "mount" as const }, opts.onRender, () => disposed);
           });
         } else {
-          notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender);
+          notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender, () => disposed);
         }
       }
     };
@@ -1536,6 +1627,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       dropped ? () => onHighlight(carriedActive) : null,
       // currentLegendHandle, not legendHandle: that restack may have replaced the legend again.
       () => { if (carried?.focus) currentLegendHandle?.focus(carried.focus); },
+      () => disposed,
     );
   };
 
@@ -1597,8 +1689,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // draw() past its same-width/same-legendPos early return, mirroring the area click-to-restack
   // pattern (`lastWidth = -1` then a fresh draw() call at the current width/legendPos).
   requestAccentRedraw = () => {
+    if (disposed) return;
     lastWidth = -1;
-    draw(card.clientWidth || initialCardWidth, currentLegendPos ?? resolvedPos(), "reselect");
+    draw(card.clientWidth || lastOuterWidth || initialCardWidth, currentLegendPos ?? resolvedPos(), "reselect");
   };
 
   // Single persistent scrollLeft → translateX for the sticky y-axis overlay.
@@ -1625,6 +1718,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = null;
         const cardW = card.clientWidth;
+        // A hidden card (a collapsed tab) reports 0: drawing then would render at the minimum width
+        // and move a right legend to the top, only to undo both when shown. The observer fires
+        // again on the first non-zero width.
+        if (!cardW) return;
         const pos = specPos(cardW);
         const effectivePos: "top" | "right" =
           pos === "right" && cardW < LEGEND_RIGHT_MIN_CARD_WIDTH ? "top" : pos;
@@ -1671,6 +1768,9 @@ export interface TitleSelectorWiring {
    *  tints, but the per-pane grid isn't re-rendered — each pane is one facet's chart body, not a
    *  single accent target, and this port does not touch figure.ts. */
   afterChange?: () => void;
+  /** The owning mount's disposal state. Read on every change, because teardown can re-enter the
+   *  widget before it closes the header (its own `onHover(null)` may pick an option). */
+  isDisposed?: () => boolean;
 }
 
 /** One option's DATA for the inline-select widget below: display label + the RAW (unresolved)
@@ -1887,8 +1987,14 @@ function buildSelectorTitle(
   card: HTMLElement,
   wiring: TitleSelectorWiring,
 ): Array<() => void> {
-  const cleanups: Array<() => void> = [];
-  const { selectors, selections, onSelect, seriesColors, afterChange } = wiring;
+  // Set by the header's close (every mount's teardown calls it, last): the widget stays on the
+  // page, but a torn-down mount fires no onSelect, no tbl-title-select and no redraw. `off()` also
+  // reads the mount's own disposal, which is set FIRST: teardown's onHover(null) can pick an option
+  // before the header is closed. The close stays last so it still cleans up a popover opened then.
+  let closed = false;
+  const cleanups: Array<() => void> = [() => { closed = true; }];
+  const { selectors, selections, onSelect, seriesColors, afterChange, isDisposed } = wiring;
+  const off = (): boolean => closed || (isDisposed?.() ?? false);
   for (const seg of parseTitleTokens(title, selectors)) {
     if (seg.kind === "text") {
       h.appendChild(doc.createTextNode(seg.text));
@@ -1909,10 +2015,9 @@ function buildSelectorTitle(
     const initialActiveId = selections[key] ?? selector.options[0]?.id ?? "";
     const { el, destroy } = buildInlineSelect(doc, items, initialActiveId, (value) => {
       selections[key] = value;
-      onSelect?.({ id: key, value });
-      card.dispatchEvent(
-        new CustomEvent("tbl-title-select", { detail: { id: key, value }, bubbles: true }),
-      );
+      if (off()) return;
+      notify(card, "tbl-title-select", { id: key, value }, onSelect, off);
+      if (off()) return;
       afterChange?.();
     });
     h.appendChild(el);
@@ -2485,7 +2590,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // scatter never carried the chart-type class this replaces, so this is a fix, not just a rename.
   card.className = `figure-card x-${spec.xAxisType}`;
   // onHover: same notifier shape as mountChart's, forwarded per pane through wireFigureSvg's ctx.
-  const hoverNotifier = (ctx: BandHoverCtx | null): void => notify(card, "tbl-hover", ctx, opts.onHover);
+  const hoverNotifier = hoverNotifierFor(card, opts.onHover, () => disposed);
   // Set by the returned teardown, checked by the deferred "mount" onRender dispatch below — see
   // mountChart's identical `disposed` flag for why (a synchronous mount-then-teardown must not
   // fire onRender afterward for a chart that no longer exists).
@@ -2505,6 +2610,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           onSelect: opts.onSelect,
           seriesColors: spec.series_colors,
           afterChange: () => requestFigureRedraw?.(),
+          isDisposed: () => disposed,
         }
       : undefined,
   );
@@ -2649,10 +2755,19 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
             ...(accentColor ? { accentColor } : {}),
           });
     } catch (e) {
-      grid.innerHTML = `<div class="figure-error">${(e as Error).message}</div>`;
+      if (disposed) return; // a hook in a pane's render tore the mount down
+      grid.replaceChildren(drawErrorNode(doc, e));
       currentPaneSvgs = [];
-      return; // leave lastSig unchanged so a same-width re-render retries after a fix
+      // As mountChart's draw(): the legend goes with the panes it pinned; its pins are kept.
+      legendSlot.replaceChildren();
+      card.classList.remove("is-selectable");
+      // Invalidated, as mountChart's draw(): the failed width and the last good one both retry.
+      lastSig = "";
+      return;
     }
+    // renderFigure runs the user's hooks synchronously for every pane; one may have torn the mount
+    // down. Stop before touching the card again (as mountChart's draw(); also after renderLegend).
+    if (disposed) return;
     lastSig = sig; // commit only after a successful render
     // Explicit per-column px widths (shared mode, or variable pane_widths in either mode): the
     // panes were rendered at those widths, so the grid template must match. Else equal 1fr columns.
@@ -2683,9 +2798,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const hasFigShape = !!(fig.shapeLegendItems && fig.shapeLegendItems.length);
     const onHighlight = (active: Set<string>): void => {
       for (const d of pillDrivers) d.setActive(active);
+      if (disposed) return;
       // onLegendSelect: same "however it changed" note as mountChart's identical dispatch —
       // fires on hover/focus/blur too, not only a pin click; high-frequency, debounce-worthy.
-      notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
+      notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect, () => disposed);
     };
     const handle = fig.legendItems || hasFigShape
       ? renderLegend(legendSlot, fig.legendItems ?? [], {
@@ -2696,8 +2812,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           colorTitle: fig.colorLegendTitle,
           shapeTitle: fig.shapeLegendTitle,
           state: carried?.state,
+          abandoned: () => disposed,
         })
       : null;
+    if (disposed) return; // legendKey tore the mount down
     currentLegendHandle = handle;
     const dropped = pinsDropped(carried, handle);
     // Attach each pane's crosshair ALWAYS (single-series bar panes have no legend but still
@@ -2793,10 +2911,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
             queueMicrotask(() => {
               const live = currentPaneSvgs[i];
               if (disposed || !live) return;
-              notify(card, "tbl-render", { svg: live, phase: "mount" as const }, opts.onRender);
+              notify(card, "tbl-render", { svg: live, phase: "mount" as const }, opts.onRender, () => disposed);
             });
-          } else {
-            notify(card, "tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender);
+          } else if (!disposed) { // a consumer may tear down from an earlier pane's onRender
+            notify(card, "tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender, () => disposed);
           }
         });
       }
@@ -2806,6 +2924,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       fireRender,
       dropped ? () => onHighlight(carriedActive) : null,
       () => { if (carried?.focus) handle?.focus(carried.focus); },
+      () => disposed,
     );
   };
 
@@ -2815,6 +2934,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // On a selection change, re-render the grid so the accent tracks the active option. Reset the
   // width-keyed guard (sig is width-only) so the same-width re-render isn't skipped.
   requestFigureRedraw = () => {
+    if (disposed) return;
     lastSig = "";
     draw(card.clientWidth || initialWidth, "reselect");
   };
@@ -2827,7 +2947,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       if (resizeRaf !== null) return;
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = null;
-        draw(card.clientWidth || initialWidth, "resize");
+        // As mountChart's observer: a hidden card (width 0) waits for its first non-zero width.
+        const w = card.clientWidth;
+        if (w) draw(w, "resize");
       });
     });
     ro.observe(card);

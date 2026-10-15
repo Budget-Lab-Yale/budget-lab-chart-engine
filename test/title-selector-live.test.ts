@@ -282,12 +282,15 @@ describe("inline title selector — live DOM", () => {
     const svgBefore = container.querySelector(".figure-canvas svg");
     expect(svgBefore).not.toBeNull();
     expect(FakeResizeObserver.instances.length).toBeGreaterThan(0);
+    // A real width: a card reporting 0 (jsdom's default) is a hidden one, which is not redrawn.
+    const card = container.querySelector(".figure-card") as HTMLElement;
+    Object.defineProperty(card, "clientWidth", { value: 480, configurable: true });
     for (const inst of FakeResizeObserver.instances) inst.cb([], inst as unknown as ResizeObserver);
     await new Promise((r) => requestAnimationFrame(r));
     await new Promise((r) => requestAnimationFrame(r));
 
-    // The redraw genuinely executed: draw() rebuilt the chart SVG (card.clientWidth is 0 in
-    // jsdom, so the render width changed 720 → the 390 floor and replaceChildren swapped it)...
+    // The redraw genuinely executed: draw() rebuilt the chart SVG (the render width changed
+    // 720 → 480 and replaceChildren swapped it)...
     expect(container.querySelector(".figure-canvas svg")).not.toBe(svgBefore);
 
     // ...but the header was NOT rebuilt (buildFigureHeader runs once per mount): same button

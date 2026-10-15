@@ -46,6 +46,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `tbl-chart snapshot --baseline <path>` with no `.png` suffix: a failing compare overwrote the
   baseline with the diff image. The diff now goes to `<path>.diff.png`. When the rendered image's
   size differs from the baseline's, no diff image is written, and the message no longer says one was.
+- Live charts and small multiples, teardown from a callback: a host that tears the mount down from
+  `onRender` no longer gets a later pane's `onRender`, a dropped-pin `onLegendSelect`, or (on an
+  area chart) the restack's `onLegendSelect` and morph. A legend or title selector left on the page
+  after teardown fires no `onLegendSelect`, `onSelect` or `tbl-title-select`, and redraws nothing.
+  A teardown from inside `onHover`, `onRender`, `onLegendSelect` or `onSelect` also withholds that
+  callback's bubbling `tbl-*` event, which was still dispatched; the `onHover(null)` and `tbl-hover`
+  the teardown itself sends for a hover it ends are unchanged. A teardown from inside a hook
+  (`tickLabel`, `afterRender`, `legendKey`, `tooltip`) or `onHover` now stops the redraw or hover
+  where it is; the redraw went on to finish, rebuild the legend and fire `onRender`, and the hover
+  showed its card.
+- Live charts and small multiples, a failed render: the error message is shown as text (it was
+  parsed as HTML), and a non-`Error` throw shows its value rather than `undefined`. The legend, and
+  on a standalone chart the y-axis labels, of the last good render are removed. A standalone chart
+  retries a resize to the width that failed; it skipped it as unchanged. Both retry a resize back
+  to the last width that rendered, which they also skipped as unchanged.
+- Live charts and small multiples in a hidden container (width 0, such as a collapsed tab) are no
+  longer redrawn at the minimum width, which also moved a right legend to the top, until shown. On
+  a page with no layout, pinning an area series beside a right legend no longer narrows the chart.
+- Line charts with a single x value: the hover guide is drawn on the point (it was `x1="NaN"`), and
+  the small-multiples coordinated cursor's guide on the point rather than at the left edge.
 
 ### Changed
 - `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while

@@ -85,6 +85,7 @@ export function renderLegend(
     shapeTitle,
     hooks,
     state: carried,
+    abandoned,
   }: {
     svg?: Element;
     onHighlight?: (active: Set<string>) => void;
@@ -99,6 +100,10 @@ export function renderLegend(
      *  are applied to the legend and `svg` WITHOUT calling `onHighlight` — the caller compares
      *  `state()` with what it passed and decides what to report. */
     state?: LegendState | null;
+    /** Read once the rows are built, before the legend is attached: true when the owner was torn
+     *  down meanwhile (a `legendKey` hook can do it). Then nothing is attached and the result is
+     *  null. */
+    abandoned?: () => boolean;
   } = {},
 ): LegendHandle | null {
   const hasColor = !!items?.length;
@@ -366,6 +371,7 @@ export function renderLegend(
     legend.appendChild(shapeGroup!);
   }
 
+  if (abandoned?.()) return null;
   parent.appendChild(legend);
   if (carried) {
     const { pins: p, hovered: h } = carried;

@@ -207,7 +207,8 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): H
   }
   // The range Plot drew, which can be wider than these rows (see readScaleDomain).
   const [xMin, xMax] = readScaleDomain(svgEl, "x") ?? [xs[0]!, xs[xs.length - 1]!];
-  const xToPx = (x: number): number => ml + ((x - xMin) / (xMax - xMin)) * plotW;
+  // One x value is a zero-width domain; d3 (and so Plot) maps it to the middle of the range.
+  const xToPx = (x: number): number => ml + (xMax > xMin ? (x - xMin) / (xMax - xMin) : 0.5) * plotW;
   const pxToX = (px: number): number => xMin + ((px - ml) / plotW) * (xMax - xMin);
   const bisect = d3.bisector((d: number) => d).left;
 
@@ -1141,6 +1142,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
   const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
   const card = tooltipOwnership(tip);
   let active = false;
+  let detached = false; // set by the detach; a host callback mid-update may run it
 
   // Bar tooltips: colour each series' swatch from the bar's ACTUAL rendered fill (bar_color /
   // accent / category_colors / a waterfall's per-direction palette), not the series' base colour —
@@ -1268,6 +1270,8 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
         ...(opts.facet != null ? { facet: opts.facet } : {}),
         ...(section != null ? { section } : {}),
       });
+      // The host may have torn the chart down from inside onHover; the detach has run. Stop.
+      if (detached) return;
     }
     if (emitOnly) return;
 
@@ -1295,6 +1299,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
       ...(icons ? { icons } : {}),
       ...(opts.tooltipSection ? { tooltipSection: true, sectionLabels: opts.sectionLabels } : {}),
     });
+    if (detached) return; // hooks.tooltip tore the chart down
     tip!.innerHTML = html;
 
     const offset = 14;
@@ -1330,6 +1335,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     pointerdown: update as EventListener,
   });
   return () => {
+    detached = true;
     unlisten();
     if (active) hide(true);
     else card.release();
@@ -2408,7 +2414,8 @@ export function attachSecondaryLineCursor(
   }
   // The range Plot drew, which can be wider than these rows (see readScaleDomain).
   const [xMin, xMax] = readScaleDomain(svgEl, "x") ?? [xs[0]!, xs[xs.length - 1]!];
-  const xToPx = (x: number): number => ml + (xMax > xMin ? (x - xMin) / (xMax - xMin) : 0) * plotW;
+  // A zero-width domain (one x value) maps to the middle, as in attachCrosshair and in Plot.
+  const xToPx = (x: number): number => ml + (xMax > xMin ? (x - xMin) / (xMax - xMin) : 0.5) * plotW;
   const order =
     seriesOrder && seriesOrder.length ? seriesOrder.filter((s) => bySeries.has(s)) : [...bySeries.keys()];
 
@@ -3177,6 +3184,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
   const tip = emitOnly || opts.showTooltip === false ? null : getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
   const card = tooltipOwnership(tip);
   let active = false;
+  let detached = false; // set by the detach; hooks.tooltip mid-update may run it
   const accenter = opts.accentLabel && horizontal && hl ? labelAccenter(svgEl) : null;
   let centers: Array<{ category: string; cx: number }> | null = null;
   // Re-coloured ONCE, not per pointermove: `opts.renderedFills` is handed in already resolved and
@@ -3223,7 +3231,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
 
     if (!tip) return; // chrome.tooltip: false — guide/highlight shown, no card.
 
-    tip!.innerHTML = buildBandTooltipHtml(category, opts.rows, {
+    const html = buildBandTooltipHtml(category, opts.rows, {
       seriesLabels: opts.seriesLabels,
       seriesOrder: opts.seriesOrder,
       yFormat,
@@ -3234,6 +3242,8 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
       ...(opts.showTotal ? { isStacked: true, totalRow: "text" as const } : {}),
       ...(opts.tooltipSection ? { tooltipSection: true, sectionLabels: opts.sectionLabels } : {}),
     });
+    if (detached) return; // hooks.tooltip tore the chart down
+    tip!.innerHTML = html;
     const offset = 14;
     const win = svgEl.ownerDocument.defaultView!;
     card.show();
@@ -3261,6 +3271,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     pointerdown: update as EventListener,
   });
   return () => {
+    detached = true;
     unlisten();
     if (active) hide(true);
     else card.release();
