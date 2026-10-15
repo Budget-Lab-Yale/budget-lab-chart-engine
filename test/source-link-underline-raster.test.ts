@@ -9,23 +9,15 @@
 // If this ever fails, the fix is not to delete the assertion — it is to draw the underline as an
 // explicit <line> under each link run, which the rasterizer cannot ignore.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { existsSync } from "node:fs";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 import { PNG } from "pngjs";
-
-const HAS_BROWSER = (() => {
-  try {
-    return existsSync(chromium.executablePath());
-  } catch {
-    return false;
-  }
-})();
+import { HAS_BROWSER, launchBrowser, closeBrowser, CLOSE_HOOK_TIMEOUT_MS } from "./helpers/browser";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let browser: Browser | undefined;
-beforeAll(async () => { if (HAS_BROWSER) browser = await chromium.launch(); });
-afterAll(async () => { await browser?.close(); });
+beforeAll(async () => { if (HAS_BROWSER) browser = await launchBrowser(); });
+afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
 /** Rasterize an SVG string through the SAME path the download uses, and count dark pixels. */
 async function darkPixels(svg: string): Promise<number> {

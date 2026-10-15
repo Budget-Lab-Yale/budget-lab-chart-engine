@@ -66,6 +66,7 @@ function stacks(list: Box[], axis: "y" | "x"): Box[][] {
 describe("barStack.segmentGap, vertical", () => {
   it("opens a gap of exactly N px between adjacent segments", () => {
     for (const gap of [1, 3]) {
+      expect(stacks(boxes(gapSpec(gap)), "y").length).toBeGreaterThan(0);
       for (const stack of stacks(boxes(gapSpec(gap)), "y")) {
         expect(stack.length).toBeGreaterThan(1);
         for (let i = 0; i < stack.length - 1; i++) {
@@ -112,6 +113,7 @@ describe("barStack.segmentGap, horizontal", () => {
   it("opens the gap along the stacking axis", () => {
     const gap = 2;
     const s = horizontal({ barStack: { segmentGap: gap } });
+    expect(stacks(boxes(s), "x").length).toBeGreaterThan(0);
     for (const stack of stacks(boxes(s), "x")) {
       expect(stack.length).toBeGreaterThan(1);
       for (let i = 0; i < stack.length - 1; i++) {
@@ -174,6 +176,7 @@ describe("thin segments", () => {
 describe("segmentGap with the rest of the stacked feature set", () => {
   it("honours the gap on a 100%-normalized stack", () => {
     const s = gapSpec(2, { barStack: { normalize: true } });
+    expect(stacks(boxes(s), "y").length).toBeGreaterThan(0);
     for (const stack of stacks(boxes(s), "y")) {
       for (let i = 0; i < stack.length - 1; i++) {
         expect(stack[i + 1]!.y - (stack[i]!.y + stack[i]!.h)).toBeCloseTo(2, 5);

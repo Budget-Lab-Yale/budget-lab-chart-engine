@@ -2,8 +2,6 @@
 // Treemap live mount (spec §6): sizing at the card width with a 280px floor, re-flow on resize
 // through the ordinary draw() path, no y-axis overlay, and the per-tile hover card.
 import { describe, it, expect, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { mountChart, computeChartHeight } from "../src/engine/render-live";
 import { treemapHeight } from "../src/engine/marks/treemap";
 import { treemapAreaHeight } from "../src/engine/treemap-layout";
@@ -11,18 +9,9 @@ import { tokens } from "../src/theme/tokens";
 import { CHART_CSS } from "../src/embed/styles";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { csvFixtureReader } from "./helpers/csv";
 
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 const BLS = parseCsv("./fixtures/treemap-bls.csv");
 const FLAT_SPEC = {
   chartType: "treemap", title: "Share of total annual expenditures, 2024", xAxisType: "categorical", data: "d.csv",
@@ -195,6 +184,7 @@ describe("treemap live mount: hover", () => {
     expect(num(outline, "width")).toBeCloseTo(num(rect, "width") - 2, 6);
     expect(num(outline, "height")).toBeCloseTo(num(rect, "height") - 2, 6);
     // Dim: every other tile at 0.85, the hovered one untouched.
+    expect(tileGroups(svg).length).toBeGreaterThan(1);
     for (const other of tileGroups(svg)) {
       expect(other.getAttribute("opacity")).toBe(other === (g as unknown as SVGGElement) ? null : "0.85");
     }

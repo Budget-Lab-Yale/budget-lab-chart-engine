@@ -147,6 +147,7 @@ function agreementChecks(s: ChartSpec, rows: TidyRow[], expected: Record<string,
     const panes = Array.from(host.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
     expect(panes.length).toBe(2);
     for (const svg of panes) {
+      expect(drawnShapes(svg).size, "no shape drawn on a pane").toBeGreaterThan(0);
       for (const [shape, syms] of drawnShapes(svg)) expect([...syms], `shape ${shape}`).toEqual([legend[shape]]);
     }
   });

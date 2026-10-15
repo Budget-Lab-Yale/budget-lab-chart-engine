@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { timelineTextWidth, graphemes, WIDE_EM, EMOJI_EM } from "../src/engine/timeline-text";
 import { FIGTREE_ADVANCE, FIGTREE_CHARS, FIGTREE_FALLBACK } from "../src/engine/timeline-metrics";
-import { SCRIPT_CHARS } from "../src/engine/script-metrics";
+import { SCRIPT_ADVANCE, SCRIPT_CHARS } from "../src/engine/script-metrics";
 import { layoutTimeline, LINE_STYLE, type LayoutEvent } from "../src/engine/timeline-layout";
 
 const adv = (ch: string, w: 500 | 700): number => FIGTREE_ADVANCE[w][[...FIGTREE_CHARS].indexOf(ch)]!;
@@ -273,6 +274,21 @@ describe("per-letter Cyrillic and Greek, SCRIPT_EM for other scripts (Ruling 51)
     }
     expect(letters.length).toBeGreaterThan(80);
     for (const ch of letters) expect(table.has(ch), ch).toBe(true);
+  });
+
+  it("keeps the table's non-NFC letters as themselves, written as \\u escapes in the source", () => {
+    // An NFC-normalising editor would swap each for its canonical equivalent (U+037E for ";"),
+    // keying its advance to another character. As escapes the source has nothing to normalise.
+    const nonNfc = [...SCRIPT_CHARS]
+      .filter((ch) => ch.normalize("NFC") !== ch)
+      .map((ch) => ch.codePointAt(0)!.toString(16));
+    expect(nonNfc).toEqual([
+      "374", "37e", "387", "1f71", "1f73", "1f75", "1f77", "1f79", "1f7b", "1f7d", "1fbb", "1fbe",
+      "1fc9", "1fcb", "1fd3", "1fdb", "1fe3", "1feb", "1fee", "1fef", "1ff9", "1ffb", "1ffd",
+    ]);
+    expect([...SCRIPT_CHARS]).toHaveLength(SCRIPT_ADVANCE[500].length);
+    const src = readFileSync(new URL("../src/engine/script-metrics.ts", import.meta.url), "utf8");
+    expect(src).toMatch(/^export const SCRIPT_CHARS = "[\x20-\x7e]+";$/m);
   });
 
   it("leaves Latin Extended-E at the Latin letter mean", () => {

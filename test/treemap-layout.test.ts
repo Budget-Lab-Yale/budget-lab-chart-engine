@@ -34,7 +34,9 @@ describe("extreme magnitudes (Ruling 43)", () => {
       // Huge keeps (all but the gutter of) the whole frame; the others have no area.
       const huge = l.tiles.find((t) => t.datum.name === "Huge")!;
       expect(area(huge)).toBeGreaterThan(920 * 460 * 0.98);
-      for (const t of l.tiles.filter((t) => t.datum.name !== "Huge")) expect(area(t)).toBe(0);
+      const others = l.tiles.filter((t) => t.datum.name !== "Huge");
+      expect(others).toHaveLength(2);
+      for (const t of others) expect(area(t)).toBe(0);
     }
   });
 });

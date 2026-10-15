@@ -94,7 +94,9 @@ describe(`every character over every palette colour (${MATRIX.length} combinatio
       expect(shapes[0]!.getAttribute("style"), `${char} over ${name} ground`).toContain(hex);
       expect(shapes[1]!.getAttribute("style"), `${char} over ${name} band`).toContain(hatch.stroke);
 
-      for (const rect of svg.querySelectorAll<SVGElement>('rect[data-series="textured"]')) {
+      const marks = svg.querySelectorAll<SVGElement>('rect[data-series="textured"]');
+      expect(marks.length, `${char} over ${name}: no textured mark drawn`).toBeGreaterThan(0);
+      for (const rect of marks) {
         expect(rect.style.fill, `${char} over ${name} mark fill`).toContain(hatch.id);
       }
     }

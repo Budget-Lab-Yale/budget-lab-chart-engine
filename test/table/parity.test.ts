@@ -372,7 +372,9 @@ function headerClampViolations(r: Rendered, spec: TableSpec, part: "count" | "fi
   const m = makeMeasureText();
   const out: string[] = [];
   // The live side really is clamped to N lines.
-  for (const el of Array.from(r.table.querySelectorAll(".tbl-table-header-clamp")) as HTMLElement[]) {
+  const clamps = Array.from(r.table.querySelectorAll(".tbl-table-header-clamp")) as HTMLElement[];
+  expect(clamps.length, "no clamped header on the live side").toBeGreaterThan(0);
+  for (const el of clamps) {
     expect(el.style.getPropertyValue("--tbl-header-lines")).toBe(String(n));
   }
   for (const c of svgHeader(r).cells.filter((c) => c.leaf)) {

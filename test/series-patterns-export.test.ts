@@ -111,6 +111,7 @@ describe("the PNG export", () => {
         });
       return [...byBand.values()].map((g) => g.sort((a, b) => a.y - b.y));
     };
+    expect(stacks(gapped).length).toBeGreaterThan(0);
     for (const stack of stacks(gapped)) {
       expect(stack.length).toBeGreaterThan(1);
       for (let i = 0; i < stack.length - 1; i++) {

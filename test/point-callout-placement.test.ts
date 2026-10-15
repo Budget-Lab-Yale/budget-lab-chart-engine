@@ -12,6 +12,7 @@ import { MARK_POINT_R } from "../src/engine/theme";
 import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const ROW_H = 13;
 // `top`/`bottom` are the FRAME edges; placePointCallouts insets each label by its own half-height.
@@ -488,17 +489,7 @@ const withPoints = (points: unknown[]): ChartSpec => ({ ...SCORECARD, annotation
 /** Absolute (x, y) of a <text>, accumulating every translate() up to the <svg> (Plot puts the mark's
  *  dx/dy on the group and the data position on the element). */
 function absPos(el: Element): { x: number; y: number } {
-  let x = 0;
-  let y = 0;
-  let n: Element | null = el;
-  while (n && n.tagName.toLowerCase() !== "svg") {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) {
-      x += Number(m[1]);
-      y += Number(m[2]);
-    }
-    n = n.parentElement;
-  }
+  const [x, y] = translateOf(el);
   return { x, y };
 }
 

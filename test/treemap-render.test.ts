@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
@@ -12,18 +10,9 @@ import { tokens } from "../src/theme/tokens";
 import { d3 } from "../src/engine/vendor";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { csvFixtureReader } from "./helpers/csv";
 
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 const BLS = parseCsv("./fixtures/treemap-bls.csv");
 const GROUPED = parseCsv("./fixtures/treemap-grouped.csv");
 const WHITE = tokens.structural.background;
@@ -58,6 +47,7 @@ describe("treemap render", () => {
     for (const [spec, rows] of [[FLAT_SPEC, BLS], [GROUPED_SPEC, GROUPED]] as const) {
       const { svg } = render(spec, rows, w);
       const areaH = treemapAreaHeight(w);
+      expect(q(svg, "rect.tbl-treemap-tile").length).toBeGreaterThan(0);
       for (const r of q(svg, "rect.tbl-treemap-tile")) {
         for (const a of ["x", "y", "width", "height"]) expect(Number.isFinite(num(r, a))).toBe(true);
         expect(num(r, "x")).toBeGreaterThanOrEqual(0);

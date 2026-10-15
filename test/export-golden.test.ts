@@ -21,11 +21,10 @@
 // only with `npm run goldens:record` (scripts/goldens.mjs); never re-record an existing one.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { serializeExportSvg as ser } from "./helpers/export-golden";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { buildExportSvg } from "../src/embed/export-png";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { csvFixtureReader } from "./helpers/csv";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => {
@@ -39,17 +38,7 @@ const rowsOf = (rs: Array<Record<string, string | number>>): TidyRow[] =>
   rs.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v)]))) as unknown as TidyRow[];
 
 // Comma-free CSV fixture reader (same as timeline-golden.test.ts).
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 
 const MONTHS = ["2024-01-01", "2024-02-01", "2024-03-01", "2024-04-01", "2024-05-01", "2024-06-01"];
 const twoSeriesTemporal = rowsOf(

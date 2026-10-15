@@ -17,12 +17,13 @@
 //   3. FLANKED — a single-direction band has ground on BOTH sides ("three bands"), which is what
 //      separates `/` from an edge.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 import { PNG } from "pngjs";
 import { renderLegend } from "../src/engine/legend";
 import { CHART_CSS } from "../src/embed/styles";
 import { HATCH_CHARS, resolveHatch, type HatchChar } from "../src/engine/hatch";
 import type { LegendItem } from "../src/engine/index";
+import { launchBrowser, closeBrowser, CLOSE_HOOK_TIMEOUT_MS } from "./helpers/browser";
 
 // This file launches a real Chromium via Playwright, which flakes under parallel test-file load
 // (contending for CPU with the rest of the suite's worker threads) — the suite's 5s/10s defaults
@@ -57,11 +58,9 @@ const EXPECTED: Record<HatchChar, Direction[]> = {
 
 let browser: Browser;
 beforeAll(async () => {
-  browser = await chromium.launch();
+  browser = await launchBrowser();
 }, 60000);
-afterAll(async () => {
-  await browser?.close();
-});
+afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
 async function shootSwatch(char: HatchChar): Promise<PNG> {
   const hatch = resolveHatch(char, GROUND);

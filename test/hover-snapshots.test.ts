@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
 // HOVER SNAPSHOTS: the live-hover output of every chart family, standalone and (where the family
-// supports facets) as a 2-pane small-multiples figure, recorded as files under
-// test/fixtures/hover/.
+// supports facets) as a 2-pane small-multiples figure, coordinated (the default) and with
+// `small_multiples.coordinated_cursor: false`, recorded as files under test/fixtures/hover/.
 //
 // Why this file exists: goldens never mount, so nothing on the static/PNG path exercises
 // crosshair.ts or render-live.ts's hover wiring. This is the characterisation net for splitting
@@ -309,18 +309,36 @@ const FAMILIES: Family[] = [
   },
 ];
 
+/** A 2-pane cell's figure with the cross-pane cursor off: each pane hovers on its own. */
+const uncoordinated = (s: ChartSpec): ChartSpec => {
+  const sm = (s as { small_multiples?: Record<string, unknown> }).small_multiples;
+  return { ...s, small_multiples: { ...sm, coordinated_cursor: false } } as ChartSpec;
+};
+
+type Layout = "standalone" | "2-pane" | "2-pane-uncoordinated";
+const LAYOUT_KEY: Record<Layout, string> = {
+  "standalone": "standalone",
+  "2-pane": "2-pane",
+  "2-pane-uncoordinated": "2-pane, coordinated_cursor: false",
+};
+
 const cells = FAMILIES.flatMap((fam) =>
-  (fam.panes === false ? [false] : [false, true]).map((faceted) => ({
-    fam,
-    faceted,
-    key: `${fam.name} · ${faceted ? "2-pane" : "standalone"}`,
-    file: `./fixtures/hover/${fam.slug}.${faceted ? "2-pane" : "standalone"}.txt`,
-  })),
+  (fam.panes === false ? ["standalone"] as const : ["standalone", "2-pane", "2-pane-uncoordinated"] as const)
+    .map((layout: Layout) => ({
+      fam,
+      faceted: layout !== "standalone",
+      layout,
+      key: `${fam.name} · ${LAYOUT_KEY[layout]}`,
+      file: `./fixtures/hover/${fam.slug}.${layout}.txt`,
+    })),
 );
 
 /** Mount, hover pane 0 once, and collect every onHover call. */
-function hoverCell(fam: Family, faceted: boolean) {
-  const { spec: s, rows, hover } = fam.mount(faceted);
+type Cell = (typeof cells)[number];
+
+function hoverCell({ fam, faceted, layout }: Cell) {
+  const { spec: s0, rows, hover } = fam.mount(faceted);
+  const s = layout === "2-pane-uncoordinated" ? uncoordinated(s0) : s0;
   const hovers: Array<BandHoverCtx | null> = [];
   const m = mountHover(s, rows, faceted, { onHover: (ctx) => { hovers.push(ctx); } });
   hover(m.svgs[0]!);
@@ -334,9 +352,10 @@ function hoverCell(fam: Family, faceted: boolean) {
 const ON_HOVER_WIRED = new Set(["bar", "bar-grouped", "stacked-pills", "stacked-card", "waterfall"]);
 
 describe("hover snapshots — every family, standalone and 2-pane, at one fixed hover", () => {
-  for (const { fam, faceted, key, file } of cells) {
+  for (const cell of cells) {
+    const { fam, faceted, key, file } = cell;
     it(key, async () => {
-      const { m, hovers } = hoverCell(fam, faceted);
+      const { m, hovers } = hoverCell(cell);
       expect(m.svgs.length, `${key}: pane count`).toBe(faceted ? 2 : 1);
       if (ON_HOVER_WIRED.has(fam.slug)) {
         expect(hovers.length, `${key}: onHover was not called on the move`).toBeGreaterThan(0);
@@ -351,9 +370,10 @@ describe("hover snapshots — every family, standalone and 2-pane, at one fixed 
   it("every snapshot shows a hover response, except the timeline's (it has no hover)", () => {
     // Guards against a snapshot that records nothing because the pointer missed (a fixture
     // problem) rather than because the family draws nothing.
-    for (const { fam, faceted, key } of cells) {
+    for (const cell of cells) {
+      const { fam, key } = cell;
       document.body.innerHTML = "";
-      const { m, hovers } = hoverCell(fam, faceted);
+      const { m, hovers } = hoverCell(cell);
       const responded =
         cardShown() ||
         hovers.some((h) => h !== null) ||
@@ -380,8 +400,8 @@ describe("hover snapshots — every family, standalone and 2-pane, at one fixed 
 // when they flip to `it`.
 // ---------------------------------------------------------------------------
 
-function teardownLeavesNothing(fam: Family, faceted: boolean): void {
-  const { m, hovers } = hoverCell(fam, faceted);
+function teardownLeavesNothing(cell: Cell): void {
+  const { m, hovers } = hoverCell(cell);
   m.teardown();
   expect(cardShown(), "the hover card is still shown after teardown").toBe(false);
   if (hovers.some((h) => h !== null)) {
@@ -410,17 +430,28 @@ const B2_FAILS_TODAY = [
   "waterfall · standalone",
   "waterfall · 2-pane",
   "histogram · standalone",
+  // Every pane under coordinated_cursor: false hovers with its own card.
+  "line (temporal) · 2-pane, coordinated_cursor: false",
+  "line (categorical x) · 2-pane, coordinated_cursor: false",
+  "area (temporal) · 2-pane, coordinated_cursor: false",
+  "bar (plain) · 2-pane, coordinated_cursor: false",
+  "bar (grouped) · 2-pane, coordinated_cursor: false",
+  "stacked (all positive: pills) · 2-pane, coordinated_cursor: false",
+  "stacked (with a negative: card) · 2-pane, coordinated_cursor: false",
+  "dumbbell (vertical) · 2-pane, coordinated_cursor: false",
+  "waterfall · 2-pane, coordinated_cursor: false",
+  "histogram · 2-pane, coordinated_cursor: false",
 ];
 
 describe("B2: teardown() hides the hover card and sends onHover(null)", () => {
   for (const key of B2_FAILS_TODAY) {
     const cell = cells.find((c) => c.key === key)!;
-    it.fails(`B2: ${key}`, () => teardownLeavesNothing(cell.fam, cell.faceted));
+    it.fails(`B2: ${key}`, () => teardownLeavesNothing(cell));
   }
 
   it("B2: treemap · standalone (already hides its card on teardown, Ruling 21)", () => {
     const cell = cells.find((c) => c.key === "treemap · standalone")!;
-    const { m } = hoverCell(cell.fam, cell.faceted);
+    const { m } = hoverCell(cell);
     expect(cardShown(), "precondition: the treemap hover shows a card").toBe(true);
     m.teardown();
     expect(cardShown()).toBe(false);
@@ -431,10 +462,10 @@ describe("B2: teardown() hides the hover card and sends onHover(null)", () => {
     // misspelt key). This pins the precondition: every listed cell shows a card or sends an
     // onHover payload, and no other non-treemap cell does.
     const live = cells
-      .filter(({ fam, faceted }) => {
+      .filter((cell) => {
         document.body.innerHTML = "";
-        const { hovers } = hoverCell(fam, faceted);
-        return fam.slug !== "treemap" && (cardShown() || hovers.some((h) => h !== null));
+        const { hovers } = hoverCell(cell);
+        return cell.fam.slug !== "treemap" && (cardShown() || hovers.some((h) => h !== null));
       })
       .map((c) => c.key);
     expect(live.sort()).toEqual([...B2_FAILS_TODAY].sort());

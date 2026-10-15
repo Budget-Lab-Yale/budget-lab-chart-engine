@@ -12,6 +12,7 @@ import { validateSpec } from "../src/spec/validate";
 import { mockRect1to1 } from "./helpers/hover-harness";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => {
@@ -87,12 +88,7 @@ const BAR: ChartSpec = {
   data: "d.csv",
 };
 function translateY(el: Element, svg: Element): number {
-  let y = 0;
-  for (let n: Element | null = el; n && n !== svg; n = n.parentElement) {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) y += Number(m[2]);
-  }
-  return y;
+  return translateOf(el, svg)[1];
 }
 /** Row centres top to bottom, from the category labels. */
 const centres = (svg: SVGSVGElement): number[] =>

@@ -17,8 +17,7 @@
 // both. The probe also proves the embedded Figtree is the face drawing Latin text: a fallback face
 // matches neither the table's advances nor their rounding, and fails the suite loudly.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { existsSync } from "node:fs";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 import { renderChart } from "../src/engine/index";
 import { FIGTREE_FONT_FACE } from "../src/embed/assets";
 import { TM_GEOM } from "../src/engine/treemap-layout";
@@ -26,26 +25,17 @@ import { timelineTextWidth } from "../src/engine/timeline-text";
 import { FIGTREE_ADVANCE, FIGTREE_CHARS } from "../src/engine/timeline-metrics";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { HAS_BROWSER, launchBrowser, closeBrowser, CLOSE_HOOK_TIMEOUT_MS } from "./helpers/browser";
 
 // A real Chromium launch: the suite's jsdom-speed defaults are too tight under parallel load (see
 // test/hatch-legend-legibility.test.ts).
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
-const HAS_BROWSER = (() => {
-  try {
-    return existsSync(chromium.executablePath());
-  } catch {
-    return false;
-  }
-})();
-
 let browser: Browser;
 beforeAll(async () => {
-  if (HAS_BROWSER) browser = await chromium.launch();
+  if (HAS_BROWSER) browser = await launchBrowser();
 }, 60_000);
-afterAll(async () => {
-  await browser?.close();
-});
+afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
 /** One drawn line: a <text> without <tspan>s, or a <tspan>. `est` is timelineTextWidth's width
  *  for it; `estWhole` the width it draws at whole-pixel positioning (wholePixelWidth), for a line of

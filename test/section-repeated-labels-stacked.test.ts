@@ -17,6 +17,7 @@ import { validateChartData } from "../src/spec/validate";
 import { mockRect1to1, cardShown, cardText, coordTexts } from "./helpers/hover-harness";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => {
@@ -70,15 +71,6 @@ const KEYS = RAW.map(([s, c]) => sectionCategoryKey(s, c));
 const leaksKey = (text: string): boolean => KEYS.some((k) => text.includes(k));
 
 // --- geometry (jsdom has no layout: attributes + ancestor translates) ---
-function translateOf(el: Element): [number, number] {
-  let x = 0;
-  let y = 0;
-  for (let n: Element | null = el; n && n.tagName.toLowerCase() !== "svg"; n = n.parentElement) {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) { x += Number(m[1]); y += Number(m[2]); }
-  }
-  return [x, y];
-}
 const catLabels = (svg: Element): string[] =>
   Array.from(svg.querySelectorAll("g.tbl-cat-label text")).map((t) => t.textContent ?? "");
 /** Every drawn mark and non-label text, with its absolute position and its series tag. */
@@ -236,8 +228,11 @@ describe("sectioned stack: the internal row key never reaches a reader", () => {
   ] as Array<[string, ChartSpec, number]>) {
     it(`${name}: not in any SVG text (live and export), aria text, the hover readout or the CSV`, async () => {
       const rows = rowsOf(false, sign);
-      for (const t of Array.from(render(spec, rows).querySelectorAll("text"))) expect(leaksKey(t.textContent ?? "")).toBe(false);
-      for (const t of Array.from(buildExportSvg(spec, rows).querySelectorAll("text"))) expect(leaksKey(t.textContent ?? "")).toBe(false);
+      for (const svgOut of [render(spec, rows), buildExportSvg(spec, rows)]) {
+        const texts = Array.from(svgOut.querySelectorAll("text"));
+        expect(texts.length).toBeGreaterThan(0);
+        for (const t of texts) expect(leaksKey(t.textContent ?? "")).toBe(false);
+      }
 
       const { container, svg } = mount(spec, rows);
       const attrs = ["aria-label", "aria-description", "aria-roledescription", "aria-valuetext"];
@@ -246,11 +241,14 @@ describe("sectioned stack: the internal row key never reaches a reader", () => {
         ...Array.from(container.querySelectorAll("title, desc")).map((el) => el.textContent ?? ""),
       ];
       for (const a of aria) expect(leaksKey(a)).toBe(false);
+      expect(rowCentres(svg)).toHaveLength(7);
       for (const y of rowCentres(svg)) {
         hoverAt(svg, y);
         expect(leaksKey(document.body.querySelector(".tbl-tooltip")?.innerHTML ?? "")).toBe(false);
         for (const t of coordTexts(svg)) expect(leaksKey(t)).toBe(false);
-        for (const t of Array.from(svg.querySelectorAll("text"))) expect(leaksKey(t.textContent ?? "")).toBe(false);
+        const texts = Array.from(svg.querySelectorAll("text"));
+        expect(texts.length).toBeGreaterThan(0);
+        for (const t of texts) expect(leaksKey(t.textContent ?? "")).toBe(false);
       }
 
       const blobs: Blob[] = [];

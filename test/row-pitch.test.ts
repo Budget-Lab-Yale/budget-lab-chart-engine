@@ -14,6 +14,7 @@ import { horizontalBarChartHeight, HORIZONTAL_PX_PER_BAR } from "../src/engine/f
 import { rowBandGeometry } from "../src/engine/marks/category-band";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => {
@@ -27,12 +28,7 @@ beforeEach(() => {
 });
 
 function translateY(el: Element, svg: Element): number {
-  let y = 0;
-  for (let n: Element | null = el; n && n !== svg; n = n.parentElement) {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) y += Number(m[2]);
-  }
-  return y;
+  return translateOf(el, svg)[1];
 }
 
 /** Row centres top to bottom: one per category label. */

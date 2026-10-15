@@ -5,25 +5,14 @@
 // shapes (1-tier, 2-tier + sublabels, 3-tier with a blank interior tier → rowspan) we build
 // the model + layout, render to SVG, assert structural facts, and lock the output to a golden.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { buildTableModel } from "../../src/table/model";
 import { layoutTable } from "../../src/table/layout";
 import { renderTableSvg } from "../../src/table/render-svg";
 import type { TableSpec } from "../../src/spec/table-types";
 import type { TidyRow } from "../../src/data/index";
+import { csvFixtureReader } from "../helpers/csv";
 
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 
 // Shared layout knobs: fixed width + a deterministic char-width measurer (no canvas in jsdom).
 const layoutOpts = { width: 720, measureText: (s: string) => s.length * 7 };
@@ -130,9 +119,9 @@ describe("renderTableSvg — golden bodies", () => {
     expect(tallCells.length).toBeGreaterThan(0);
 
     // Numeric cells centered.
-    svg.querySelectorAll("g.tbl-table-cell text").forEach((t) =>
-      expect(t.getAttribute("text-anchor")).toBe("middle"),
-    );
+    const cellTexts = svg.querySelectorAll("g.tbl-table-cell text");
+    expect(cellTexts.length).toBeGreaterThan(0);
+    cellTexts.forEach((t) => expect(t.getAttribute("text-anchor")).toBe("middle"));
 
     await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/tariff.golden.svg");
   });

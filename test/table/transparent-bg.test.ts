@@ -5,21 +5,14 @@
 // table fits. Asserted on computed style AND on pixels in a real Chromium page whose background
 // is a non-white host colour, so a rule that resolves but does not paint still fails.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
-import { chromium, type Browser, type Page } from "playwright";
+import { readFileSync } from "node:fs";
+import type { Browser, Page } from "playwright";
 import { PNG } from "pngjs";
 import { BUNDLE_PATH } from "../setup/global-build";
 import { CHART_CSS } from "../../src/embed/styles";
 import type { TableSpec } from "../../src/spec/table-types";
 import type { TidyRow } from "../../src/data/index";
-
-const HAS_BROWSER = (() => {
-  try {
-    return existsSync(chromium.executablePath());
-  } catch {
-    return false;
-  }
-})();
+import { HAS_BROWSER, launchBrowser, closeBrowser, CLOSE_HOOK_TIMEOUT_MS } from "../helpers/browser";
 
 // Real Chromium launch: raised per-file, as in test/tooltip-divider-visibility.test.ts.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
@@ -54,11 +47,9 @@ const STICKY_WIDE: TableSpec = { ...STICKY, column_width: 120 }; // 160 + 8 x 12
 
 let browser: Browser;
 beforeAll(async () => {
-  if (HAS_BROWSER) browser = await chromium.launch();
+  if (HAS_BROWSER) browser = await launchBrowser();
 }, 60_000);
-afterAll(async () => {
-  await browser?.close();
-});
+afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
 async function mount(spec: TableSpec, width = 700): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: width + 40, height: 600 } });

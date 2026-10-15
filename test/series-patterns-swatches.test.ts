@@ -125,7 +125,9 @@ describe("the tooltip swatch", () => {
       icons: FLAT_ICONS,
     });
     const doc = new DOMParser().parseFromString(html, "text/html");
-    for (const svg of doc.querySelectorAll(".tbl-tooltip-swatch svg")) {
+    const swatches = doc.querySelectorAll(".tbl-tooltip-swatch svg");
+    expect(swatches.length).toBeGreaterThan(0);
+    for (const svg of swatches) {
       expect(svg.children).toHaveLength(1);
     }
   });
@@ -231,7 +233,9 @@ describe("every filled chart type keys with a chip", () => {
       ] as unknown as TidyRow[];
       const { legendItems } = renderChart(spec, rows, OPTS);
       expect(legendItems, `${chartType} produced no legend`).toBeTruthy();
-      for (const item of legendItems!.filter((i) => !i.annotation)) {
+      const seriesItems = legendItems!.filter((i) => !i.annotation);
+      expect(seriesItems.length, `${chartType}: no series legend item`).toBeGreaterThan(0);
+      for (const item of seriesItems) {
         expect(item.markerShape, `${chartType} / ${item.series}`).toBe("rect");
       }
     }

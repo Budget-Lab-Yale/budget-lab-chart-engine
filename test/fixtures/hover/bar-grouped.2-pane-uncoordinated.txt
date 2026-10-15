@@ -1,0 +1,57 @@
+# card
+<div class="tbl-tooltip-head">
+  "A"
+</div>
+<div class="tbl-tooltip-row">
+  <span class="tbl-tooltip-swatch">
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <rect x="0" y="0" width="14" height="14" rx="1" style="fill:#0072B2"/>
+    </svg>
+  </span>
+  <span>
+    <span class="tbl-tooltip-label">
+      "Up:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "6.00"
+    </span>
+  </span>
+</div>
+<div class="tbl-tooltip-row">
+  <span class="tbl-tooltip-swatch">
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <rect x="0" y="0" width="14" height="14" rx="1" style="fill:#E69F00"/>
+    </svg>
+  </span>
+  <span>
+    <span class="tbl-tooltip-label">
+      "Down:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "4.00"
+    </span>
+  </span>
+</div>
+# pane 0 (hovered)
+<rect class="tbl-band-crosshair-hl" fill="#BBBBBB" opacity="0.12" style="pointer-events: none;" x="61.5" y="18" width="169" height="280"/>
+<rect class="tbl-band-crosshair-hit" x="0" y="0" width="432" height="320" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
+<g class="tbl-hl-pills" opacity="0" style="pointer-events: none;"/>
+# pane 1
+<rect class="tbl-band-crosshair-hl" fill="#BBBBBB" opacity="0" style="pointer-events: none;"/>
+<rect class="tbl-band-crosshair-hit" x="0" y="0" width="390" height="320" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
+<g class="tbl-hl-pills" opacity="0" style="pointer-events: none;"/>
+# onHover (last payload)
+{
+  "category": "A",
+  "series": [
+    "Up",
+    "Down"
+  ],
+  "values": {
+    "Up": 6,
+    "Down": 4
+  },
+  "facet": "P1"
+}

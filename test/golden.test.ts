@@ -8,8 +8,6 @@
 // This is the headless engine path (engine/index.ts → assemblePlot) running under jsdom,
 // so it also proves the render is deterministic and DOM-document-injectable for SSR.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { renderChart, renderFigure, render, TOTAL_SERIES_KEY } from "../src/engine/index";
 import type { FigureRenderResult, FigurePane } from "../src/engine/index";
 import { buildStackedMarks } from "../src/engine/marks/stacked";
@@ -33,36 +31,18 @@ import { makeTickFormatter } from "../src/engine/scales";
 import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
 import { parseDate } from "../src/spec/parse-time";
 import { horizontalBarChartHeight } from "../src/engine/figure";
+import { csvFixtureReader } from "./helpers/csv";
+import { translateOf } from "./helpers/geometry";
 
 // Minimal CSV → TidyRow[]. The real data layer (engine step 5) handles quoting/remote
 // sources; these fixtures are deliberately comma-free so a plain split suffices.
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 
 // Absolute x of an SVG element, accumulating every `transform="translate(x,y)"` up the
 // ancestor chain to the root <svg>. jsdom has no layout engine, so we read the transforms
 // Plot emits (per-element + per-group) directly. Used to assert label-vs-bar alignment.
 function absX(el: Element | null): number {
-  let x = 0;
-  let n: Element | null = el;
-  while (n && n.tagName.toLowerCase() !== "svg") {
-    const tf = n.getAttribute("transform");
-    if (tf) {
-      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
-      if (m) x += Number(m[1]);
-    }
-    n = n.parentElement;
-  }
-  return x;
+  return translateOf(el)[0];
 }
 
 // Mirror of absX: absolute y of an SVG element, accumulating every ancestor
@@ -72,17 +52,7 @@ function absX(el: Element | null): number {
 const isSectionSpacer = (t: string): boolean => t.startsWith(" section:");
 
 function absY(el: Element | null): number {
-  let y = 0;
-  let n: Element | null = el;
-  while (n && n.tagName.toLowerCase() !== "svg") {
-    const tf = n.getAttribute("transform");
-    if (tf) {
-      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
-      if (m) y += Number(m[2]);
-    }
-    n = n.parentElement;
-  }
-  return y;
+  return translateOf(el)[1];
 }
 
 const GRADS_SPEC: ChartSpec = {
@@ -662,18 +632,18 @@ describe("golden SVG — bar category_colors / bar_color", () => {
       rows,
       { width: 720, height: 400, document },
     ).svg;
-    Array.from(highlighted.querySelectorAll('g[aria-label="bar"] rect')).forEach((r) =>
-      expect(r.getAttribute("fill")).toBe(resolveColor("amber")),
-    );
+    const highlightedBars = Array.from(highlighted.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(highlightedBars.length).toBeGreaterThan(0);
+    highlightedBars.forEach((r) => expect(r.getAttribute("fill")).toBe(resolveColor("amber")));
     // Not highlighted: dimming wins over bar_color.
     const dimmed = renderChart(
       { ...BAR_SINGLE_SPEC, bar_color: "amber", highlightSeries: ["Other"] },
       rows,
       { width: 720, height: 400, document },
     ).svg;
-    Array.from(dimmed.querySelectorAll('g[aria-label="bar"] rect')).forEach((r) =>
-      expect(r.getAttribute("fill")).toBe(TBL.color.annotationDim),
-    );
+    const dimmedBars = Array.from(dimmed.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(dimmedBars.length).toBeGreaterThan(0);
+    dimmedBars.forEach((r) => expect(r.getAttribute("fill")).toBe(TBL.color.annotationDim));
   });
 });
 

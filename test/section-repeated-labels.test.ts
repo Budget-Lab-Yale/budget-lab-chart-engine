@@ -254,6 +254,7 @@ describe("the internal row key never reaches a reader", () => {
   it("not in axis labels, section headers or any other SVG text (live and PNG export)", () => {
     for (const [spec, rows] of [[DUMBBELL, ROWS], [BAR, ROWS], [BAR_SINGLE, CASH_ROWS]] as const) {
       const { svg } = renderChart(spec, rows, { width: 720, height: 500, document });
+      expect(svg.querySelectorAll("text").length).toBeGreaterThan(0);
       for (const t of Array.from(svg.querySelectorAll("text"))) expect(leaksKey(t.textContent ?? "")).toBe(false);
       const exported = buildExportSvg(spec, rows);
       expect(exported.querySelectorAll("text").length).toBeGreaterThan(0);
@@ -276,6 +277,7 @@ describe("the internal row key never reaches a reader", () => {
 
   it("not in the tooltip card", () => {
     const { svg } = mount(DUMBBELL, ROWS);
+    expect(dotRowsY(svg).length).toBeGreaterThan(0);
     for (const y of dotRowsY(svg)) {
       hoverAt(svg, 400, y);
       expect(leaksKey(document.body.querySelector(".tbl-tooltip")?.innerHTML ?? "")).toBe(false);

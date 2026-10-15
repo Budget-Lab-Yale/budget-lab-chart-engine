@@ -9,6 +9,7 @@ import { computeChartHeight } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import { tokens } from "../src/theme/tokens";
+import { translateOf } from "./helpers/geometry";
 
 const INK = tokens.structural.text_heading;
 
@@ -40,17 +41,7 @@ const opts = { width: 720, height: 400 } as const;
 // element's own position (cx/cy for circles, x/y attrs for text). jsdom has no layout engine, so we
 // read the transforms Plot emits directly — the same technique golden.test.ts uses.
 function absPos(el: Element | null): { x: number; y: number } {
-  let x = 0;
-  let y = 0;
-  let n: Element | null = el;
-  while (n && n.tagName.toLowerCase() !== "svg") {
-    const tf = n.getAttribute("transform");
-    if (tf) {
-      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
-      if (m) { x += Number(m[1]); y += Number(m[2]); }
-    }
-    n = n.parentElement;
-  }
+  let [x, y] = translateOf(el);
   const tag = el?.tagName.toLowerCase();
   // Add the element's own position. Guard non-numeric attrs — Plot emits text `y="0.32em"` (a
   // baseline nudge), which is not a coordinate; the real position is in the ancestor transforms.

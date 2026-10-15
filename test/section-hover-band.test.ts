@@ -12,6 +12,7 @@ import { CROSSHAIR_HIT_SELECTOR } from "../src/engine/crosshair";
 import { mockRect1to1 } from "./helpers/hover-harness";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => {
@@ -79,12 +80,7 @@ const dbRows = (): TidyRow[] =>
 
 // --- geometry (jsdom has no layout: attributes + ancestor translates) ---
 function translateY(el: Element, svg: Element): number {
-  let y = 0;
-  for (let n: Element | null = el; n && n !== svg; n = n.parentElement) {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) y += Number(m[2]);
-  }
-  return y;
+  return translateOf(el, svg)[1];
 }
 const labels = (svg: SVGSVGElement): SVGTextElement[] => Array.from(svg.querySelectorAll<SVGTextElement>("g.tbl-cat-label text"));
 const labelOf = (svg: SVGSVGElement, cat: string): SVGTextElement => labels(svg).find((t) => t.textContent === cat)!;
@@ -134,6 +130,7 @@ function expectBelowPlotTop(band: Element | null, svg: SVGSVGElement): void {
 
 /** Only `cat`'s label is darkened + bolded. */
 function expectAccent(svg: SVGSVGElement, cat: string | null): void {
+  expect(labels(svg).length).toBeGreaterThan(0);
   for (const t of labels(svg)) {
     const on = t.textContent === cat;
     expect(t.getAttribute("font-weight") === "700", `${t.textContent} bold`).toBe(on);

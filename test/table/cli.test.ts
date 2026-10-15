@@ -13,21 +13,14 @@ import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, unlinkSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "playwright";
 import { runValidate, runRender, runSnapshot } from "../../src/cli/index";
 import { BUNDLE_PATH } from "../setup/global-build";
 import { CHART_CSS } from "../../src/embed/styles";
+import { HAS_BROWSER } from "../helpers/browser";
 
-// The PNG snapshot path renders through a real headless Chromium. Skip it where the browser binary
-// isn't installed (e.g. CI running `npm ci` without `playwright install`); it runs locally. The
-// table SVG/HTML output itself is covered by the jsdom golden + render tests, browser-free.
-const HAS_BROWSER = (() => {
-  try {
-    return existsSync(chromium.executablePath());
-  } catch {
-    return false;
-  }
-})();
+// The PNG snapshot path renders through a real headless Chromium, so its suite skips where the
+// browser binary isn't installed (HAS_BROWSER). The table SVG/HTML output itself is covered by the
+// jsdom golden + render tests, browser-free.
 
 // Stub bundle — just needs to expose BudgetLabChart.mountTable and mountChart stubs.
 const STUB_BUNDLE = `var BudgetLabChart={mountChart:function(el,opts){el.innerHTML='<p>chart</p>';},mountTable:function(el,opts){el.innerHTML='<p>table</p>';}}`;

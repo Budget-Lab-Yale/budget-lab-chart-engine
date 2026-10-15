@@ -11,6 +11,7 @@ import { renderChart } from "../src/engine/index";
 import { horizontalBarChartHeight, FIT_MIN_PX_PER_BAR, FIT_LABEL_LINE_PX } from "../src/engine/figure";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => { HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement["getContext"]; });
@@ -76,12 +77,7 @@ const figRows = (facets: number) =>
 
 /** Sum of every translate's y from `el` up to (excluding) `stop`. */
 function translateY(el: Element, stop: Element): number {
-  let y = 0;
-  for (let n: Element | null = el; n && n !== stop; n = n.parentElement) {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) y += Number(m[2]);
-  }
-  return y;
+  return translateOf(el, stop)[1];
 }
 const fontSizeOf = (el: Element): number => {
   for (let n: Element | null = el; n; n = n.parentElement) {

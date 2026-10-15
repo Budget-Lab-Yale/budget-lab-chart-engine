@@ -66,13 +66,18 @@ describe("column_align — live HTML", () => {
     const th = Array.from(t.querySelectorAll("thead th")).find((e) => e.textContent === "Value")!;
     expect(th.classList.contains("is-align-center")).toBe(true);
     // The unnamed column is untouched.
+    expect(colOf(t, "Source").length).toBeGreaterThan(0);
     for (const td of colOf(t, "Source")) expect(td.className).not.toContain("is-align-");
   });
 
   it("a single value applies to every data column but never the stub", () => {
     const t = html({ ...SPEC, column_align: "right" });
-    for (const td of t.querySelectorAll("tbody td")) expect(td.classList.contains("is-align-right")).toBe(true);
-    for (const th of t.querySelectorAll("th.tbl-table-stub, th.tbl-table-stub-header")) {
+    const cells = t.querySelectorAll("tbody td");
+    const stubs = t.querySelectorAll("th.tbl-table-stub, th.tbl-table-stub-header");
+    expect(cells.length).toBeGreaterThan(0);
+    expect(stubs.length).toBeGreaterThan(0);
+    for (const td of cells) expect(td.classList.contains("is-align-right")).toBe(true);
+    for (const th of stubs) {
       expect(th.className).not.toContain("is-align-");
     }
   });

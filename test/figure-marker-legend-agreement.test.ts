@@ -103,6 +103,7 @@ for (const k of KINDS) {
           const panes = Array.from(host.querySelectorAll<SVGSVGElement>(".figure-pane svg"));
           expect(panes.length).toBe(2);
           for (const svg of panes) {
+            expect(drawnSymbols(svg).size, "no marker drawn on a pane").toBeGreaterThan(0);
             for (const [series, syms] of drawnSymbols(svg)) expect([...syms], `series ${series}`).toEqual([legend.get(series)]);
           }
         });

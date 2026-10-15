@@ -644,6 +644,7 @@ describe("reversed value axis — degenerate and boundary data", () => {
       OPTS,
     ).svg;
     const [lo, hi] = frame(svg, false);
+    expect(valueCoords(svg, false).length).toBeGreaterThan(0);
     for (const v of valueCoords(svg, false)) {
       expect(v).toBeGreaterThanOrEqual(lo - 1e-6);
       expect(v).toBeLessThanOrEqual(hi + 1e-6);
