@@ -1,0 +1,26 @@
+# card
+(no card)
+# pane 0 (hovered)
+<rect class="tbl-band-crosshair-hit" x="0" y="0" width="720" height="400" fill="transparent" style="cursor: default; pointer-events: all;"/>
+<g class="tbl-hl-pills" opacity="0" style="pointer-events: none;"/>
+<g class="tbl-coord" opacity="1" style="pointer-events: none;">
+  <rect class="tbl-coord-region" x="74" y="18" width="300" height="360" fill="#BBBBBB" opacity="0.12"/>
+  <rect class="tbl-coord-axis-label" x="217.245" y="383.25" width="14.51" height="14.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-axis-label-text" x="224.5" y="390.5" dy="0.32em" text-anchor="middle" fill="#1A1A2E" font-size="10.5" font-weight="700">
+    "A"
+  </text>
+  <rect class="tbl-coord-pill" x="206.98" y="52.678571428571445" width="34.04" height="15.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-pill-text" x="224" y="60.428571428571445" dy="0.32em" text-anchor="middle" fill="#0072B2" font-size="10.5" font-weight="700">
+    "6.00"
+  </text>
+</g>
+# onHover (last payload)
+{
+  "category": "A",
+  "series": [
+    "S"
+  ],
+  "values": {
+    "S": 6
+  }
+}

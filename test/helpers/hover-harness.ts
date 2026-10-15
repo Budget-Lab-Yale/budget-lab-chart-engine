@@ -5,7 +5,7 @@
 // Everything here is measurement plumbing, not policy: no helper sets a spec field, so a test
 // cannot accidentally acquire a non-default dial from the harness. That matters because the class
 // of defect these two files gate is "a claim verified by a test that quietly turned a default off".
-import { mountChart } from "../../src/engine/render-live";
+import { mountChart, type MountOptions } from "../../src/engine/render-live";
 import { CROSSHAIR_HIT_SELECTOR } from "../../src/engine/crosshair";
 import type { ChartSpec } from "../../src/spec/types";
 import type { TidyRow } from "../../src/data/index";
@@ -55,24 +55,37 @@ export function mockRect1to1(svg: SVGSVGElement): void {
   }
 }
 
-export type Mounted = { container: HTMLElement; svgs: SVGSVGElement[]; calls: () => number };
+export type Mounted = {
+  container: HTMLElement;
+  svgs: SVGSVGElement[];
+  calls: () => number;
+  /** The disposer `mountChart` returned. */
+  teardown: () => void;
+};
 
 /** Mount `spec` exactly as given — the harness adds no spec field of its own — with a counting
- *  `hooks.tooltip`. `faceted` picks the pane selector only; the spec decides whether panes exist. */
-export function mountHover(spec: ChartSpec, rows: TidyRow[], faceted = false): Mounted {
+ *  `hooks.tooltip`. `faceted` picks the pane selector only; the spec decides whether panes exist.
+ *  `onHover` is a mount option, not a spec field, so passing it does not change what is drawn. */
+export function mountHover(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  faceted = false,
+  extra: { onHover?: MountOptions["onHover"] } = {},
+): Mounted {
   let calls = 0;
   const container = document.createElement("div");
   document.body.appendChild(container);
-  mountChart(container, {
+  const teardown = mountChart(container, {
     spec,
     rows,
     width: faceted ? 838 : 720,
     height: faceted ? 420 : 400,
     hooks: { tooltip: () => { calls++; return null; } },
+    ...(extra.onHover ? { onHover: extra.onHover } : {}),
   } as never);
   const svgs = Array.from(container.querySelectorAll<SVGSVGElement>(faceted ? ".figure-pane svg" : ".figure-canvas svg"));
   svgs.forEach(mockRect1to1);
-  return { container, svgs, calls: () => calls };
+  return { container, svgs, calls: () => calls, teardown };
 }
 
 /** Is a floating card actually SHOWN? A non-emitOnly attach creates the singleton up front, so

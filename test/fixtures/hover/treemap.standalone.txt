@@ -1,0 +1,30 @@
+# card
+<div class="tbl-tooltip-head">
+  "Medicare \u00b7 Mandatory"
+</div>
+<div class="tbl-tooltip-row">
+  <span>
+    <span class="tbl-tooltip-label">
+      "Value:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "874"
+    </span>
+  </span>
+</div>
+<div class="tbl-tooltip-row">
+  <span>
+    <span class="tbl-tooltip-label">
+      "Share:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "25.1%"
+    </span>
+  </span>
+</div>
+# pane 0 (hovered)
+<rect x="303.27" y="1" width="176.82" height="358" class="tbl-treemap-hover-outline" fill="none" stroke="#1A1A2E" stroke-width="2" pointer-events="none" aria-hidden="true"/>
+# onHover (last payload)
+(no onHover call)

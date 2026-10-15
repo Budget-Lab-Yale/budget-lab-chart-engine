@@ -1,0 +1,53 @@
+# card
+<div class="tbl-tooltip-head">
+  "Feb 2020"
+</div>
+<div class="tbl-tooltip-row">
+  <span class="tbl-tooltip-swatch">
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <rect x="0" y="0" width="14" height="14" rx="1" style="fill:#0072B2"/>
+    </svg>
+  </span>
+  <span>
+    <span class="tbl-tooltip-label">
+      "A:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "4.00"
+    </span>
+  </span>
+</div>
+<div class="tbl-tooltip-row">
+  <span class="tbl-tooltip-swatch">
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <rect x="0" y="0" width="14" height="14" rx="1" style="fill:#E69F00"/>
+    </svg>
+  </span>
+  <span>
+    <span class="tbl-tooltip-label">
+      "B:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "4.00"
+    </span>
+  </span>
+</div>
+<div class="tbl-tooltip-row" style="border-top:1px solid var(--tbl-gridline,#eee);margin-top:3px;padding-top:3px;font-weight:600">
+  <span class="tbl-tooltip-swatch"/>
+  <span>
+    <span class="tbl-tooltip-label">
+      "Total:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "8.00"
+    </span>
+  </span>
+</div>
+# pane 0 (hovered)
+<line class="tbl-crosshair" stroke="#BBBBBB" stroke-dasharray="3 3" y1="18" y2="378" opacity="1" style="pointer-events: none;" x1="385.00000000000006" x2="385.00000000000006"/>
+<rect class="tbl-crosshair-hit" x="0" y="0" width="720" height="400" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
+# onHover (last payload)
+(no onHover call)
