@@ -11,7 +11,9 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     environment: "node",
-    environmentMatchGlobs: [["test/table/dom/**", "jsdom"]],
+    // vitest 5 schedules workers more aggressively; the CPU-heavy property tests (treemap, timeline
+    // layout) exceeded the 5s default under full-suite load though each passes alone in seconds.
+    testTimeout: 15000,
     globalSetup: ["./test/setup/global-build.ts"],
     env: { TZ: "UTC" },
   },
