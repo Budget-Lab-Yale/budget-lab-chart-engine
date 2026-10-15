@@ -337,7 +337,7 @@ export function buildBarMarks(
     fxScaleOpts: groupBandOpts,
     xScaleOpts: innerBandOpts,
     xScaleField: "fx",
-    xAxisMarks: tblBandXAxis(categories, "fx", undefined, ctx.xLabelMode ?? "single", true),
+    xAxisMarks: tblBandXAxis(categories, "fx", ctx.xLabelMode ?? "single", true),
   };
 }
 

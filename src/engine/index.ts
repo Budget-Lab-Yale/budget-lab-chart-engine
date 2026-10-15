@@ -366,28 +366,6 @@ export interface PaneResult {
   overlayTooltips: OverlayTooltipLine[];
 }
 
-/** DORMANT (Plot grid-faceting): the old SHARED-mode combined-SVG path passed this into
- *  renderPane to drive Plot's fx/fy facet grid. Shared mode is now a per-pane composition
- *  (figure.ts), so renderFigure no longer constructs a FacetInfo. The faceting machinery
- *  (this type, assemblePlot's `facet` option, collapseFacetGridChrome, paneTitleMark,
- *  attachFacetCrosshair, the facet-regions golden) is left in place + still unit-tested via the
- *  assemblePlot facet path, but is unused by the live shared figure. Candidate for a later
- *  cleanup round. NOTE: the bar/stacked fx-grouped + fy-horizontal chrome (collapseFacetChrome /
- *  collapseFacetChromeY) is a DIFFERENT, still-live path — do not remove that.
- *
- *  SHARED-mode faceting passed into renderPane: the value→(col,row) grid assignment the
- *  orchestrator computed, plus the grid dimensions + per-cell pane titles. When present,
- *  renderPane tags each row with its grid-index fields, drops out-of-scope facet values,
- *  drives the markBuilder + x-adapter in faceted mode, and passes `facet` to assemblePlot —
- *  producing ONE faceted SVG whose y-domain is shared across every in-scope pane. */
-export interface FacetInfo {
-  facetField: string;
-  /** facet value → grid cell. Out-of-scope values (not a key) drop the row. */
-  cellFor: Map<string, { col: number; row: number; title: string }>;
-  columns: number;
-  rows: number;
-}
-
 /** `x_ticks` → the candidate tick positions the x adapter places and thins, in its units (epoch ms on
  *  a date axis): the data's own x values (or the figure's, `figureValues`), or the listed values
  *  parsed in the axis' grammar. Undefined when the spec leaves the ticks to the axis. */
@@ -416,15 +394,12 @@ export function paneXValues(rows: PreparedRow[]): number[] {
 /** Render the single-frame pipeline: parse rows → series order/colors → y-axis (incl. the
  *  bar y-extent pre-pass) → x-adapter/xOpts → markBuilder → assemblePlot. No legend or
  *  RenderResult assembly — that stays in renderChart. `classNameSuffix` is threaded into
- *  assemblePlot for unique-but-deterministic clip-path ids per pane (absent → "tblchart").
- *  When `facetInfo` is supplied (shared-mode small multiples), every parsed row is tagged with
- *  its grid indices, the markBuilder binds fx/fy, and the result is ONE faceted SVG. */
+ *  assemblePlot for unique-but-deterministic clip-path ids per pane (absent → "tblchart"). */
 export function renderPane(
   spec: ChartSpec,
   rows: TidyRow[],
   opts: RenderOptions = {},
   classNameSuffix?: string,
-  facetInfo?: FacetInfo,
 ): PaneResult {
   spec = normalizeSpec(spec);
   const xType = spec.xAxisType;
@@ -434,23 +409,23 @@ export function renderPane(
   // Histogram: raw rows are binned (or pre-binned x0/x1/value read directly) into `_x0/_x1/_y`
   // PreparedRows, then rendered through the shared pane tail with a continuous histogram adapter.
   if (spec.chartType === "histogram") {
-    return renderHistogramPane(spec, rows, opts, classNameSuffix, facetInfo, cols, xType);
+    return renderHistogramPane(spec, rows, opts, classNameSuffix, cols, xType);
   }
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
-  const data = prepareRows(spec, rows, cols, adapter, facetInfo);
+  const data = prepareRows(spec, rows, cols, adapter);
 
   if (!data.length) throw new Error("No data.");
 
   const monoStack = spec.chartType === "stacked" && spec.barStack?.mono?.base != null;
-  const allSections = !opts.paletteSeries || monoStack ? rowsWithEverySection(spec, rows, cols, adapter, facetInfo, data) : undefined;
+  const allSections = !opts.paletteSeries || monoStack ? rowsWithEverySection(spec, rows, cols, adapter, data) : undefined;
   const paletteSeries = opts.paletteSeries ?? seriesBeforeSectionScope(spec, allSections, data);
   const paneOpts = paletteSeries ? { ...opts, paletteSeries } : opts;
   const monoBasis = monoStack && allSections ? scopeToSeries(spec, allSections) : undefined;
   // In the row order the full render sums them (assemblePaneResult sorts its rows the same way): a
   // series' sign is a float sum, so a different order can flip a near-cancelling one and swap shades.
   if (monoBasis) sortByCategoryOrder(spec, monoBasis.dataInScope);
-  const pane = assemblePaneResult(spec, paneOpts, classNameSuffix, facetInfo, adapter, cols, data, monoBasis);
+  const pane = assemblePaneResult(spec, paneOpts, classNameSuffix, adapter, cols, data, monoBasis);
   // A date axis fits its ticks to the data's span, but a marker, band or callout past the data
   // widens the scale Plot draws, crowding the labels. Only the render knows that scale, so when it
   // would thin the ticks, render once more with it explicit (the same domain, so nothing else moves).
@@ -464,7 +439,7 @@ export function renderPane(
       // `x_ticks` always: its listed values may lie in the widened part, and its thinning is measured
       // on the drawn span too.
       if (spec.x_ticks != null || temporalXTicks(dates, width, [s0, s1]).length !== temporalXTicks(dates, width).length) {
-        return renderPane(spec, rows, { ...opts, sharedX: { data: [d0, d1], scale: [s0, s1] } }, classNameSuffix, facetInfo);
+        return renderPane(spec, rows, { ...opts, sharedX: { data: [d0, d1], scale: [s0, s1] } }, classNameSuffix);
       }
     }
   }
@@ -478,11 +453,10 @@ function rowsWithEverySection(
   rows: TidyRow[],
   cols: ResolvedColumns,
   adapter: XAdapter,
-  facetInfo: FacetInfo | undefined,
   data: PreparedRow[],
 ): PreparedRow[] | undefined {
   if (!cols.section || !spec.section_order?.length) return undefined;
-  const all = prepareRows({ ...spec, section_order: undefined }, rows, cols, adapter, facetInfo);
+  const all = prepareRows({ ...spec, section_order: undefined }, rows, cols, adapter);
   // section_order only removes rows, so an equal count means it removed none.
   return all.length === data.length ? undefined : all;
 }
@@ -505,7 +479,6 @@ function prepareRows(
   rows: TidyRow[],
   cols: ResolvedColumns,
   adapter: XAdapter,
-  facetInfo: FacetInfo | undefined,
 ): PreparedRow[] {
   // `overlays[].column` names an author-chosen data column, so no canonical PreparedRow field can
   // hold it — carry the ones this spec actually asks for, keyed by name. No overlays ⇒ no field ⇒
@@ -572,22 +545,9 @@ function prepareRows(
         }
         if (Object.keys(bag).length) row._overlayCols = bag;
       }
-      // Shared-mode small multiples: tag the row with its pane's facet value + grid indices.
-      // Rows whose facet value isn't in the ordered pane set are dropped below.
-      if (facetInfo) {
-        const fval = r[facetInfo.facetField] as string;
-        const cell = facetInfo.cellFor.get(fval);
-        if (cell) {
-          row._facet = fval;
-          row._fxCol = String(cell.col);
-          row._fyRow = String(cell.row);
-        }
-      }
       return row;
     })
-    .filter((r) => adapter.validate(r as unknown as Record<string, unknown>))
-    // Drop rows outside the in-scope pane set (consistent with pane_order filtering).
-    .filter((r) => !facetInfo || r._facet != null);
+    .filter((r) => adapter.validate(r as unknown as Record<string, unknown>));
 }
 
 /** [min(_x0), max(_x1)] over binned rows — the continuous bin-edge span the histogram x-scale
@@ -612,7 +572,6 @@ function renderHistogramPane(
   rows: TidyRow[],
   opts: RenderOptions,
   classNameSuffix: string | undefined,
-  facetInfo: FacetInfo | undefined,
   cols: ResolvedColumns,
   xType: NonNullable<ChartSpec["xAxisType"]>,
 ): PaneResult {
@@ -620,7 +579,7 @@ function renderHistogramPane(
   if (!binned.length) throw new Error("No data.");
 
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, histogramDomainOf(binned), spec.tooltip_x_format);
-  return assemblePaneResult(spec, opts, classNameSuffix, facetInfo, adapter, cols, binned);
+  return assemblePaneResult(spec, opts, classNameSuffix, adapter, cols, binned);
 }
 
 /** A histogram pane's binned `_x0/_x1/_y` rows: pre-binned rows read directly, raw rows binned at
@@ -707,7 +666,7 @@ export function paneValueExtent(
   const data =
     spec.chartType === "histogram"
       ? histogramPaneRows(spec, rows, cols, xType, binThresholds)
-      : prepareRows(spec, rows, cols, makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format), undefined);
+      : prepareRows(spec, rows, cols, makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format));
   let min = Infinity;
   let max = -Infinity;
   for (const r of scopeToSeries(spec, data).dataInScope) {
@@ -727,7 +686,7 @@ export function singleChartDrawsNetDots(spec: ChartSpec, rows: TidyRow[]): boole
   spec = normalizeSpec(spec);
   if (spec.chartType !== "stacked" || !spec.xAxisType) return false;
   const cols = resolveColumns(spec, rows);
-  const data = prepareRows(spec, rows, cols, makeXAdapter(spec.xAxisType, spec.xAxisPolicy, undefined, spec.tooltip_x_format), undefined);
+  const data = prepareRows(spec, rows, cols, makeXAdapter(spec.xAxisType, spec.xAxisPolicy, undefined, spec.tooltip_x_format));
   const { seriesNames, dataInScope } = scopeToSeries(spec, data);
   return netDotsDrawn(spec, dataInScope, seriesNames.length);
 }
@@ -831,7 +790,7 @@ export function shapeDomainOver(spec: ChartSpec, rows: TidyRow[]): string[] {
   if (!xType) throw new Error("No xAxisType.");
   const cols = resolveColumns(spec, rows);
   const adapter = makeXAdapter(xType, spec.xAxisPolicy, undefined, spec.tooltip_x_format);
-  const { dataInScope } = scopeToSeries(spec, prepareRows(spec, rows, cols, adapter, undefined));
+  const { dataInScope } = scopeToSeries(spec, prepareRows(spec, rows, cols, adapter));
   sortByCategoryOrder(spec, dataInScope);
   return resolveShapeNames(spec, dataInScope);
 }
@@ -844,7 +803,6 @@ function assemblePaneResult(
   spec: ChartSpec,
   opts: RenderOptions,
   classNameSuffix: string | undefined,
-  facetInfo: FacetInfo | undefined,
   adapter: XAdapter,
   cols: ResolvedColumns,
   data: PreparedRow[],
@@ -1140,8 +1098,6 @@ function assemblePaneResult(
   // margin and their baselines align; otherwise decide per-pane from this pane's width + categories.
   const xLabelMode = opts.xLabelMode ?? bandLabelMode(catsForX, dataWidthForX);
 
-  // Faceted (shared mode): tag x-axis label marks so the grid chrome collapse keeps only the
-  // bottom-row copies. Non-faceted → default false → byte-identical single-chart output.
   // tagCategoryLabels: the hover-accent hook (task 17) is bar/stacked-only — categorical-x line
   // and dot-plot charts share this same adapter path and stay byte-identical.
   // X-axis rug: the strip occupies space between the plot frame and the tick labels. Handed to the
@@ -1149,7 +1105,6 @@ function assemblePaneResult(
   // the room made and the offset taken are one number applied in one place. assemblePlot draws the
   // strip into that gap and must NOT re-add it. 0 when the chart has no rug tracks.
   const xOpts = adapter.buildXOpts(dataInScope, {
-    faceted: facetInfo != null,
     labelMode: xLabelMode,
     tagCategoryLabels: chartType === "bar" || chartType === "stacked",
     bottomGutter: rugAllowance(spec),
@@ -1249,9 +1204,6 @@ function assemblePaneResult(
     parseXValue: adapter.parseX,
     ...(clipMarks ? { clipMarks: true } : {}),
     ...(hasShape ? { shapeField: "_shape", shapeNames, shapeIsSeries } : {}),
-    // Shared-mode small multiples: pass the facet field names so the mark builder binds
-    // fx/fy on its marks (they face into the grid). Absent → single frame.
-    ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
     // Pane stroke flag: thins line marks for figure panes (both modes). renderFigure sets it.
     ...(opts.pane ? { pane: true } : {}),
     // The figure's distinct drawn series (set only by renderFigure): a count a pane can undercount.
@@ -1276,19 +1228,6 @@ function assemblePaneResult(
     ...(opts.hooks ? { hooks: opts.hooks } : {}),
   });
 
-  // Shared-mode small multiples: build the per-cell pane-title list from the grid assignment.
-  const facetOpt = facetInfo
-    ? {
-        columns: facetInfo.columns,
-        rows: facetInfo.rows,
-        cells: Array.from(facetInfo.cellFor.values()).map((c) => ({
-          col: c.col,
-          row: c.row,
-          title: c.title,
-        })),
-      }
-    : undefined;
-
   // Overlay lines — fits, equations, stated slopes, precomputed columns. Built HERE rather than in a
   // mark builder because they apply to every numeric/temporal-x chart type, and this is the one site
   // every chart type passes through. Pushing them into `layers` is also what gets them into the PNG:
@@ -1308,16 +1247,8 @@ function assemblePaneResult(
       ...(xAxisDomain ? { xDomain: xAxisDomain } : {}),
     }).filter((o) => overlayDrawsInPane(o.facet, opts.paneFacetValue));
     overlayTooltips = overlayTooltipLines(spec.overlays, resolvedOverlays);
-    // NOT actually wired for shared-mode small multiples: `facetInfo` here only turns on the
-    // fx/fy CHANNEL NAMES passed to `buildOverlayMarks`, but the `OverlayRow` objects it builds
-    // (marks/overlay.ts) carry no `_fxCol`/`_fyRow` fields — those channels would resolve to
-    // `undefined` on every row if this path ever ran. Unreachable today: no production caller
-    // (engine/figure.ts) supplies `facetInfo` to `renderPane`; only a test does. Wiring this for
-    // real needs `runsOf`/the band mapper in marks/overlay.ts to stamp the resolved overlay's
-    // `facet` value onto each row as `_fxCol`/`_fyRow` before this reaches that point.
     const om = buildOverlayMarks(resolvedOverlays, spec.overlays ?? [], {
       xField: adapter.xField as "_xn" | "_xd",
-      ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
     });
     layers.underlay.push(...om.underlay);
     layers.overlay.push(
@@ -1327,7 +1258,6 @@ function assemblePaneResult(
       // `annotations` placement is the more deliberate one, and both are nudgeable.
       ...buildOverlayLabelMarks(resolvedOverlays, {
         xField: adapter.xField as "_xn" | "_xd",
-        ...(facetInfo ? { fxField: "_fxCol", fyField: "_fyRow" } : {}),
         // The visible frame, so a label anchors on the part of the line that is on screen.
         ...(xAxisDomain ? { xDomain: xAxisDomain } : {}),
         yDomain,
@@ -1356,7 +1286,6 @@ function assemblePaneResult(
     document: opts.document,
     classNameSuffix,
     hooks: opts.hooks,
-    ...(facetOpt ? { facet: facetOpt } : {}),
     ...(opts.hideYAxisLabels ? { hideYAxisLabels: true } : {}),
     ...(opts.marginLeft != null ? { marginLeft: opts.marginLeft } : {}),
     ...(opts.paneFacetValue != null ? { paneFacetValue: opts.paneFacetValue } : {}),

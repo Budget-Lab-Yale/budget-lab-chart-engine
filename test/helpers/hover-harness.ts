@@ -135,6 +135,22 @@ export function hoverFirstMark(svg: SVGSVGElement, markSel: string): void {
   );
 }
 
+/** Hover a continuous-x chart at fraction `frac` (0..1) of its plot width, read from the margins
+ *  assemblePlot stamps on the SVG. Needs `mockRect1to1` first (mountHover applies it). */
+export function hoverPlotAt(svg: SVGSVGElement, frac: number): void {
+  const vb = svg.viewBox.baseVal;
+  const ml = +(svg.dataset.marginLeft ?? "") || 0;
+  const mr = +(svg.dataset.marginRight ?? "") || 0;
+  svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+    new PointerEvent("pointermove", { clientX: ml + frac * (vb.width - ml - mr), clientY: vb.height / 2, bubbles: true }),
+  );
+}
+
+/** The shown card's inner HTML, or "" when no card is shown. */
+export function cardHtml(): string {
+  return cardShown() ? document.body.querySelector<HTMLElement>(".tbl-tooltip")!.innerHTML : "";
+}
+
 export const BAR_MARK = 'g[aria-label="bar"] rect';
 export const HIST_MARK = 'g[aria-label="rect"] rect';
 export const DOT_MARK = 'g[aria-label="dot"] circle';

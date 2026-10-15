@@ -7,7 +7,6 @@ import {
   tblXAxis, tblTemporalXAxis, temporalXTicks, thinTemporalTicks, everyKthThatFits, labelsClear, maxClearLabels, measuredLabelWidth,
   tblBandXAxis, bandLabelMarginBottom, type BandLabelMode,
 } from "./axes";
-import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
 import { parseXValue, parseDate, parseQuarter, formatQuarter } from "../spec/parse-time";
 import { formatNumericX, formatNumericTick, isAnnualSeries } from "./util";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
@@ -28,14 +27,10 @@ export interface XOpts {
   tooltipXFormat?: (v: number) => string;
 }
 
-/** Per-chart options for `buildXOpts`. Named rather than positional: the axis has accumulated four
- *  independent switches, and the positional form left three of the four adapters declaring
- *  placeholder params they never read just to reach the last one. */
+/** Per-chart options for `buildXOpts`. Named rather than positional: the axis has accumulated
+ *  several independent switches, and the positional form left adapters declaring placeholder
+ *  params they never read just to reach the last one. */
 export interface BuildXOptsOptions {
-  /** Shared-mode small multiples: tag the x-axis label marks with `X_AXIS_LABEL_CLASS` so the grid
-   *  chrome collapse can keep the bottom-row copies and drop the duplicate rows. Default false →
-   *  no class → output byte-identical. */
-  faceted?: boolean;
   /** Categorical axis: horizontal / wrapped / rotated category labels. */
   labelMode?: BandLabelMode;
   /** Categorical axis: stamp the hover-accent hook class on the category labels — passed true for
@@ -129,7 +124,7 @@ export function makeXAdapter(
       parseX: (v) => parseXValue("numeric", v),
       xField: "_xn",
       validate: (r) => Number.isFinite(r._xn),
-      buildXOpts(data, { faceted = false, bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
+      buildXOpts(data, { bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range (the
         // "data" here is already-binned counts, which must NOT drive the x domain).
         if (histogramDomain) {
@@ -138,7 +133,6 @@ export function makeXAdapter(
             xPlotOpts: { type: "linear", label: null, axis: null, domain: histogramDomain },
             axisMarks: tblXAxis(
               { xTickFormat: (d: unknown) => formatNumericTick(+(d as number)) },
-              faceted ? X_AXIS_LABEL_CLASS : undefined,
               bottomGutter,
             ),
             markerToX: (m) => +m.x,
@@ -183,7 +177,6 @@ export function makeXAdapter(
           // TEMPORAL axis, which parses and labels it correctly (see `parseDate`).
           axisMarks: tblXAxis(
             { xTickFormat: (d: unknown) => formatNumericTick(+(d as number)), ...(ticks ? { ticks } : {}) },
-            faceted ? X_AXIS_LABEL_CLASS : undefined,
             bottomGutter,
           ),
           markerToX: (m) => +m.x,
@@ -200,7 +193,7 @@ export function makeXAdapter(
       parseX: (v) => parseXValue("temporal", v),
       xField: "_xd",
       validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
-      buildXOpts(data, { faceted = false, bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
+      buildXOpts(data, { bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
         // An ANNUAL series — every point on 1 January — is identified by its year alone, so the
         // month in the card is noise: `Jan 1950` under an axis reading `1950`. The axis already
         // collapses a year-cadence span to a bare `%Y` (`tblTemporalXAxis`), and this stops the
@@ -231,7 +224,7 @@ export function makeXAdapter(
             : sharedX
               ? { domain: sharedX.scale.map((v) => new Date(v)), axis: null, label: null }
               : undefined,
-          axisMarks: tblTemporalXAxis(xDomain, tickWidth, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter, sharedX?.scale, ticks),
+          axisMarks: tblTemporalXAxis(xDomain, tickWidth, bottomGutter, sharedX?.scale, ticks),
           markerToX: (m) => parseDate(m.x),
           // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
           // crosshair's `new Date(string)` auto-detect — that parses YYYY-MM-DD as UTC and then
@@ -250,7 +243,7 @@ export function makeXAdapter(
       parseX: (v) => parseXValue("quarterly", v),
       xField: "_xd",
       validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
-      buildXOpts(data, { faceted = false, bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
+      buildXOpts(data, { bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
         const xs = data.map((r) => +r._xd);
         const xDomain: [Date, Date] = sharedX
           ? [new Date(sharedX.data[0]), new Date(sharedX.data[1])]
@@ -259,7 +252,7 @@ export function makeXAdapter(
         return {
           marginBottom: temporalMarginBottom(ticks) + bottomGutter,
           ...(sharedX ? { xPlotOpts: { domain: sharedX.scale.map((v) => new Date(v)), axis: null, label: null } } : {}),
-          axisMarks: tblTemporalXAxis(xDomain, tickWidth, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter, sharedX?.scale, ticks),
+          axisMarks: tblTemporalXAxis(xDomain, tickWidth, bottomGutter, sharedX?.scale, ticks),
           markerToX: (m) => parseQuarter(m.x),
           tooltipXParse: (v) => +parseQuarter(v),
           tooltipXFormat: tooltipXFormatPattern
@@ -275,7 +268,7 @@ export function makeXAdapter(
       parseX: (v) => parseXValue("categorical", v),
       xField: "_xc",
       validate: (r) => typeof r._xc === "string" && r._xc !== "",
-      buildXOpts(data, { faceted = false, labelMode = "single", tagCategoryLabels = false }: BuildXOptsOptions = {}) {
+      buildXOpts(data, { labelMode = "single", tagCategoryLabels = false }: BuildXOptsOptions = {}) {
         // Category domain in data-encounter order (Style-Guide: declaration order is
         // authoritative; never auto-sort by magnitude).
         const seen = new Set<string>();
@@ -300,7 +293,6 @@ export function makeXAdapter(
           axisMarks: tblBandXAxis(
             categories,
             "x",
-            faceted ? X_AXIS_LABEL_CLASS : undefined,
             labelMode,
             tagCategoryLabels,
           ),

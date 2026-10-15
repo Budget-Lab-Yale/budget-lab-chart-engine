@@ -859,8 +859,8 @@ export function renderFigure(
       opts,
     );
     const panes: FigurePane[] = paneValues.map((value, i) => {
-      // Restrict the rows to this pane (own y-domain/units). No facetInfo → renderPane renders a
-      // standalone single frame for these rows only.
+      // Restrict the rows to this pane (own y-domain/units): renderPane renders a standalone
+      // single frame for these rows only.
       const paneRows = rows.filter((r) => (r[facetField] as string) === value);
       const col = i % columns;
       const p = renderPane(
@@ -963,8 +963,8 @@ export function renderFigure(
   //   2. y-axis tick LABELS show only on the leftmost column (col 0); panes with col > 0 keep
   //      their gridlines + plot area + left margin but hide the tick label text (so panes stay
   //      aligned and the same width).
-  // (The old Plot-faceting path — one combined SVG, collapseFacetGridChrome, facet-aware
-  // crosshair — is retired; combinedSvg is now undefined for shared mode too.)
+  // (The old Plot-faceting path — one combined SVG — is gone; combinedSvg is undefined for
+  // shared mode too.)
 
   // 1. Shared y-domain: probe EACH pane independently and UNION the per-pane domains. A single
   //    combined probe over all in-scope rows would, for STACKED bars, sum same-category rows

@@ -13,8 +13,7 @@ export function buildAreaMarks(
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const { xField, fxField, fyField } = ctx;
-  const facetChannels = fxField && fyField ? { fx: fxField, fy: fyField } : {};
+  const { xField } = ctx;
 
   const seriesNames = ctx.seriesNames ?? [];
   // Stacking order (bottom→top): the dynamic stackOrder when the live layer supplies one
@@ -47,7 +46,6 @@ export function buildAreaMarks(
       stroke: "#FFFFFF",
       strokeWidth: 0.75,
       defined: (r: PreparedRow) => Number.isFinite(r._y),
-      ...facetChannels,
       // Truncated value axis (see assemblePaneResult's clip gate): a stack top above a hard `max`
       // would otherwise paint over the title and legend. The veil below spans yDomain, so it is
       // already inside the frame and needs no clip.
@@ -123,7 +121,6 @@ export function buildAreaMarks(
           y2: "y2",
           fill: "#FFFFFF",
           fillOpacity: 1 - fillOpacity,
-          ...facetChannels,
         }),
       );
     }

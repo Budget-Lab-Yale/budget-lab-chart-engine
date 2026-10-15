@@ -76,7 +76,7 @@ export function buildDumbbellMarks(
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const { xField, colors, fxField, fyField } = ctx;
+  const { xField, colors } = ctx;
   const catField = xField; // "_xc" for the categorical axis
   const seriesNames = ctx.seriesNames ?? [];
   // Orientation defaults to horizontal (categories on screen-y) — long income-group labels read
@@ -84,9 +84,6 @@ export function buildDumbbellMarks(
   const horizontal = isHorizontalDumbbell(spec);
   const catFont = horizontal ? FACETED_CAT_LABEL_PX : TBL.size.axis;
   const r = spec.dot_radius ?? DEFAULT_DOT_R;
-  // Shared-mode small multiples: bind fx/fy so marks face into the grid (Plot allows a category
-  // band AND a facet grid at once — the point.ts idiom, simpler than bar.ts's fy-category topology).
-  const facetChannels = fxField && fyField ? { fx: fxField, fy: fyField } : {};
 
   // Category (band) domain in data-encounter order — declaration/`category_order` is authoritative
   // (the pane already sorted dataInScope by category order upstream).
@@ -176,7 +173,6 @@ export function buildDumbbellMarks(
   const SINGLE_SLOT = "_v";
   const bandBind = (field: string): Record<string, unknown> =>
     sectioned ? { fy: field, y: () => SINGLE_SLOT } : horizontal ? { y: field } : { x: field };
-  const catChannels = sectioned ? {} : facetChannels;
 
   // Truncated value axis (see assemblePaneResult's clip gate): clip the dots + stems to the frame.
   // Reachable here more easily than on other types, because a dumbbell fits its data instead of
@@ -189,7 +185,6 @@ export function buildDumbbellMarks(
     strokeWidth: connWidth,
     className: CONNECTOR_CLASS,
     ...(connDash ? { strokeDasharray: connDash } : {}),
-    ...catChannels,
     ...clipOpt,
   };
 
@@ -226,7 +221,6 @@ export function buildDumbbellMarks(
     stroke: (d: PreparedRow) => strokeFor(d.series),
     strokeWidth: (d: PreparedRow) => strokeWidthFor(d.series),
     r,
-    ...catChannels,
     ...clipOpt,
   };
   const overlay: unknown[] = [Plot.dot(dotData, dotOpts)];
@@ -262,7 +256,6 @@ export function buildDumbbellMarks(
           fontSize: GAP_LABEL_PX,
           fontWeight: 600,
           className: GAP_LABEL_CLASS,
-          ...catChannels,
         };
         overlay.push(
           horizontal

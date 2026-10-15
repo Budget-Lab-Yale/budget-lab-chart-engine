@@ -316,7 +316,7 @@ describe("timeline live mount", () => {
     const host = mountAt(900, CAT_SPEC, CAT_ROWS);
     // Every crosshair/band/histogram/categorical hit rect, the guide line, and the shared tooltip
     // (appended to the tooltip container — document.body by default — not to the card).
-    expect(host.querySelector(`${CROSSHAIR_HIT_SELECTOR}, .tbl-crosshair, .tbl-facet-crosshair`)).toBeNull();
+    expect(host.querySelector(`${CROSSHAIR_HIT_SELECTOR}, .tbl-crosshair`)).toBeNull();
     expect(document.querySelector(".tbl-tooltip")).toBeNull();
   });
 

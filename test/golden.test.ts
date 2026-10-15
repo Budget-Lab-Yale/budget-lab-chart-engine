@@ -22,14 +22,11 @@ import {
   TBL_MARGIN_LEFT,
   TBL_MARGIN_RIGHT,
 } from "../src/engine/theme";
-import { paneTitleMark, temporalXTicks } from "../src/engine/axes";
+import { temporalXTicks } from "../src/engine/axes";
 
 import { makeXAdapter } from "../src/engine/x-adapter";
 import { resolveColor } from "../src/engine/palette";
-import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
-import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
-import { parseDate } from "../src/spec/parse-time";
 import { horizontalBarChartHeight } from "../src/engine/figure";
 import { csvFixtureReader } from "./helpers/csv";
 import { translateOf } from "./helpers/geometry";
@@ -1427,143 +1424,11 @@ describe("golden SVG — stacked bars", () => {
   });
 });
 
-// --- Shared-mode small multiples (task B3) ---
-//
-// Builds a 2x2 faceted line plot directly via assemblePlot (the figure orchestrator B4 will
-// drive this the same way). Each region is one pane; the shared y-scale + fx/fy facet grid
-// renders as ONE SVG. The chrome must collapse to: y-tick labels on the LEFT column only,
-// x-axis labels on the BOTTOM row only, a pane title per cell, per-pane gridlines.
-
-// 2x2 layout: Northeast (0,0), Midwest (1,0), South (0,1), West (1,1).
-const FACET_LAYOUT: Record<string, { col: number; row: number }> = {
-  Northeast: { col: 0, row: 0 },
-  Midwest: { col: 1, row: 0 },
-  South: { col: 0, row: 1 },
-  West: { col: 1, row: 1 },
-};
-
-function buildFacetedPlot() {
-  const rows = parseCsv("./fixtures/facet-regions.csv");
-  // Parse into PreparedRows carrying the temporal x + the facet grid-index fields.
-  const data: PreparedRow[] = rows.map((r) => {
-    const facet = r.facet as string;
-    const cell = FACET_LAYOUT[facet] as { col: number; row: number };
-    return {
-      series: r.series as string,
-      time: r.time as string,
-      _y: r.value === "" ? null : +(r.value as string),
-      _xd: parseDate(r.time as string),
-      _facet: facet,
-      _fxCol: String(cell.col),
-      _fyRow: String(cell.row),
-    };
-  });
-
-  // Faceted line overlay: the line mark carries the fx/fy facet channels.
-  const overlay = [
-    Plot.line(data, {
-      x: "_xd",
-      y: "_y",
-      z: "series",
-      fx: "_fxCol",
-      fy: "_fyRow",
-      stroke: TBL.color.blue,
-      strokeWidth: TBL.strokeWidth.solid,
-      defined: (r: PreparedRow) => Number.isFinite(r._y),
-    }),
-  ];
-
-  // Shared y-axis across all panes.
-  const { domain: yDomain, ticks: yTicks } = computeYAxis(
-    data.map((d) => d._y),
-    { includeZero: true, tickCount: 5 },
-  );
-
-  // Shared temporal x-axis built through the REAL adapter with the faceted flag set, so the
-  // adapter (not the test) is what tags the x-axis label marks with X_AXIS_LABEL_CLASS. This
-  // exercises the production path end-to-end: buildXOpts(data, { faceted: true }) →
-  // tblTemporalXAxis with the class → grid collapse keeps the bottom row.
-  const xOpts = makeXAdapter("temporal").buildXOpts(data, { faceted: true });
-
-  const layers: MarkLayers = {
-    underlay: [],
-    overlay,
-    tagging: [],
-    dashedNames: new Set<string>(),
-  };
-
-  const cells = Object.entries(FACET_LAYOUT).map(([title, { col, row }]) => ({
-    col,
-    row,
-    title,
-  }));
-
-  const spec: ChartSpec = {
-    chartType: "line",
-    title: "Trend by region",
-    subtitle: "Index",
-    xAxisType: "temporal",
-    data: "facet-regions.csv",
-    columns: { facet: "facet" },
-    small_multiples: { columns: 2, mode: "shared" },
-  };
-
-  return assemblePlot({
-    layers,
-    yDomain,
-    yTicks,
-    valueAffixes: { prefix: "", suffix: "" },
-    xOpts,
-    seriesNames: ["Series"],
-    colors: new Map([["Series", TBL.color.blue]]),
-    spec,
-    width: 720,
-    height: 460,
-    document,
-    classNameSuffix: "facet",
-    facet: { columns: 2, rows: 2, cells },
-  }).svg;
-}
-
-describe("golden SVG — shared-mode small multiples", () => {
-  it("renders a 2x2 faceted line grid with collapsed chrome", async () => {
-    const svg = buildFacetedPlot();
-    expect(svg.tagName.toLowerCase()).toBe("svg");
-
-    // ONE left-column y-tick-label set: 2 rows x (originally 2 columns) collapse to 2 groups
-    // (one per row, leftmost column only).
-    const yLabelGroups = svg.querySelectorAll("g.tbl-y-tick-label");
-    expect(yLabelGroups.length).toBe(2);
-
-    // X-axis labels: bottom row only. The temporal axis emits 2 text marks (month + year),
-    // each faceted into the grid; after collapse each keeps only its bottom-row copies =
-    // 2 columns. So 2 marks x 2 bottom-row cells = 4 groups.
-    const xLabelGroups = svg.querySelectorAll(`g.${X_AXIS_LABEL_CLASS}`);
-    expect(xLabelGroups.length).toBe(4);
-
-    // A pane title per cell (4 panes → 4 title groups, none collapsed).
-    const titleTexts = Array.from(
-      svg.querySelectorAll("g.tbl-pane-title text"),
-    ).map((t) => t.textContent);
-    expect(titleTexts.sort()).toEqual(["Midwest", "Northeast", "South", "West"]);
-
-    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/facet-regions.golden.svg");
-  });
-
-  it("faceted grid render is deterministic (byte-identical)", () => {
-    const a = buildFacetedPlot().outerHTML;
-    const b = buildFacetedPlot().outerHTML;
-    expect(a).toBe(b);
-  });
-});
-
 // --- Figure orchestrator: shared-mode small multiples (task B4) ---
 //
 // Drives the WHOLE figure path through `renderFigure`: the orchestrator partitions the
 // facet-regions fixture by `facet`, lays out a 2x2 grid, computes ONE shared y-domain, and
-// (via renderPane → assemblePlot's `facet` option) renders ONE faceted SVG. The line mark
-// builder binds fx/fy from the MarkContext facet fields. Asserts grid + collapsed chrome +
-// pane titles, then locks the combined SVG to a golden.
+// renders one SVG per pane through renderPane, then locks the panes to a golden.
 
 const FIGURE_SPEC: ChartSpec = {
   chartType: "line",
@@ -2038,16 +1903,7 @@ describe("golden — faceted horizontal stacked draws as groups", () => {
   });
 });
 
-describe("axes primitives — pane titles + tick density (task B3)", () => {
-  it("paneTitleMark returns one non-empty text mark per grid", () => {
-    const marks = paneTitleMark([
-      { col: 0, row: 0, title: "A" },
-      { col: 1, row: 0, title: "B" },
-    ]);
-    expect(marks.length).toBe(1);
-    expect(marks[0]).toBeTruthy();
-  });
-
+describe("axes primitives — tick density (task B3)", () => {
   it("a narrower data width yields fewer (or equal) x ticks", () => {
     const xDomain: [Date, Date] = [new Date(2010, 0, 1), new Date(2026, 0, 1)];
     const wide = temporalXTicks(xDomain, 640);

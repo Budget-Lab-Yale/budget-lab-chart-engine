@@ -29,12 +29,7 @@ export function buildLineMarks(
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const { xField, colors, fxField, fyField } = ctx;
-
-  // Shared-mode small multiples: when the orchestrator supplies facet field names, every mark
-  // binds `fx`/`fy` so it faces into the grid. Absent → no facet channels → single frame.
-  const facetChannels =
-    fxField && fyField ? { fx: fxField, fy: fyField } : {};
+  const { xField, colors } = ctx;
 
   // Lines render at the full weight in panes too (matches single charts) for legibility.
   const solidStroke = TBL.strokeWidth.solid;
@@ -95,7 +90,6 @@ export function buildLineMarks(
             fill,
             fillOpacity: region.fillOpacity ?? SHADE_FILL_OPACITY,
             className: SHADE_CLASS,
-            ...facetChannels,
             ...clipOpt,
           }),
         );
@@ -122,7 +116,6 @@ export function buildLineMarks(
           y2: "_hi",
           fill: bandColor,
           fillOpacity: 0.18,
-          ...facetChannels,
           ...clipOpt,
         },
       ),
@@ -149,7 +142,6 @@ export function buildLineMarks(
         strokeWidth: dashedStroke,
         strokeDasharray: TBL.dashArray,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
-        ...facetChannels,
         ...clipOpt,
       }),
     );
@@ -189,7 +181,6 @@ export function buildLineMarks(
           strokeWidth: solidStroke,
           ...(projDashed ? { strokeDasharray: TBL.dashArray } : {}),
           defined: (r: PreparedRow) => Number.isFinite(r._y),
-          ...facetChannels,
           ...clipOpt,
         }),
       );
@@ -203,7 +194,6 @@ export function buildLineMarks(
           stroke: "series",
           strokeWidth: solidStroke,
           defined: (r: PreparedRow) => Number.isFinite(r._y),
-          ...facetChannels,
           ...clipOpt,
         }),
       );
@@ -217,7 +207,6 @@ export function buildLineMarks(
         stroke: "series",
         strokeWidth: solidStroke,
         defined: (r: PreparedRow) => Number.isFinite(r._y),
-        ...facetChannels,
         ...clipOpt,
       }),
     );
@@ -242,7 +231,6 @@ export function buildLineMarks(
         r: ctx.pane ? MARK_LINE_POINT_PANE_R : MARK_LINE_POINT_R,
         stroke: "#ffffff",
         strokeWidth: 1,
-        ...facetChannels,
         ...clipOpt,
       }),
     );

@@ -6,9 +6,9 @@
 //   1. fx/fy facets INSIDE one plot — grouped vertical bars (fx per category) and horizontal bars
 //      (fy per category). Plot emits ONE cell-sized clipPath and lets each facet group's translate
 //      move it, so the clip must be verified per cell, not per SVG.
-//   2. small_multiples — both modes are per-pane compositions (each pane its own single-frame SVG,
-//      see FacetInfo's DORMANT note), so each pane hits the single-frame clip path independently and
-//      only the panes whose data exceeds the domain are clipped.
+//   2. small_multiples — both modes are per-pane compositions (each pane its own single-frame SVG),
+//      so each pane hits the single-frame clip path independently and only the panes whose data
+//      exceeds the domain are clipped.
 //
 // The jsdom assertions can only prove the clip-path attributes are wired. Whether the geometry is
 // actually clipped — and clipped to the right CELL rather than to the whole frame — needs a real

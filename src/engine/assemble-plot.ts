@@ -5,13 +5,11 @@
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, MARK_POINT_R } from "./theme";
-import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth, fittedSectionGapPx } from "./axes";
-import type { PaneTitleCell } from "./axes";
+import { tblPlotDefaults, gridAndYLabels, wrapToWidth, fittedSectionGapPx } from "./axes";
 import {
   collapseFacetChrome,
   collapseFacetChromeY,
   spreadSections,
-  collapseFacetGridChrome,
   GRIDLINE_CLASS,
   ZERO_BASELINE_CLASS,
   X_TICK_LABEL_CLASS,
@@ -270,18 +268,6 @@ export interface AssembleOptions {
    *  (byte-identical single-chart + per-pane output). Vertical (line) charts only — shared mode is
    *  line-only, so this never collides with the horizontal-bar `layers.marginLeft` gutter. */
   marginLeft?: number;
-  /** Optional SHARED-mode small-multiples faceting. When present, assemblePlot builds ONE
-   *  Plot with a 2-D facet grid (`fx` = columns, `fy` = rows) sharing the single `yDomain`,
-   *  then collapses the repeated per-facet chrome to the Style-Guide grid look (y-tick
-   *  labels on the leftmost column only, x-axis labels on the bottom row only, per-pane
-   *  gridlines + pane titles kept). Absent → behavior is EXACTLY as today (single frame).
-   *
-   *  The layer's marks must already carry `fx`/`fy` channels bound to the per-row grid-index
-   *  fields (`fx: "_fxCol"`, `fy: "_fyRow"` — String column/row indices the orchestrator adds
-   *  to each data row). assemblePlot drives Plot's `fx`/`fy` scale domains from `columns`/
-   *  `rows` so cell order is deterministic, adds one pane title per cell, and collapses the
-   *  repeated chrome. */
-  facet?: FacetOptions;
   /** Shared-mode small multiples, non-leftmost columns: emit the y gridlines (so the plot
    *  area stays aligned with the left column) but SKIP the y-tick label text marks. The left
    *  margin is unchanged so every pane is the same width. Default/absent → labels emitted
@@ -324,16 +310,6 @@ export interface AssembleResult {
   seriesPainted: Map<string, string>;
 }
 
-export interface FacetOptions {
-  /** Grid columns. Plot `fx` domain becomes ["0".."columns-1"]. */
-  columns: number;
-  /** Grid rows. Plot `fy` domain becomes ["0".."rows-1"]. */
-  rows: number;
-  /** One entry per pane: its (col,row) cell + display title. Drives the per-cell pane titles
-   *  (and documents the orchestrator's `_fxCol`/`_fyRow` assignment). */
-  cells: PaneTitleCell[];
-}
-
 /** Wrap a tick formatter with the caller's `tickLabel` hook. `null` from the hook means "engine
  *  default", so an un-hooked axis returns the formatter's own string unchanged and the output is
  *  byte-identical to not passing hooks at all. */
@@ -365,7 +341,6 @@ export function assemblePlot({
   document,
   classNameSuffix,
   marginLeft,
-  facet,
   hideYAxisLabels,
   paneFacetValue,
   hooks,
@@ -374,23 +349,6 @@ export function assemblePlot({
   // Shared-mode small multiples override the left margin; absent → default TBL_MARGIN_LEFT.
   // Used for the plot defaults, the gridline insetLeft / y-label dx, and the zero-baseline.
   const effMarginLeft = marginLeft ?? TBL_MARGIN_LEFT;
-  // SHARED-mode small-multiples grid: a 2-D fx×fy facet sharing the single yDomain. The
-  // layer's marks already carry fx/fy channels; here we drive the fx/fy scale domains and
-  // (after render) collapse the repeated per-facet chrome to the grid look.
-  const gridFaceted = facet != null;
-
-  // Grid faceting (fx/fy small-multiples) of GROUPED bars is a later task (B8): a grouped-bar
-  // layer ALSO claims `fx` (its category group scale) and supplies `fxScaleOpts`, which would
-  // collide with the grid's own `fx` column scale — Plot would render into the wrong/empty
-  // cells and the chrome-collapse `else-if` chain (which prefers the `faceted` branch when
-  // `xScaleField === "fx"`) would skip `collapseFacetGridChrome` entirely. Rather than render
-  // silently-wrong output, fail loud until B8 implements it properly.
-  if (gridFaceted && (layers.xScaleField === "fx" || layers.fxScaleOpts != null)) {
-    throw new Error(
-      "grid faceting of grouped-bar charts is not yet supported (the grouped-bar `fx` " +
-        "category scale collides with the grid `fx` column scale; planned for task B8)",
-    );
-  }
 
   const marks: unknown[] = [];
   // Annotation LABEL text marks are collected here and pushed LAST (after every band rect, gridline,
@@ -1132,14 +1090,7 @@ export function assemblePlot({
     );
   }
 
-  // 7. Pane titles (shared-mode small-multiples grid only): one per facet cell at the pane's
-  //    top-left. The mark facets on both fx (=String(col)) and fy (=String(row)) so each
-  //    title lands in its own (col,row) cell.
-  if (gridFaceted && facet) {
-    marks.push(...paneTitleMark(facet.cells));
-  }
-
-  // 8. Annotation labels LAST — on top of every band rect, gridline, axis rule, data line and
+  // 7. Annotation labels LAST — on top of every band rect, gridline, axis rule, data line and
   //    reference line, so no later stroke paints over them.
   marks.push(...labelMarks);
 
@@ -1207,26 +1158,6 @@ export function assemblePlot({
   // Per-series marker symbols (line point markers). axis:null suppresses Plot's symbol legend
   // (the engine renders its own legend).
   if (layers.symbolScaleOpts) plotOpts.symbol = { ...layers.symbolScaleOpts, axis: null };
-  // Shared-mode grid: drive the fx (columns) + fy (rows) facet scales from the layout. The
-  // domains are the String column/row indices the marks reference; explicit so cell order is
-  // deterministic. axis:null suppresses Plot's native facet-axis chrome (we supply our own
-  // pane titles + collapsed engine chrome).
-  if (gridFaceted && facet) {
-    // paddingInner separates the panes so each (col,row) cell reads as a DISTINCT small
-    // multiple sharing one y-scale — without a vertical gap the two stacked rows of a column
-    // run together and look like a single tall chart with a doubled axis. Rows need a larger
-    // gap (the shared y-axis repeats per row, so the boundary must be unmistakable).
-    plotOpts.fx = {
-      domain: Array.from({ length: facet.columns }, (_, i) => String(i)),
-      axis: null,
-      paddingInner: 0.08,
-    };
-    plotOpts.fy = {
-      domain: Array.from({ length: facet.rows }, (_, i) => String(i)),
-      axis: null,
-      paddingInner: 0.22,
-    };
-  }
   if (document) plotOpts.document = document;
 
   const svg = Plot.plot(plotOpts) as SVGSVGElement;
@@ -1236,8 +1167,8 @@ export function assemblePlot({
   // undeclared facet scale falls back to Plot's own default facet-axis chrome (raw domain
   // values rendered as text) instead of the engine's collapsed chrome. This is exactly how the
   // fig09/fig10 defect happened: a mark builder pushed fy-bound header marks without ever
-  // declaring `fyScaleOpts`. Every scale THIS module declares always sets `axis: null` (see
-  // `plotOpts.fx`/`plotOpts.fy` above), so Plot's default facet-axis groups appearing in the
+  // declaring `fyScaleOpts`. Every facet scale a layer declares sets `axis: null` (passed through
+  // as `plotOpts.fx`/`plotOpts.fy` above), so Plot's default facet-axis groups appearing in the
   // rendered SVG are a reliable, deterministic tell that a mark carries a facet channel the
   // layer never accounted for. Fail loudly here — at the one chokepoint every chart renders
   // through — instead of shipping a silently-broken chart.
@@ -1288,11 +1219,6 @@ export function assemblePlot({
       marginBottom: (plotOpts.marginBottom as number) ?? 24,
       ...(sectionGapRanges.length ? { sectionGaps: sectionGapRanges } : {}),
     });
-  } else if (gridFaceted) {
-    // Shared-mode small-multiples grid: Plot repeated the y-tick labels in every column and
-    // the x-axis labels in every row. Keep the leftmost column's y-labels + the bottom row's
-    // x-labels; drop the duplicates. Per-pane gridlines + pane titles are kept (correct).
-    collapseFacetGridChrome(svg);
   }
 
   // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series

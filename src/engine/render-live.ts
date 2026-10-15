@@ -348,7 +348,7 @@ function rugStripTop(svgEl: SVGSVGElement): number | null {
  */
 function addLineHitPaths(svgEl: SVGSVGElement): void {
   const NS = "http://www.w3.org/2000/svg";
-  const overlay = svgEl.querySelector(".tbl-crosshair-hit, .tbl-facet-crosshair-hit");
+  const overlay = svgEl.querySelector(".tbl-crosshair-hit");
   // A per-series `method`/`column` overlay on a line chart lands in this same
   // `g[aria-label="line"]` namespace (marks/overlay.ts): Plot.line wraps it in its own
   // `g[aria-label="line"]`, nesting the mark's `g.tbl-overlay-line` INSIDE that — so the base
@@ -1422,7 +1422,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         xField: "time",
         yField: "value",
         seriesField: "series",
-        xParse: tooltipXParse as ((v: unknown) => number) | undefined,
+        // Set by every continuous x-adapter; a categorical chart took a branch above.
+        xParse: tooltipXParse as (v: unknown) => number,
         xFormat: tooltipXFormat,
         yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
         // ONE resolved icon per series, from the legend's own rows — which is what carries the point
@@ -2442,7 +2443,8 @@ function wireFigureSvg(
     xField: "time",
     yField: "value",
     seriesField: "series",
-    xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
+    // Set by every continuous x-adapter; a categorical pane returned above.
+    xParse: ctx.tooltipXParse as (v: unknown) => number,
     xFormat: ctx.tooltipXFormat,
     yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
     ...(ctx.icons ? { icons: ctx.icons } : {}),
@@ -2470,7 +2472,7 @@ function wireFigureSvg(
       xField: "time",
       yField: "value",
       seriesField: "series",
-      xParse: ctx.tooltipXParse as ((v: unknown) => number) | undefined,
+      xParse: ctx.tooltipXParse as (v: unknown) => number,
       xFormat: ctx.tooltipXFormat,
       // `tooltipXFormat` is always a function on a temporal axis (the x-adapter defaults it to the
       // axis-matching "%b %Y"), so the cursor cannot tell an author's format from the default and

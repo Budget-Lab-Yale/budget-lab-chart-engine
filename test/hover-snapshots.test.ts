@@ -50,7 +50,6 @@ beforeEach(() => {
  *  rects are included: they carry the geometry the pointer is resolved against. */
 const HOVER_CLASSES = [
   "tbl-crosshair", "tbl-crosshair-hit",
-  "tbl-facet-crosshair", "tbl-facet-crosshair-hit",
   "tbl-band-crosshair-hl", "tbl-band-crosshair-hit",
   "tbl-hist-hover-hl", "tbl-hist-hover-hit",
   "tbl-catline-hl", "tbl-catline-guide", "tbl-catline-hit",

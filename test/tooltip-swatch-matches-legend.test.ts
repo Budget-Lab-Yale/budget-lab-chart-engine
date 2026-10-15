@@ -13,18 +13,15 @@
 // CSS shape rules; that CSS is gone, and a test comparing bytes could only ever be rewritten
 // wholesale whenever the emitter changed. `test/key-agreement.test.ts` is the structural gate that
 // a key matches its mark; this file pins what each individual shape actually draws.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
-import {
-  buildFacetTooltipHtml,
-  buildBandTooltipHtml,
-  seriesSwatchHtml,
-} from "../src/engine/crosshair";
+import { buildBandTooltipHtml, seriesSwatchHtml } from "../src/engine/crosshair";
 import { resolveHatch, defaultHatchStroke } from "../src/engine/hatch";
-import { ICON_BOX, resolveTooltipIcons, type IconSpec } from "../src/engine/icon";
+import { ICON_BOX, type IconSpec } from "../src/engine/icon";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { mountHover, hoverPlotAt, cardHtml } from "./helpers/hover-harness";
 
 const OPTS = { width: 640, height: 360, document };
 const GROUND = "#58A3E7";
@@ -102,7 +99,17 @@ describe("seriesSwatchHtml — one emitter for every tooltip key", () => {
   });
 });
 
+// The card here is the one a reader sees: the chart is mounted and hovered at its last x (2021), so
+// the rows come from the live line/area crosshair, not from a builder called in isolation.
 describe("the line/area tooltip agrees with its legend", () => {
+  // The card is a body-level singleton, so one case's card would leak into the next.
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
   const AREA_ROWS: TidyRow[] = [
     { time: "2020", series: "plain", value: "3" },
     { time: "2021", series: "plain", value: "4" },
@@ -119,18 +126,19 @@ describe("the line/area tooltip agrees with its legend", () => {
     series_patterns: { textured: "/" },
   } as unknown as ChartSpec;
 
-  const values = new Map([
-    ["plain", new Map([[1, 4]])],
-    ["textured", new Map([[1, 5]])],
-  ]);
+  /** Mount `spec` live, hover its last x, and return the card's HTML. */
+  const liveCard = (spec: ChartSpec, rows: TidyRow[]): string => {
+    const { svgs } = mountHover(spec, rows);
+    hoverPlotAt(svgs[0]!, 0.95);
+    const html = cardHtml();
+    expect(html).not.toBe("");
+    return html;
+  };
 
   it("shows a square, not a line, on a filled chart type", () => {
-    const r = renderChart(AREA, AREA_ROWS, OPTS);
-    const html = buildFacetTooltipHtml("pane", "2021", values, 1, {
-      yFormat: String,
-      icons: resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }),
-    });
+    const html = liveCard(AREA, AREA_ROWS);
     const doc = new DOMParser().parseFromString(html, "text/html");
+    // Two series rows. The stacked area's Total row names no series, so its swatch draws nothing.
     const svgs = [...doc.querySelectorAll(".tbl-tooltip-swatch svg")];
     expect(svgs).toHaveLength(2);
     // The untextured row is a bare square. (The textured one is a square GROUND under a glyph, whose
@@ -143,10 +151,7 @@ describe("the line/area tooltip agrees with its legend", () => {
   it("carries the texture, so the row matches the key the reader just read", () => {
     const r = renderChart(AREA, AREA_ROWS, OPTS);
     const item = r.legendItems!.find((i) => i.series === "textured")!;
-    const html = buildFacetTooltipHtml("pane", "2021", values, 1, {
-      yFormat: String,
-      icons: resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }),
-    });
+    const html = liveCard(AREA, AREA_ROWS);
     // The textured row carries the glyph's bands; the plain row is one flat rect.
     const rows = html.split('<div class="tbl-tooltip-row"').slice(1);
     const marksIn = (row: string) => drawing(swatchSvg(row)!);
@@ -164,10 +169,7 @@ describe("the line/area tooltip agrees with its legend", () => {
     renderLegend(parent, r.legendItems!);
     const legendGlyph = parent.querySelector('[data-series="textured"] .tbl-legend-swatch svg')!;
 
-    const html = buildFacetTooltipHtml("pane", "2021", values, 1, {
-      yFormat: String,
-      icons: resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }),
-    });
+    const html = liveCard(AREA, AREA_ROWS);
     const rows = html.split('<div class="tbl-tooltip-row"').slice(1);
     const tooltipGlyph = swatchSvg(rows.find((r) => r.includes("textured"))!)!;
 
@@ -185,13 +187,9 @@ describe("the line/area tooltip agrees with its legend", () => {
     // ONE series, so this chart draws no legend at all — the key comes from `seriesKeyRows`, the
     // row the legend WOULD have drawn. Before the consolidation this reached a separate synthesised
     // default inside the tooltip builder, which is the path that drifted.
-    const r = renderChart(spec, AREA_ROWS.filter((row) => row.series === "plain"), OPTS);
-    expect(r.legendItems).toBeNull();
-    const html = buildFacetTooltipHtml("pane", "2021", new Map([["plain", new Map([[1, 4]])]]), 1, {
-      yFormat: String,
-      icons: resolveTooltipIcons({ legendItems: r.legendItems, keyRows: r.seriesKeyRows }),
-    });
-    const svg = swatchSvg(html)!;
+    const plainRows = AREA_ROWS.filter((row) => row.series === "plain");
+    expect(renderChart(spec, plainRows, OPTS).legendItems).toBeNull();
+    const svg = swatchSvg(liveCard(spec, plainRows))!;
     expect(svg.querySelector("line")).not.toBeNull();
     expect(svg.querySelector("rect")).toBeNull();
   });

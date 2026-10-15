@@ -1359,6 +1359,7 @@ describe("attachSecondaryLineCursor (coordinated cursor)", () => {
       xField: "time",
       yField: "value",
       seriesField: "series",
+      xParse: (v) => +new Date(String(v)),
       colors: new Map([["A", "#f00"], ["B", "#00f"]]),
     });
     drive(+new Date("2021-01-01"));
@@ -1373,7 +1374,7 @@ describe("attachSecondaryLineCursor (coordinated cursor)", () => {
 
   it("empty rows → a callable no-op driver", () => {
     const svg = makeSvg();
-    const drive = attachSecondaryLineCursor(svg, { rows: [] });
+    const drive = attachSecondaryLineCursor(svg, { rows: [], xParse: Number });
     expect(() => drive(123)).not.toThrow();
   });
 });

@@ -48,7 +48,10 @@ export interface CrosshairOptions {
   xField?: string;
   yField?: string;
   seriesField?: string;
-  xParse?: (v: unknown) => number;
+  /** The x-adapter's `tooltipXParse`. Required: both readers of this type are continuous-x (a
+   *  categorical chart is dispatched to the catline or band crosshair first), and every continuous
+   *  adapter supplies it — see x-adapter.ts. */
+  xParse: (v: unknown) => number;
   xFormat?: (v: number) => string;
   /** True when `xFormat` came from the spec's own `tooltip_x_format` rather than the x-adapter's
    *  axis-matching default. Read ONLY by `attachSecondaryLineCursor`, which shares this options
@@ -133,7 +136,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
     seriesLabels,
     seriesOrder,
   } = opts;
-  let { xParse, xFormat } = opts;
+  const { xParse, xFormat } = opts;
   const yFormat =
     opts.yFormat ??
     ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
@@ -151,38 +154,14 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   const plotW = W - ml - mr;
   const plotH = H - mt - mb;
 
-  if (!xParse) {
-    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
-    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
-    const sample = rows[0]?.[xField];
-    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
-      xParse = (v) => +new Date(String(v));
-      if (!xFormat) xFormat = (v) => d3.timeFormat("%b %Y")(new Date(v));
-    } else if (/Q\d/.test(String(sample))) {
-      xParse = (v) => {
-        const m = /(\d{4})Q(\d)/.exec(String(v));
-        return +new Date(+(m as RegExpExecArray)[1]!, (+(m as RegExpExecArray)[2]! - 1) * 3, 1);
-      };
-      if (!xFormat)
-        xFormat = (v) => {
-          const d = new Date(v);
-          const q = Math.floor(d.getMonth() / 3) + 1;
-          return `${d.getFullYear()}Q${q}`;
-        };
-    } else {
-      xParse = (v) => +(v as number);
-      if (!xFormat) xFormat = (v) => String(v);
-    }
-  }
-
-  const xs = Array.from(new Set(rows.map((r) => xParse!(r[xField])))).sort((a, b) => a - b);
+  const xs = Array.from(new Set(rows.map((r) => xParse(r[xField])))).sort((a, b) => a - b);
   const bySeries = new Map<string, Map<number, number>>();
   for (const r of rows) {
     const v = r[yField];
     if (v === "" || v == null) continue; // skip blank rows
     const k = r[seriesField] as string;
     if (!bySeries.has(k)) bySeries.set(k, new Map());
-    bySeries.get(k)!.set(xParse!(r[xField]), +(v as number));
+    bySeries.get(k)!.set(xParse(r[xField]), +(v as number));
   }
   // The range Plot drew, which can be wider than these rows (see readScaleDomain).
   const [xMin, xMax] = readScaleDomain(svgEl, "x") ?? [xs[0]!, xs[xs.length - 1]!];
@@ -316,164 +295,6 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): v
   hit.addEventListener("pointerdown", update as EventListener);
 }
 
-// ---------------------------------------------------------------------------
-// Facet-aware crosshair — SHARED-mode small-multiples LINE figures
-// ---------------------------------------------------------------------------
-// A shared figure is ONE faceted SVG (fx columns x fy rows) sharing a y-scale. The flat
-// `attachCrosshair` above would span the guide across BOTH stacked rows of a column and
-// collide tooltip data across panes. This variant treats each facet CELL as a separate
-// chart: it resolves the cell under the cursor, draws a guide confined to that cell's plot
-// y-range, snaps to the shared x-domain within the cell, and shows a tooltip headed by the
-// pane's title with only that pane's series values.
-
-/** One facet's data + identity, supplied by the live layer (grouped from dataInScope). */
-export interface FacetCrosshairPane {
-  /** The facet value (e.g. "Northeast"). */
-  facet: string;
-  /** Grid column index. */
-  col: number;
-  /** Grid row index. */
-  row: number;
-  /** Pane display title (header of the tooltip). */
-  title: string;
-  /** This pane's rows (already restricted to this facet). */
-  rows: Row[];
-}
-
-export interface FacetCrosshairOptions {
-  panes: FacetCrosshairPane[];
-  xField?: string;
-  yField?: string;
-  seriesField?: string;
-  xParse?: (v: unknown) => number;
-  xFormat?: (v: number) => string;
-  yFormat?: (v: number) => string;
-  seriesLabels?: Record<string, string>;
-  seriesOrder?: string[];
-  /** Series → its resolved icon; see icon.ts resolveTooltipIcons. */
-  icons?: Map<string, IconSpec>;
-  /** Reparent the floating tooltip card into this element instead of `document.body`. Not
-   *  wired from MountOptions today — this attach function is dead on the live render path (see
-   *  the UN-GATED `getSharedTooltip` call above); kept for interface consistency with the other
-   *  five attach-options types, which all share this field. */
-  tooltipContainer?: HTMLElement;
-}
-
-/** A resolved facet cell's geometry in SVG user coords. The plot area of the cell is
- *  [x0,x1] x [y0,y1]; the guide is confined to [y0,y1]; the shared x-domain maps linearly
- *  across [x0,x1]. */
-export interface FacetCell {
-  facet: string;
-  col: number;
-  row: number;
-  title: string;
-  x0: number;
-  x1: number;
-  y0: number;
-  y1: number;
-}
-
-/** A minimal view of a Plot band scale (what `svg.scale("fx"|"fy")` returns). */
-export interface BandScaleLike {
-  domain: unknown[];
-  range: [number, number] | number[];
-  bandwidth?: number;
-}
-
-/** A minimal view of a Plot continuous scale (what `svg.scale("x"|"y")` returns). */
-export interface ContinuousScaleLike {
-  range: [number, number] | number[];
-}
-
-/**
- * PURE — compute the absolute SVG-user-coordinate plot bounds of every facet cell from
- * Plot's faceted scales. Each cell's origin is the band START of its (fx col, fy row); the
- * within-cell plot area is the shared x/y scale ranges (which are cell-LOCAL), offset by the
- * cell origin. Verified against the rendered figure (fy paddingInner 0.22, fx 0.08):
- *   fx range [44,822] bandwidth 373 → col origins {0,405} (= bandStart − range[0]).
- *   x range [44,417] local, y range [177,18] local → cell plot [tx+44,tx+417] x [ty+18,ty+177].
- *
- * Band-start derivation (no `.apply` is exposed): origin(i) = i * step, where step is the
- * inter-band stride. With n>1 bands sharing the range, step = (rangeSpan − bandwidth)/(n−1).
- * For n=1 there is a single band at origin 0. `panes` supplies the (col,row)→facet/title map;
- * cells with no matching pane are skipped.
- */
-export function computeFacetCells(
-  fx: BandScaleLike,
-  fy: BandScaleLike,
-  x: ContinuousScaleLike,
-  y: ContinuousScaleLike,
-  panes: Array<{ facet: string; col: number; row: number; title: string }>,
-): FacetCell[] {
-  const bandOrigin = (scale: BandScaleLike): number[] => {
-    const n = scale.domain.length;
-    const r0 = scale.range[0]!;
-    const r1 = scale.range[1]!;
-    const span = r1 - r0;
-    const bw = scale.bandwidth ?? span;
-    if (n <= 1) return [0];
-    const step = (span - bw) / (n - 1);
-    return Array.from({ length: n }, (_, i) => i * step);
-  };
-
-  const colOrigins = bandOrigin(fx);
-  const rowOrigins = bandOrigin(fy);
-
-  // Within-cell plot ranges are cell-LOCAL (the same in every cell — shared scales).
-  const xLo = Math.min(x.range[0]!, x.range[1]!);
-  const xHi = Math.max(x.range[0]!, x.range[1]!);
-  const yLo = Math.min(y.range[0]!, y.range[1]!);
-  const yHi = Math.max(y.range[0]!, y.range[1]!);
-
-  const cells: FacetCell[] = [];
-  for (const p of panes) {
-    const tx = colOrigins[p.col] ?? 0;
-    const ty = rowOrigins[p.row] ?? 0;
-    cells.push({
-      facet: p.facet,
-      col: p.col,
-      row: p.row,
-      title: p.title,
-      x0: tx + xLo,
-      x1: tx + xHi,
-      y0: ty + yLo,
-      y1: ty + yHi,
-    });
-  }
-  return cells;
-}
-
-/**
- * PURE — resolve which facet cell a cursor (svgX, svgY) is over. A cursor inside a cell's
- * plot rect [x0,x1] x [y0,y1] matches that cell directly. Outside every plot rect we still
- * snap to the nearest cell BY ROW then COLUMN band, so hovering a pane's title row / inter-
- * pane gutter still attaches to the intended pane (mirrors the band crosshair's snap). Pass
- * `strict` to disable the nearest-snap and require containment (returns null outside). Returns
- * null when there are no cells.
- */
-export function resolveFacetCell(
-  cells: FacetCell[],
-  svgX: number,
-  svgY: number,
-  strict = false,
-): FacetCell | null {
-  if (!cells.length) return null;
-  for (const c of cells) {
-    if (svgX >= c.x0 && svgX <= c.x1 && svgY >= c.y0 && svgY <= c.y1) return c;
-  }
-  if (strict) return null;
-  // Nearest by clamped distance to each cell's plot rect.
-  let best: FacetCell | null = null;
-  let bestDist = Infinity;
-  for (const c of cells) {
-    const dx = svgX < c.x0 ? c.x0 - svgX : svgX > c.x1 ? svgX - c.x1 : 0;
-    const dy = svgY < c.y0 ? c.y0 - svgY : svgY > c.y1 ? svgY - c.y1 : 0;
-    const d = dx * dx + dy * dy;
-    if (d < bestDist) { bestDist = d; best = c; }
-  }
-  return best;
-}
-
 /** One tooltip key, for every tooltip path.
  *
  *  There were three near-copies of this, and each knew about a different subset of the channels — so
@@ -596,252 +417,6 @@ function tooltipSeriesRowHtml(
   return `<div class="tbl-tooltip-row">${swatch}<span>${label}<span class="tbl-tooltip-value">${escapeHtml(valueText)}</span></span></div>`;
 }
 
-/**
- * PURE — build the tooltip inner HTML for ONE facet cell at the snapped x. Header is the
- * pane title + the formatted x label; then one row per series in `seriesOrder` that has a
- * finite value at `snappedX` in this facet's `bySeries` lookup. Mirrors attachCrosshair's
- * row markup (swatch + label + value). No DOM access.
- */
-export function buildFacetTooltipHtml(
-  title: string,
-  xLabel: string,
-  bySeries: Map<string, Map<number, number>>,
-  snappedX: number,
-  opts: {
-    seriesLabels?: Record<string, string>;
-    seriesOrder?: string[];
-    yFormat: (v: number) => string;
-    /** Series → its resolved icon. The ONLY source of a row's key; see resolveTooltipIcons. */
-    icons?: Map<string, IconSpec>;
-  },
-): string {
-  const { seriesLabels, seriesOrder, yFormat } = opts;
-  let html = `<div class="tbl-tooltip-head">${escapeHtml(title)} · ${escapeHtml(xLabel)}</div>`;
-  const tipSeries =
-    seriesOrder && seriesOrder.length
-      ? seriesOrder.filter((s) => bySeries.has(s))
-      : [...bySeries.keys()];
-  for (const series of tipSeries) {
-    const v = bySeries.get(series)!.get(snappedX);
-    if (v == null || Number.isNaN(v)) continue;
-    html += tooltipSeriesRowHtml(series, yFormat(v), {
-      ...(seriesLabels ? { seriesLabels } : {}),
-      ...(opts.icons ? { icons: opts.icons } : {}),
-    });
-  }
-  return html;
-}
-
-/**
- * Attach a facet-aware crosshair to a SHARED-mode small-multiples LINE figure (one faceted
- * SVG). Resolves the cell under the cursor from Plot's faceted scales, draws a guide confined
- * to that cell's plot y-range, snaps to the shared x-domain, and shows a per-pane tooltip.
- *
- * DORMANT — shared mode is a per-pane composition now, so nothing in the live layer calls this
- * (see the note on FacetInfo in engine/index.ts). A caller reviving it MUST pass `icons`:
- * `resolveTooltipIcons({ legendItems, keyRows })`, as every other crosshair does. Without it each
- * row draws an empty key box — deliberately, so a missed wiring is visible rather than guessed at.
- *
- * Resilient to non-layout environments (jsdom/SSR): if `svg.scale` is unavailable or the
- * scales can't be read, it no-ops cleanly (browser verification carries correctness).
- */
-export function attachFacetCrosshair(svgEl: SVGSVGElement, opts: FacetCrosshairOptions): void {
-  const {
-    panes,
-    xField = "time",
-    yField = "value",
-    seriesField = "series",
-    seriesLabels,
-    seriesOrder,
-  } = opts;
-  let { xParse, xFormat } = opts;
-  const yFormat =
-    opts.yFormat ??
-    ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
-  if (!svgEl || !panes?.length) return;
-
-  const vb = svgEl.viewBox?.baseVal;
-  const W = vb?.width || +(svgEl.getAttribute("width") ?? "") || svgEl.clientWidth;
-  const H = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgEl.clientHeight;
-
-  // Feature-detect Plot's scale API; without it we cannot compute cell geometry → no-op.
-  const scaleFn = (svgEl as unknown as { scale?: (name: string) => unknown }).scale;
-  if (typeof scaleFn !== "function") return;
-  let fx: BandScaleLike, fy: BandScaleLike, xS: ContinuousScaleLike, yS: ContinuousScaleLike;
-  try {
-    fx = scaleFn.call(svgEl, "fx") as BandScaleLike;
-    fy = scaleFn.call(svgEl, "fy") as BandScaleLike;
-    xS = scaleFn.call(svgEl, "x") as ContinuousScaleLike;
-    yS = scaleFn.call(svgEl, "y") as ContinuousScaleLike;
-  } catch {
-    return;
-  }
-  if (!fx?.range || !fy?.range || !xS?.range || !yS?.range) return;
-
-  const cells = computeFacetCells(
-    fx,
-    fy,
-    xS,
-    yS,
-    panes.map((p) => ({ facet: p.facet, col: p.col, row: p.row, title: p.title })),
-  );
-  if (!cells.length) return;
-
-  // x-parse/format inference (mirrors attachCrosshair) when the adapter didn't thread them.
-  if (!xParse) {
-    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
-    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
-    const sample = panes.find((p) => p.rows.length)?.rows[0]?.[xField];
-    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) {
-      xParse = (v) => +new Date(String(v));
-      if (!xFormat) xFormat = (v) => d3.timeFormat("%b %Y")(new Date(v));
-    } else if (/Q\d/.test(String(sample))) {
-      xParse = (v) => {
-        const m = /(\d{4})Q(\d)/.exec(String(v));
-        return +new Date(+(m as RegExpExecArray)[1]!, (+(m as RegExpExecArray)[2]! - 1) * 3, 1);
-      };
-      if (!xFormat)
-        xFormat = (v) => {
-          const d = new Date(v);
-          const q = Math.floor(d.getMonth() / 3) + 1;
-          return `${d.getFullYear()}Q${q}`;
-        };
-    } else {
-      xParse = (v) => +(v as number);
-      if (!xFormat) xFormat = (v) => String(v);
-    }
-  }
-
-  // Per-facet lookup: facet → (sorted unique xs, series → x → value).
-  interface FacetData { xs: number[]; bySeries: Map<string, Map<number, number>>; }
-  const dataByFacet = new Map<string, FacetData>();
-  for (const p of panes) {
-    const xsSet = new Set<number>();
-    const bySeries = new Map<string, Map<number, number>>();
-    for (const r of p.rows) {
-      const xv = xParse!(r[xField]);
-      xsSet.add(xv);
-      const v = r[yField];
-      if (v === "" || v == null) continue;
-      const k = r[seriesField] as string;
-      if (!bySeries.has(k)) bySeries.set(k, new Map());
-      bySeries.get(k)!.set(xv, +(v as number));
-    }
-    dataByFacet.set(p.facet, { xs: [...xsSet].sort((a, b) => a - b), bySeries });
-  }
-
-  const bisect = d3.bisector((d: number) => d).left;
-  const NS = "http://www.w3.org/2000/svg";
-  // Remove only THIS crosshair's own elements on re-attach (not the flat crosshair's
-  // .tbl-crosshair*, which attachCrosshair owns) so the two never clobber each other.
-  svgEl.querySelectorAll(".tbl-facet-crosshair, .tbl-facet-crosshair-hit").forEach((el) => el.remove());
-
-  const guide = svgEl.ownerDocument.createElementNS(NS, "line");
-  guide.classList.add("tbl-facet-crosshair");
-  guide.setAttribute("stroke", TBL.color.annotationDim);
-  guide.setAttribute("stroke-dasharray", "3 3");
-  guide.setAttribute("opacity", "0");
-  guide.style.pointerEvents = "none";
-  svgEl.appendChild(guide);
-
-  const hit = svgEl.ownerDocument.createElementNS(NS, "rect");
-  hit.classList.add("tbl-facet-crosshair-hit");
-  hit.setAttribute("x", "0");
-  hit.setAttribute("y", "0");
-  hit.setAttribute("width", String(W));
-  hit.setAttribute("height", String(H));
-  hit.setAttribute("fill", "transparent");
-  hit.style.cursor = "crosshair";
-  svgEl.appendChild(hit);
-
-  // Deliberately UN-GATED on showTooltip/chrome.tooltip: dead code on the live path today (see
-  // engine/index.ts:274's FacetInfo note — only reachable from test/facet-crosshair.test.ts). Add
-  // the gate here if this is ever wired up live.
-  const tip = getSharedTooltip(svgEl.ownerDocument, opts.tooltipContainer);
-
-  /** Snap an absolute svgX to the nearest x in `xs`, given this cell's [x0,x1] plot range. */
-  function snapXInCell(svgX: number, cell: FacetCell, xs: number[]): number | null {
-    if (!xs.length) return null;
-    const xMin = xs[0]!;
-    const xMax = xs[xs.length - 1]!;
-    // Linear: shared x-domain maps across [cell.x0, cell.x1].
-    const span = cell.x1 - cell.x0;
-    const frac = span > 0 ? (svgX - cell.x0) / span : 0;
-    const xVal = xMin + frac * (xMax - xMin);
-    const i = bisect(xs, xVal);
-    const cand = [xs[i - 1], xs[i]].filter((v) => v != null) as number[];
-    if (!cand.length) return null;
-    return cand.length === 1
-      ? cand[0]!
-      : Math.abs(cand[0]! - xVal) < Math.abs(cand[1]! - xVal)
-        ? cand[0]!
-        : cand[1]!;
-  }
-
-  /** Map a snapped x value to its absolute pixel within the cell. */
-  function xToPxInCell(xVal: number, cell: FacetCell, xs: number[]): number {
-    const xMin = xs[0]!;
-    const xMax = xs[xs.length - 1]!;
-    const frac = xMax > xMin ? (xVal - xMin) / (xMax - xMin) : 0;
-    return cell.x0 + frac * (cell.x1 - cell.x0);
-  }
-
-  function update(evt: PointerEvent): void {
-    const rect = svgEl.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const scaleX = W / rect.width;
-    const scaleY = H / rect.height;
-    const svgX = (evt.clientX - rect.left) * scaleX;
-    const svgY = (evt.clientY - rect.top) * scaleY;
-
-    const cell = resolveFacetCell(cells, svgX, svgY);
-    if (!cell) { hide(); return; }
-    const fd = dataByFacet.get(cell.facet);
-    if (!fd || !fd.xs.length) { hide(); return; }
-
-    const snap = snapXInCell(svgX, cell, fd.xs);
-    if (snap == null) { hide(); return; }
-
-    const gx = xToPxInCell(snap, cell, fd.xs);
-    guide.setAttribute("x1", String(gx));
-    guide.setAttribute("x2", String(gx));
-    guide.setAttribute("y1", String(cell.y0));
-    guide.setAttribute("y2", String(cell.y1));
-    guide.setAttribute("opacity", "1");
-
-    tip.innerHTML = buildFacetTooltipHtml(cell.title, xFormat!(snap), fd.bySeries, snap, {
-      seriesLabels,
-      seriesOrder,
-      yFormat,
-      ...(opts.icons ? { icons: opts.icons } : {}),
-    });
-
-    const offset = 14;
-    const win = svgEl.ownerDocument.defaultView!;
-    const vw = win.innerWidth;
-    const vh = win.innerHeight;
-    tip.style.opacity = "1";
-    let left = evt.clientX + offset;
-    let top = evt.clientY + offset;
-    if (left + tip.offsetWidth + 4 > vw) left = evt.clientX - tip.offsetWidth - offset;
-    if (top + tip.offsetHeight + 4 > vh) top = evt.clientY - tip.offsetHeight - offset;
-    if (left < 4) left = 4;
-    if (top < 4) top = 4;
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
-  }
-
-  function hide(): void {
-    guide.setAttribute("opacity", "0");
-    tip.style.opacity = "0";
-  }
-
-  hit.style.pointerEvents = "all";
-  hit.addEventListener("pointermove", update as EventListener);
-  hit.addEventListener("pointerleave", hide);
-  hit.addEventListener("pointerdown", update as EventListener);
-}
-
 // ---------------------------------------------------------------------------
 // Band-axis (categorical) hover tooltip — bar / stacked charts
 // ---------------------------------------------------------------------------
@@ -919,8 +494,8 @@ export interface BandCrosshairOptions {
   /** Screen-only hook (spec/hooks.ts's `RenderHooks.tooltip`) — replaces this band tooltip's
    *  CONTENT while the engine keeps doing the hit-testing, positioning and highlight around it.
    *  `null` (or no hook) keeps the engine's own card. Forwarded from render-live.ts through here
-   *  into `buildBandTooltipHtml`. NOT reached by `attachCrosshair` / `attachFacetCrosshair` /
-   *  `attachHistogramHover` / `attachPointHover` — those build their card markup elsewhere; see
+   *  into `buildBandTooltipHtml`. NOT reached by `attachCrosshair` / `attachHistogramHover` /
+   *  `attachPointHover` — those build their card markup elsewhere; see
    *  spec/hooks.ts's module note and CONFIG-SPEC.md for that boundary.
    *
    *  Being forwarded here is NOT the same as being reachable. `buildBandTooltipHtml` is called
@@ -2159,8 +1734,7 @@ function readLinearYScale(svgEl: SVGSVGElement): ((v: number) => number) | null 
  *  list silently leaves one chart type unbounded. Keep in sync with the `hit.classList.add` calls
  *  below. */
 export const CROSSHAIR_HIT_SELECTOR =
-  ".tbl-crosshair-hit, .tbl-facet-crosshair-hit, .tbl-band-crosshair-hit, " +
-  ".tbl-hist-hover-hit, .tbl-catline-hit";
+  ".tbl-crosshair-hit, .tbl-band-crosshair-hit, .tbl-hist-hover-hit, .tbl-catline-hit";
 
 const COORD_NS = "http://www.w3.org/2000/svg";
 /** Dark text for value labels on bars/stacked + the active x-axis value (matches bar value labels). */
@@ -2723,7 +2297,7 @@ export function attachSecondaryLineCursor(
   const noop = (): void => {};
   if (!svgEl || !opts.rows?.length) return noop;
   const { rows, xField = "time", yField = "value", seriesField = "series", colors, seriesOrder } = opts;
-  let { xParse } = opts;
+  const { xParse } = opts;
   const yFormat =
     opts.yFormat ?? ((v: number) => `${(+v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`);
 
@@ -2737,27 +2311,15 @@ export function attachSecondaryLineCursor(
   const plotW = W - ml - mr;
   const plotH = H - mt - mb;
 
-  // x PARSING is derived here; x FORMATTING is `opts.xFormat`, read in the `active` branch below
-  // and gated on `opts.xFormatExplicit` — see this function's contract above and the
+  // x PARSING is the caller's `xParse`; x FORMATTING is `opts.xFormat`, read in the `active` branch
+  // below and gated on `opts.xFormatExplicit` — see this function's contract above and the
   // `attachSecondaryHistogramCursor` precedent (it re-uses the primary's own `formatBinLabel` opts
   // "so the coordinated label matches"). The gate is the load-bearing part: `tooltipXFormat` is
   // ALWAYS a function on a temporal axis (the x-adapter defaults it to `%b %Y`), so honouring it
   // unconditionally would collapse the default two-line echo — one line per axis tick row — into a
   // single "Jun 2026" on every published multi-pane temporal figure, including the ones that set
   // nothing. Only an author-set `tooltip_x_format` may change what a pane echoes.
-  if (!xParse) {
-    // Reached only on a categorical axis (every other x adapter passes tooltipXParse), so this
-    // lenient guess must not be swapped for the strict parseDate/parseQuarter.
-    const sample = rows[0]?.[xField];
-    if (/^\d{4}-\d{2}-\d{2}/.test(String(sample))) xParse = (v) => +new Date(String(v));
-    else if (/Q\d/.test(String(sample)))
-      xParse = (v) => {
-        const m = /(\d{4})Q(\d)/.exec(String(v));
-        return +new Date(+(m as RegExpExecArray)[1]!, (+(m as RegExpExecArray)[2]! - 1) * 3, 1);
-      };
-    else xParse = (v) => +(v as number);
-  }
-  const xs = Array.from(new Set(rows.map((r) => xParse!(r[xField])))).sort((a, b) => a - b);
+  const xs = Array.from(new Set(rows.map((r) => xParse(r[xField])))).sort((a, b) => a - b);
   if (!xs.length) return noop;
   const bySeries = new Map<string, Map<number, number>>();
   for (const r of rows) {
@@ -2765,7 +2327,7 @@ export function attachSecondaryLineCursor(
     if (v === "" || v == null) continue;
     const k = r[seriesField] as string;
     if (!bySeries.has(k)) bySeries.set(k, new Map());
-    bySeries.get(k)!.set(xParse!(r[xField]), +(v as number));
+    bySeries.get(k)!.set(xParse(r[xField]), +(v as number));
   }
   // The range Plot drew, which can be wider than these rows (see readScaleDomain).
   const [xMin, xMax] = readScaleDomain(svgEl, "x") ?? [xs[0]!, xs[xs.length - 1]!];
