@@ -43,7 +43,7 @@ export interface ValidationResult {
 }
 
 const ajv = new Ajv({ allErrors: true });
-const validateStructural = ajv.compile(CHART_SPEC_SCHEMA);
+const validateStructural = ajv.compile<ChartSpec>(CHART_SPEC_SCHEMA);
 
 function formatAjvError(e: ErrorObject, spec: unknown): string {
   const path = e.instancePath || "(root)";
@@ -240,7 +240,7 @@ function dumbbellAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): 
  *  Keyed on the two literals ON PURPOSE. `FILLED_CHART_TYPES` (./filled-chart-types) is the
  *  tempting import and the wrong one: it also holds `histogram` (numeric/temporal by design),
  *  `area` (usually temporal) and `waterfall` (already checked, with its own vertical-only message
- *  that a second check here would make unreachable). This must never read as
+ *  that a second check here would only duplicate). This must never read as
  *  "categorical implies bar" either — line and area on a categorical axis render correctly and are
  *  used by published figures. */
 function barBandAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): string | null {
@@ -815,9 +815,12 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
   // Every interval, declared or derived, parsed on this chart's axis. An unparseable bound would
   // silently drop its block; a reversed one would draw a zero-width sliver at the floor width.
   // Indexed BEFORE the rug filter, so `annotations.bands[2]` names the entry the author wrote.
-  const allIntervals: Array<{ where: string; from?: string; to?: string }> = [
-    ...bands.map((b, i) => ({ where: `annotations.bands[${i}]`, from: b.start, to: b.end, e: b })),
-    ...shading.map((s, i) => ({ where: `shading[${i}]`, from: s.from, to: s.to, e: s })),
+  // On a date axis `dateCoordinateErrors` has already parsed every band and shading bound against the
+  // same grammar, so only the rug's own tracks report a bad bound from here there (`parsedAbove`).
+  const parsedAbove = xAxisType === "temporal" || xAxisType === "quarterly";
+  const allIntervals: Array<{ where: string; from?: string; to?: string; parsedAbove: boolean }> = [
+    ...bands.map((b, i) => ({ where: `annotations.bands[${i}]`, from: b.start, to: b.end, e: b, parsedAbove })),
+    ...shading.map((s, i) => ({ where: `shading[${i}]`, from: s.from, to: s.to, e: s, parsedAbove })),
   ]
     .filter(({ e }) => e.rug === true)
     .concat(
@@ -827,6 +830,7 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
           from: iv.from,
           to: iv.to,
           e: {} as LegendFlagged,
+          parsedAbove: false,
         })),
       ),
     );
@@ -835,8 +839,8 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
       if (iv.from == null || iv.to == null) continue;
       const fromErr = timeParseError(xAxisType, iv.from);
       const toErr = timeParseError(xAxisType, iv.to);
-      if (fromErr) errors.push(`${iv.where}: rug bound \`from\`: ${fromErr}`);
-      if (toErr) errors.push(`${iv.where}: rug bound \`to\`: ${toErr}`);
+      if (fromErr && !iv.parsedAbove) errors.push(`${iv.where}: rug bound \`from\`: ${fromErr}`);
+      if (toErr && !iv.parsedAbove) errors.push(`${iv.where}: rug bound \`to\`: ${toErr}`);
       if (!fromErr && !toErr && rugBoundPosition(xAxisType, iv.from) > rugBoundPosition(xAxisType, iv.to)) {
         errors.push(`${iv.where}: rug interval runs backwards (${iv.from} → ${iv.to})`);
       }
@@ -892,7 +896,9 @@ const TIMELINE_REJECTED_COLUMNS = ["value", "facet", "shape", "point_label", "se
 /** Timeline cross-field rules, plus the reverse direction: the timeline-only column roles and the
  *  `timeline:` block are errors on every other chart type. Off a timeline this can only fire on a
  *  field that did not exist before 1.15.0, so no existing spec changes validity. */
-function timelineSpecErrors(spec: Record<string, unknown>): string[] {
+function timelineSpecErrors(chartSpec: ChartSpec): string[] {
+  // Read by field NAME (the TIMELINE_*_FIELDS lists), so through an index view.
+  const spec = chartSpec as unknown as Readonly<Record<string, unknown>>;
   const errors: string[] = [];
   const cols = (spec.columns ?? {}) as Record<string, unknown>;
   if (spec.chartType !== "timeline") {
@@ -948,7 +954,9 @@ const TREEMAP_ALLOWED_COLUMNS: readonly string[] = ["x", "value", "series"];
 /** Treemap cross-field rules, plus the reverse direction: the `treemap:` block is an error on every
  *  other chart type. Off a treemap this can only fire on a field that did not exist before it, so
  *  no existing spec changes validity. */
-function treemapSpecErrors(spec: Record<string, unknown>): string[] {
+function treemapSpecErrors(chartSpec: ChartSpec): string[] {
+  // Read by field NAME (the TREEMAP_*_FIELDS lists), so through an index view.
+  const spec = chartSpec as unknown as Readonly<Record<string, unknown>>;
   const errors: string[] = [];
   if (spec.chartType !== "treemap") {
     if (spec.treemap != null) errors.push(`the treemap block is only valid on chartType "treemap"`);
@@ -973,98 +981,71 @@ function treemapSpecErrors(spec: Record<string, unknown>): string[] {
   return errors;
 }
 
-/** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
- *  constraint (a cross-field rule outside the schema). */
+/** A cross-field rule over a structurally valid spec: every error it finds, in the order it finds
+ *  them (none when the spec passes). */
+type SpecRule = (spec: ChartSpec) => readonly string[];
+
+/** A rule that reports at most one error. */
+const single =
+  (rule: (spec: ChartSpec) => string | null): SpecRule =>
+  (spec) => {
+    const err = rule(spec);
+    return err ? [err] : [];
+  };
+
+/** Chart-type admission. A failing gate ENDS validation: it names a field the chart type does not
+ *  honour, and every rule below would only re-describe that same field with a less specific message
+ *  (e.g. tooltip_x_format's axis check). The treemap gate goes before the timeline's so a treemap
+ *  carrying a timeline-only column or the timeline block reports as unsupported on a treemap, not as
+ *  "only valid on a timeline". */
+const SPEC_GATES: readonly SpecRule[] = [treemapSpecErrors, timelineSpecErrors];
+
+/** The cross-field rules, run in this order and ALL reported: errors[0] is the first failing rule's
+ *  first error, and tests and downstream CI read it, so the order is a contract — a new rule goes at
+ *  the end unless it must report before an existing one. */
+const SPEC_RULES: readonly SpecRule[] = [
+  single(pointChartAxisError),
+  single(pointLabelChartTypeError),
+  pointCalloutSpecErrors,
+  single(tooltipSeriesNameChartTypeError),
+  single(tooltipSectionError),
+  single(tooltipAxisLabelChartTypeError),
+  single(dumbbellAxisError),
+  single(titleSelectorsError),
+  single(sectionColumnError),
+  facetGroupErrors,
+  single(horizontalYAxisMarkerError),
+  single(xAxisTicksOrientationError),
+  single(waterfallSpecError),
+  histogramSpecError,
+  overlaySpecErrors,
+  // AFTER `overlaySpecErrors`, not up with the other axis checks: a horizontal bar/stacked chart
+  // carrying an overlay violates BOTH rules, and the overlay message is the more specific of the two,
+  // so it reports first.
+  single(barBandAxisError),
+  single(shadingSpecError),
+  single(tooltipXFormatError),
+  single(xTicksError),
+  single(seriesPatternsError),
+  colorErrors,
+  // Before the rug rule, which leaves a band or shading bound on a date axis to this one.
+  dateCoordinateErrors,
+  legendAndRugErrors,
+];
+
+const ajvValidationErrors = (spec: unknown): string[] =>
+  (validateStructural.errors ?? []).map((e) => formatAjvError(e, spec));
+
+/** Layer 1: structural validation against the JSON schema (every schema error), then the
+ *  chart-type gates (the first failing one), then every cross-field rule's errors. */
 export function validateSpec(spec: unknown): ValidationResult {
-  const ok = validateStructural(spec);
-  if (!ok) {
-    const errors = (validateStructural.errors ?? []).map((e) => formatAjvError(e, spec));
-    return { valid: false, errors };
+  if (!validateStructural(spec)) return { valid: false, errors: ajvValidationErrors(spec) };
+  for (const gate of SPEC_GATES) {
+    const errors = gate(spec);
+    if (errors.length) return { valid: false, errors: [...errors] };
   }
-  // First, so a timeline's rejected fields report as such instead of tripping a chart-type rule
-  // further down with a less specific message (e.g. tooltip_x_format's axis check).
-  // The treemap check goes before the timeline's so a treemap carrying a timeline-only column or the
-  // timeline block reports as unsupported on a treemap, not as "only valid on a timeline".
-  const tmErrors = treemapSpecErrors(spec as unknown as Record<string, unknown>);
-  if (tmErrors.length) return { valid: false, errors: tmErrors };
-  const tlErrors = timelineSpecErrors(spec as unknown as Record<string, unknown>);
-  if (tlErrors.length) return { valid: false, errors: tlErrors };
-  const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
-  if (axisErr) return { valid: false, errors: [axisErr] };
-  const plErr = pointLabelChartTypeError(spec as { chartType?: unknown; columns?: { point_label?: unknown } });
-  if (plErr) return { valid: false, errors: [plErr] };
-  const pcErrors = pointCalloutSpecErrors(
-    spec as { chartType?: unknown; columns?: { point_label?: unknown }; annotations?: { points?: [] } },
-  );
-  if (pcErrors.length) return { valid: false, errors: pcErrors };
-  const tsnErr = tooltipSeriesNameChartTypeError(spec as { chartType?: unknown; tooltip_series_name?: unknown });
-  if (tsnErr) return { valid: false, errors: [tsnErr] };
-  const tsecErr = tooltipSectionError(spec as ChartSpec);
-  if (tsecErr) return { valid: false, errors: [tsecErr] };
-  const talErr = tooltipAxisLabelChartTypeError(
-    spec as { chartType?: unknown; tooltip_x_label?: unknown; tooltip_y_label?: unknown },
-  );
-  if (talErr) return { valid: false, errors: [talErr] };
-  const dbErr = dumbbellAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
-  if (dbErr) return { valid: false, errors: [dbErr] };
-  const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
-  if (tsErr) return { valid: false, errors: [tsErr] };
-  const secErr = sectionColumnError(
-    spec as { chartType?: unknown; orientation?: unknown; columns?: { section?: unknown } },
-  );
-  if (secErr) return { valid: false, errors: [secErr] };
-  const fgErrors = facetGroupErrors(spec as ChartSpec);
-  if (fgErrors.length) return { valid: false, errors: fgErrors };
-  const hymErr = horizontalYAxisMarkerError(spec as ChartSpec);
-  if (hymErr) return { valid: false, errors: [hymErr] };
-  const ticksErr = xAxisTicksOrientationError(
-    spec as { x_axis_ticks?: unknown; chartType?: unknown; orientation?: unknown },
-  );
-  if (ticksErr) return { valid: false, errors: [ticksErr] };
-  const wfErr = waterfallSpecError(
-    spec as { chartType?: unknown; orientation?: unknown; xAxisType?: unknown },
-  );
-  if (wfErr) return { valid: false, errors: [wfErr] };
-  const histErrors = histogramSpecError(
-    spec as {
-      chartType?: unknown;
-      xAxisType?: unknown;
-      columns?: { x0?: unknown; x1?: unknown };
-      histogram?: { bins?: unknown; binWidth?: unknown; domain?: unknown; weight?: unknown };
-    },
-  );
-  if (histErrors.length) return { valid: false, errors: histErrors };
-  const overlayErrors = overlaySpecErrors(
-    spec as {
-      overlays?: Overlay[];
-      xAxisType?: unknown;
-      chartType?: unknown;
-      orientation?: unknown;
-    },
-  );
-  if (overlayErrors.length) return { valid: false, errors: overlayErrors };
-  // Deliberately AFTER `overlaySpecErrors`, not up with the other axis checks: a horizontal
-  // bar/stacked chart carrying an overlay violates BOTH rules, and the overlay message is the more
-  // specific of the two. Placed with its family, this guard would report first and make the
-  // horizontal-bar/stacked branch of `overlaySpecErrors` unreachable dead code.
-  const barAxisErr = barBandAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
-  if (barAxisErr) return { valid: false, errors: [barAxisErr] };
-  const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
-  if (shadeErr) return { valid: false, errors: [shadeErr] };
-  const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
-  if (txfErr) return { valid: false, errors: [txfErr] };
-  const xTicksErr = xTicksError(spec as { xAxisType?: unknown; chartType?: unknown; x_ticks?: unknown });
-  if (xTicksErr) return { valid: false, errors: [xTicksErr] };
-  const patErr = seriesPatternsError(spec as { chartType?: unknown; series_patterns?: unknown });
-  if (patErr) return { valid: false, errors: [patErr] };
-  const colErrors = colorErrors(spec as ChartSpec);
-  if (colErrors.length) return { valid: false, errors: colErrors };
-  // Before the rug checks, which would otherwise report a malformed rug-flagged band bound twice.
-  const coordErrors = dateCoordinateErrors(spec as ChartSpec);
-  if (coordErrors.length) return { valid: false, errors: coordErrors };
-  const rugErrors = legendAndRugErrors(spec as ChartSpec);
-  if (rugErrors.length) return { valid: false, errors: rugErrors };
-  return { valid: true, errors: [] };
+  const errors = SPEC_RULES.flatMap((rule) => rule(spec));
+  return { valid: errors.length === 0, errors };
 }
 
 /** Returns an error string if `value` doesn't parse under `xAxisType`, else null. A date axis reads

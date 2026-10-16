@@ -108,6 +108,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Changed
 - Validation is stricter, and looser where it rejected figures that render correctly. See
   **Upgrading**.
+- `validateSpec` (and `tbl-chart validate`) reports every cross-field rule a spec breaks, not only
+  the first rule's errors. The first error is the one it reported before. A field a timeline or
+  treemap does not support still ends the report there.
 - `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while
   printing a `localhost` URL, so another machine on the same network could open every spec under
   the root, data included. `--host <addr>` opts in to another address, and the printed URL is the
