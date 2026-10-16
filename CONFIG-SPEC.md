@@ -1820,11 +1820,14 @@ columns (plus optional `pane`, `emphasis_column`, `footnote_column`). The `value
 numbers, blanks, or text strings.
 
 Validation parses every row and fails on malformed x-values, missing required columns, or
-referenced keys that don't appear in the data. A few fields are checked only where the chart reads
-them, since elsewhere a key the data lacks changes nothing: `highlightSeries` on a bar or histogram;
-`series_marker` and `gap_annotation` on a dumbbell; `barStack.stackOrder` on a stacked chart;
-`section_order` and `section_labels` with `columns.section`; and `x_labels` on a dumbbell, a
-standalone categorical line, area or dot plot, or a chart whose callout label uses `{x}`.
+referenced keys that don't appear in the data. Where the chart does not read a field, a key the data
+lacks changes nothing, so some fields are checked only on some charts: `highlightSeries` on a bar
+or histogram; `series_marker` and `gap_annotation` on a dumbbell; `barStack.stackOrder` on a stacked
+chart; `series_styles` and `confidence_bands` on every chart type but a histogram; `shape_order` and
+`shape_labels` with `columns.shape`, except on a histogram; `section_order` and `section_labels`
+with `columns.section`; `x_order`, `category_order` and `category_colors` on a categorical x-axis;
+and `x_labels` on a dumbbell, a standalone categorical line, area or dot plot, or a chart whose
+callout label uses `{x}`.
 
 ### Dates
 

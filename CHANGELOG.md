@@ -106,45 +106,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     `annotations.xAxis` / `annotations.yAxis` entry shapes.
 
 ### Changed
-- Validation is stricter; specs it now rejects rendered wrongly, blank, or not at all. Rendered
-  output of every spec that still validates is unchanged, and every spec in the `budget-lab-charts`
-  archive that validated still does.
-  - Every chart type, histograms included, checks each spec key that names a value in the data
-    against the data, where the chart reads the field: the `series_*` maps, `highlightSeries` (bar,
-    histogram), `series_marker` and `gap_annotation.series_a`/`series_b` (dumbbell),
-    `barStack.stackOrder` (stacked), `x_labels` (where a hover card or a callout's `{x}` is sure to
-    read it), `section_order`, `section_labels`, `small_multiples.pane_order`/`pane_titles`/
-    `pane_widths`, `overlays[].facet`, `annotations.points[].series`, and `facet` on reference
-    markers and x-anchored callouts. On a histogram none of these was checked; elsewhere a typo in
-    the newly checked ones dimmed every series, drew a scoped marker nowhere, or silently did
-    nothing the chart showed. `pane_widths` now counts only the panes the grid draws: a blank facet
-    cell, which is not a pane, made a correctly sized array fail.
-  - `columns.section`, and on a waterfall `columns.kind`, must name a column in the data. A
-    misspelled `kind` column drew every waterfall step as a delta.
-  - `histogram.bins` must be a positive integer: 0 or less fell back to automatic binning, and a
-    fraction such as 2.5 drew about that many bins, the last one short. `histogram.binWidth` must
-    be greater than 0 (0 or less fell back to automatic binning); a string is accepted only on a
-    temporal axis, as `day`, `week`, `month`, `quarter`, `year` or a positive day count such as
-    `"7"`, where any other string fell back to automatic binning. `histogram.domain` must be
-    ascending (a reversed one drew a single bin).
-  - A whitespace-only value cell is rejected as not numeric. It drew as 0.
-  - Colors: a hex must have 3, 4, 6 or 8 digits, and the contents of `rgb()`, `rgba()`, `hsl()` and
-    `hsla()` get a syntax check (three channels and an optional alpha, comma- or space-separated).
-    A 5- or 7-digit hex or `rgb(foo)` reached the SVG as
-    written and the browser dropped it: a filled mark took the chart's text color and a line was
-    not drawn.
-  - Under a `series_patterns` texture, a color the engine cannot read (`oklch()`, `currentColor`, a
-    space-separated `rgb()`, an `rgb()` with fractional channels, …) is rejected where it is the
-    color actually painted under the texture, when the chart is validated with its data:
-    `bar_color` on a chart whose one series is named, or beside a `series_colors[""]`;
-    `category_colors`; `waterfall.colors`; a title-selector option's color. These threw at render.
-    The check follows fill precedence, so it no longer rejects a color that is never painted under
-    the texture: a `series_colors` entry that `bar_color` overrides, `bar_color` on a stacked, area
-    or waterfall chart, or a later title selector's color when an earlier selector colors every
-    option. `validateSpec` without the data no longer makes this check.
-  - Tables: `format` `decimals` must be an integer from 0 to 10 in every scope (a negative or
-    over-100 value threw at render, a fraction was truncated), and `emphasis_column` /
-    `footnote_column` must name a column in the data (a typo dropped every emphasis or footnote).
+- Validation is stricter, and looser where it rejected figures that render correctly. See
+  **Upgrading**.
 - `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while
   printing a `localhost` URL, so another machine on the same network could open every spec under
   the root, data included. `--host <addr>` opts in to another address, and the printed URL is the
@@ -155,6 +118,58 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the dormant shared-mode Plot-faceting path they drove; `render()`, a dispatcher nothing in the
   engine called (use `renderChart`, or `renderFigure` for a `small_multiples` spec); and
   `FigureRenderResult.combinedSvg`, which was always `undefined`.
+
+### Upgrading
+- **Archive scan** (`budget-lab-charts` at main 8ef220b): every `chart.yaml` and `table.yaml`, 88
+  in all (77 figures under `charts/` and 11 slide-pipeline fixtures), validates exactly as it did
+  on 1.18.0. No figure needs a change. The one failure, the slide pipeline's deliberate bad-input
+  fixture `scripts/slides/fixtures/unknown-field/chart.yaml`, already failed.
+  `budget-lab-interactives` has no specs this engine validates.
+- **Newly rejected** by `tbl-chart validate` (and `validateChart`). Each of these rendered wrongly,
+  blank, or not at all, so a spec that now fails needs fixing, not waiving. The validation changes
+  below alter no rendered output.
+  - A spec key that names a value in the data and is not in the data, on every chart type,
+    histograms included, wherever the chart reads the field: the `series_*` maps,
+    `highlightSeries` (bar, histogram), `series_marker` and `gap_annotation.series_a`/`series_b`
+    (dumbbell), `barStack.stackOrder` (stacked), `x_labels` (where a hover card or a callout's `{x}`
+    is sure to read it), `section_order`, `section_labels`,
+    `small_multiples.pane_order`/`pane_titles`/`pane_widths`, `overlays[].facet`,
+    `annotations.points[].series`, and `facet` on reference markers and x-anchored callouts. On a
+    histogram none of these was checked; elsewhere a typo in the newly checked ones dimmed every
+    series, drew a scoped marker nowhere, or silently did nothing the chart showed. CONFIG-SPEC's
+    CSV format section lists the fields checked only on some charts.
+  - `columns.section`, and on a waterfall `columns.kind`, naming a column the data lacks. A
+    misspelled `kind` column drew every waterfall step as a delta.
+  - `histogram.bins` that is not a positive integer: 0 or less fell back to automatic binning, and
+    a fraction such as 2.5 drew about that many bins, the last one short.
+  - `histogram.binWidth` of 0 or less, which fell back to automatic binning. A string is accepted
+    only on a temporal axis, as `day`, `week`, `month`, `quarter`, `year` or a positive day count
+    such as `"7"`; any other string fell back to automatic binning.
+  - `histogram.domain` that is not ascending. A reversed one drew a single bin.
+  - A cell holding only whitespace in a numeric column (the value, a confidence bound, a `column`
+    overlay's column, `histogram.weight`): leave the cell empty for a missing observation. A
+    whitespace-only value cell drew as 0.
+  - A hex color without 3, 4, 6 or 8 digits, and `rgb()`, `rgba()`, `hsl()` or `hsla()` whose
+    contents are not three channels and an optional alpha, comma- or space-separated (`rgb(foo)`).
+    A 5- or 7-digit hex or `rgb(foo)` reached the SVG as written and the browser dropped it: a
+    filled mark took the chart's text color and a line was not drawn.
+  - Under a `series_patterns` texture, a color the engine cannot read (`oklch()`, `currentColor`, a
+    space-separated `rgb()`, an `rgb()` with fractional channels, …) where it is the color actually
+    painted under the texture, when the chart is validated with its data: `bar_color` on a chart
+    whose one series is named, or beside a `series_colors[""]`; `category_colors`;
+    `waterfall.colors`; a title-selector option's color. These threw at render.
+  - Tables: a `format` `decimals` that is not an integer from 0 to 10, in any scope (a negative or
+    over-100 value threw at render, a fraction was truncated); and an `emphasis_column` or
+    `footnote_column` naming a column the data lacks (a typo dropped every emphasis or footnote).
+  - An `overlays[].fun` function name inherited from JavaScript objects (`constructor(x)`); see
+    **Fixed**.
+- **No longer rejected**, because they render correctly:
+  - `small_multiples.pane_widths` sized to the panes the grid draws, when a facet cell is blank. A
+    blank cell is not a pane, but it was counted as one.
+  - Under a texture, a color that is never painted under it. The check follows fill precedence: a
+    `series_colors` entry that `bar_color` overrides, and `bar_color` on a stacked, area or
+    waterfall chart, now pass; a later title selector's color is not checked when an earlier
+    selector colors every option. `validateSpec` without the data no longer makes this check.
 
 ## [1.18.0] - 2026-10-14
 
