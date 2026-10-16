@@ -200,7 +200,7 @@ export function fullyHiddenRugTracks(spec: ChartSpec): string[] {
  *
  * Growing the margin (rather than insetting the y range) keeps every consumer that derives plot
  * geometry as `height - marginTop - marginBottom` correct with no changes — the annotation stagger,
- * the point-callout connector math, and all six margin reads in crosshair.ts.
+ * the point-callout connector math, and all six margin reads in crosshair/*.ts.
  */
 export function rugAllowance(spec: ChartSpec): number {
   const rows = rugRowCount(spec);

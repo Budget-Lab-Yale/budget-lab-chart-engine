@@ -106,7 +106,7 @@ export function resolveTotalRow(
  * Are there net-dot markers in the DOM?
  *
  * Read by `attachHighlightPills`: selecting the Total pseudo-series has no rect to pill, so it draws
- * a net-value pill at each net dot instead (crosshair.ts, `readNetDotMarkers`). This tracks the
+ * a net-value pill at each net dot instead (crosshair/dom-geometry.ts, `readNetDotMarkers`). This tracks the
  * MARKER, which is why it is not the same question as `resolveTotalRow` — `netDisplay: none` with
  * `hover: tooltip` yields a "text" Total row and no dots whatsoever.
  *

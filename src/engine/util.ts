@@ -91,10 +91,10 @@ export function applyValueAffixes(formatted: string, affixes: ValueAffixes): str
  *  and into the PNG export, and RENDERED output must not depend on the rendering machine —
  *  `toLocaleString()` with no locale yields `2,59` on a de-DE host. `marks/stacked.ts` states that
  *  rule. It applies to rendered text, NOT to every formatter in the engine: the hover card's
- *  y-value formatters (`crosshair.ts`, ten `opts.yFormat` fallbacks) deliberately follow the host
- *  locale, because a card is DOM that is never rasterised. The line is rendered-vs-hover, and an
- *  earlier version of this comment claimed the two formatters below were the only locale-pinned
- *  formatters anywhere, which was simply false. `histogram-label.ts` is pinned too, for a related
+ *  y-value formatter (`defaultYFormat` in crosshair/attach.ts, every `opts.yFormat` fallback)
+ *  deliberately follows the host locale, because a card is DOM that is never rasterised. The line
+ *  is rendered-vs-hover, and an earlier version of this comment claimed the two formatters below
+ *  were the only locale-pinned formatters anywhere, which was simply false. `histogram-label.ts` is pinned too, for a related
  *  reason recorded there: its bin header sits directly under this axis. */
 const NUMERIC_X_LOCALE = "en-US";
 

@@ -147,7 +147,7 @@ function applySegmentGap(
   // pane, so two panes sharing a band position cannot have their segments interleaved into one
   // stack. (Not `closest("g[aria-label^='facet']")` — vendored Plot 0.6.16 puts no `aria-label` on a
   // facet group, so that selector matched nothing and only its `?? el.parentElement` fallback ever
-  // ran. `crosshair.ts` keeps the same selector deliberately, and says so.) Grouping only needs
+  // ran. `crosshair/dom-geometry.ts` keeps the same selector deliberately, and says so.) Grouping only needs
   // parents to be DISTINGUISHABLE, so each gets an id on first sight; the id used to be
   // `indexOf(parent)`, which rebuilt the grandparent's child list once per element — O(n²) in
   // segment count for the identical partition.

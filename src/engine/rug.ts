@@ -6,7 +6,7 @@
 // Drawn by POST-RENDER injection rather than as a Plot mark, for three reasons: the strip lives
 // outside the plot frame (Plot marks position against the frame), it needs exact pixel geometry, and
 // any mark carrying an fx/fy channel would facet the whole plot (see assemblePlot's invariant
-// guard). Pixel positions come from Plot's own `svg.scale("x")` — the accessor crosshair.ts reads —
+// guard). Pixel positions come from Plot's own `svg.scale("x")` — the accessor crosshair/line.ts reads —
 // so blocks land on the real scale, not a re-derivation of it. No layout measurement, so the strip
 // is identical in live HTML, the PNG export, and the jsdom goldens, which all consume this one SVG.
 import { RUG_GAP, RUG_ROW_GAP } from "../spec/rug";
