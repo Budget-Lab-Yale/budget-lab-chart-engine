@@ -389,6 +389,91 @@ export interface ExportFrame {
 }
 
 /**
+ * What the two render passes of `buildExportSvg` take from the caller, resolved in two stages,
+ * each at the point the export has always read it. Both passes derive their options from these
+ * (`metaPassOpts`, `finalPassOpts`) rather than assembling them independently at each call, which
+ * is how the metadata pass came to miss the accent (A1, below).
+ *
+ * The stages are separate because hooks run during the metadata pass. A formatter that changes the
+ * caller's `opts.selections` or replaces `opts.hooks` there is seen by everything read after the
+ * pass and by nothing read before it (test/export-read-points.test.ts). Resolving the final pass's
+ * inputs early would change what is drawn.
+ *
+ * Geometry that depends on the metadata pass's result (the chart width beside a right-hand legend,
+ * a timeline's budget width, a framed treemap's cap, a figure's pane sizes) is in neither: it is
+ * computed from that result and added to the final pass at its call.
+ */
+interface ExportMetaInput {
+  /** The frame's inner width: the width the metadata pass renders at. */
+  width: number;
+  /** The caller's hooks without `afterRender` — see `resolveExportMetaInput`. */
+  metaHooks: RenderHooks | undefined;
+}
+
+/** Read BEFORE the metadata pass. */
+function resolveExportMetaInput(opts: { hooks?: RenderHooks }, width: number): ExportMetaInput {
+  // `afterRender` is stripped for the metadata pass only: its SVG(s) are discarded (only the
+  // legend/title metadata is read), so calling a mutating, potentially side-effecting hook against
+  // them would double-fire it per export — once on throwaway output, once more on the SVG that's
+  // actually returned. Every other hook is a pure formatter (idempotent), so passing them through
+  // unchanged there is harmless.
+  const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
+  return { width, metaHooks };
+}
+
+/**
+ * Read AFTER the metadata pass. The final hooks are not here: the export reads `opts.hooks` afresh
+ * at each later use (each legend draw, the final render), and a `legendKey` run by an earlier draw
+ * can replace it before a later one. They are passed to `finalPassOpts` at its call.
+ */
+interface ExportFinalInput {
+  /** The caller's title-selector selections, as given (`undefined` = spec defaults). */
+  selections: Record<string, string> | undefined;
+  /** The active (or default) title-selector option's colour, palette-resolved; the live mount
+   *  shows the same accent for these selections. */
+  accentColor: string | undefined;
+}
+
+function resolveExportFinalInput(
+  spec: ChartSpec,
+  opts: { selections?: Record<string, string> },
+): ExportFinalInput {
+  const selections = opts.selections;
+  // Color accent feed: resolve the same accent color the live single-chart mount
+  // would show for these `selections`, so a downloaded PNG matches what the user sees on screen.
+  // `renderFigure` (small multiples) also receives it, so a faceted chart's per-pane bars adopt the
+  // active option's accent in the export just as they do live (see mountFigure in render-live.ts).
+  const effectiveSelections = selections ?? resolveSelections(spec);
+  const rawAccent = spec.title_selectors
+    ? resolveActiveOptionColor(spec.title_selectors, effectiveSelections, spec.series_colors)
+    : undefined;
+  const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
+  return { selections, accentColor };
+}
+
+/** The metadata pass's options: legend items and axis titles are read from its result; its SVG is
+ *  discarded. */
+function metaPassOpts(input: ExportMetaInput): { width: number; hooks: RenderHooks | undefined } {
+  // A1 — phase 5: this pass is given no `accentColor`, so the legend it reports keys a series in
+  // its palette colour while the final pass draws the series in the accent. Preserved here, not
+  // fixed: the export goldens pin it (title-selector-accent-dashed.golden.svg).
+  return { width: input.width, hooks: input.metaHooks };
+}
+
+/** The options every final-pass render shares; the caller adds its geometry. `hooks` is the
+ *  caller's `opts.hooks`, read at the call (see `ExportFinalInput`). */
+function finalPassOpts(
+  input: ExportFinalInput,
+  hooks: RenderHooks | undefined,
+): { hooks: RenderHooks | undefined; phase: "export"; accentColor?: string } {
+  return {
+    hooks,
+    phase: "export",
+    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
+  };
+}
+
+/**
  * Build a self-contained export SVG for the given chart spec and data rows.
  * Pure — no canvas, no async, no external resources. The default frame is 1000×750 (4:3); `opts.frame`
  * (ExportFrame) sets another width/height, logo padding and pane fill. The chart
@@ -434,16 +519,10 @@ export function buildExportSvg(
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
   // figure-level legend), not from a single chart.
-  //
-  // `afterRender` is stripped from the hooks object for THIS call only: its SVG(s) are discarded
-  // (only the legend/title metadata is read below), so calling a mutating, potentially side-
-  // effecting hook against them would double-fire it per export — once here on throwaway output,
-  // once more below on the SVG that's actually returned. Every other hook is a pure formatter
-  // (idempotent), so passing them through unchanged here is harmless.
-  const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
+  const metaInput = resolveExportMetaInput(opts, FIW);
   const meta = isFigure
-    ? renderFigure(spec, rows, { width: FIW, hooks: metaHooks })
-    : renderChart(spec, rows, { width: FIW, hooks: metaHooks });
+    ? renderFigure(spec, rows, metaPassOpts(metaInput))
+    : renderChart(spec, rows, metaPassOpts(metaInput));
   const legendItems = meta.legendItems ?? [];
   const shapeLegendItems = meta.shapeLegendItems ?? [];
   const hasShapeLegend = shapeLegendItems.length > 0;
@@ -452,21 +531,13 @@ export function buildExportSvg(
   let xAxisTitle = meta.xAxisTitle ?? "";
   const yAxisTitle = spec.y_axis_title ?? "";
 
+  // Read after the metadata pass — see ExportFinalInput.
+  const finalInput = resolveExportFinalInput(spec, opts);
   // Title-selector tokens → the active (or default) option labels, as plain SVG text.
-  const title = spec.title ? resolveTitleText(spec, opts.selections) : "";
+  const title = spec.title ? resolveTitleText(spec, finalInput.selections) : "";
   const subtitle = spec.subtitle ?? "";
   const note = spec.note ?? "";
   const source = spec.source ?? "";
-
-  // Color accent feed: resolve the same accent color the live single-chart mount
-  // would show for these `selections`, so a downloaded PNG matches what the user sees on screen.
-  // `renderFigure` (small multiples) also receives it, so a faceted chart's per-pane bars adopt the
-  // active option's accent in the export just as they do live (see mountFigure in render-live.ts).
-  const effectiveSelections = opts.selections ?? resolveSelections(spec);
-  const rawAccent = spec.title_selectors
-    ? resolveActiveOptionColor(spec.title_selectors, effectiveSelections, spec.series_colors)
-    : undefined;
-  const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
 
   // A timeline's frame (width, chart width, legend side) is decided the SAME way `tbl-chart
   // validate` decides it — timelineExportFrame, no DOM render needed — so the two can never drift
@@ -637,9 +708,7 @@ export function buildExportSvg(
       height: plotHeight,
       // The download takes no host height: a row-sized chart's is horizontalBarChartHeight's.
       ...(rowSized ? { heightFromModel: true } : {}),
-      hooks: opts.hooks,
-      phase: "export",
-      ...(accentColor ? { accentColor } : {}),
+      ...finalPassOpts(finalInput, opts.hooks),
       ...(tlFrame?.budgetWidth !== undefined ? { timelineBudgetWidth: tlFrame.budgetWidth } : {}),
       ...(treemapCap !== undefined ? { treemapMaxHeight: treemapCap } : {}),
     });
@@ -717,11 +786,11 @@ export function buildExportSvg(
     // PER-PANE mode: equal columns, unless `pane_widths` splits the row (see colWidth below).
     const equalPaneW = Math.floor((FIW - COL_GAP * (cols - 1)) / cols);
     const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
+      ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, ...finalPassOpts(finalInput, opts.hooks) })
       : // `width` is each equal pane's width; `gridWidth`/`gridGap` are the row a per-pane
         // `pane_widths` is split across (perPaneColumnWidths). Without pane_widths renderFigure
         // reads only `width`, so equal per-pane figures are unchanged.
-        renderFigure(spec, rows, { width: equalPaneW, gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
+        renderFigure(spec, rows, { width: equalPaneW, gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, ...finalPassOpts(finalInput, opts.hooks) });
     // Cell width per column: the width each pane was RENDERED at. A pane's viewBox is its rendered
     // width, so a cell of any other width rescales the whole pane: with `pane_widths` the bars came
     // out a different width in every pane. renderFigure reports the widths whenever they are not
