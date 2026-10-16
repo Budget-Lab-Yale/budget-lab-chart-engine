@@ -14,6 +14,7 @@
 // engine/index.ts does not import this file, so nothing new is circular.
 import { resolveColumns } from "../spec/columns.js";
 import { rowsInSectionOrder } from "../spec/section-key.js";
+import { figurePaneValues } from "../spec/panes.js";
 import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
@@ -67,7 +68,7 @@ export function legendInRightColumn(
  * space, regardless of an explicit legendPosition or the stacked defaults below.
  *
  * An explicit `spec.legendPosition` wins over the defaults. Otherwise "right" when the chart is
- * `stacked` AND (five or more series, OR diverging — any row with a negative value), because a tall
+ * `stacked` AND (five or more series, OR diverging — any drawn row with a negative value), because a tall
  * stack's legend reads better beside it than wrapped above it.
  *
  * The LIVE path additionally falls back to "top" when the card is too narrow for the column
@@ -87,9 +88,19 @@ export function resolveLegendPosition(
     if (seriesCount >= 5) return "right";
     const cols = resolveColumns(spec, rows);
     const valueCol = cols.value;
-    // A section that section_order leaves out is not drawn, so its negatives make nothing diverge.
+    // Only drawn rows count: a section that section_order leaves out, a series series_order leaves
+    // out (pane.ts scopeToSeries) and a small-multiples pane that pane_order leaves out are not
+    // drawn, so their negatives make nothing diverge.
     const sectionField = cols.section;
-    const drawn = rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] as string : null);
+    const seriesField = cols.series;
+    const facetField = cols.facet;
+    const seriesOrder = spec.series_order?.length ? new Set(spec.series_order) : null;
+    const panes = spec.small_multiples && facetField ? new Set(figurePaneValues(spec, rows, facetField)) : null;
+    const drawn = rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] as string : null).filter(
+      (r) =>
+        (!seriesOrder || !seriesField || seriesOrder.has((r[seriesField] ?? "") as string)) &&
+        (!panes || panes.has(r[facetField!] as string)),
+    );
     const isDiverging = drawn.some((r) => {
       const v = typeof r._y === "number" ? r._y : Number(r[valueCol]);
       return Number.isFinite(v) && v < 0;

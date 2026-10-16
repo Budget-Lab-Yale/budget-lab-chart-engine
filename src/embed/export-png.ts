@@ -23,6 +23,7 @@ import {
   legendInRightColumn,
   orderForRightLegend,
 } from "../engine/legend-layout.js";
+import { timelineTextWidth } from "../engine/timeline-text.js";
 import {
   W,
   H,
@@ -74,7 +75,33 @@ function drawLines(
 
 // Small-multiples figure layout tokens. Per-pane chart height comes from figurePaneHeight
 // (engine/figure.ts) — the single source of truth shared with the live figure mount.
-const PANE_TITLE_H = 18; // per-pane title band height
+const PANE_TITLE_H = 18; // per-pane title band height, for a title on one line
+const PANE_TITLE_LINE_H = 16; // a wrapped pane title's line pitch (live: 11px at line-height 1.5)
+/** Width in px of a pane title (Figtree 700 at 11px, as live and export draw it), from the committed
+ *  Figtree advance table rather than canvas `measureText`: whether a title wraps decides the grid's
+ *  geometry, so it must not depend on the measuring backend (without a canvas, `measureText` guesses
+ *  8px a character and wrapped titles the browser fits on one line). */
+const paneTitleWidth = (text: string): number => timelineTextWidth(text, 11, 700);
+
+/** `title` broken at word boundaries into lines no wider than `maxWidth` by paneTitleWidth (a single
+ *  word wider than that keeps its own line, as the live title does); a title that fits is returned
+ *  whole, exactly as written. */
+function wrapPaneTitle(title: string, maxWidth: number): string[] {
+  if (paneTitleWidth(title) <= maxWidth) return [title];
+  const lines: string[] = [];
+  let line = "";
+  for (const word of title.split(/\s+/).filter(Boolean)) {
+    const trial = line ? `${line} ${word}` : word;
+    if (line && paneTitleWidth(trial) > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = trial;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [title];
+}
 const WRAP_LINE_H = 16; // a wrapped legend label's line pitch (the right-hand column's)
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
@@ -781,28 +808,54 @@ export function buildExportSvg(
     // below MIN_CHART_H: there the panes stop and the output comes out taller than the frame. Without
     // a frame it is a no-op.
     const paneChartH0 = figurePaneHeight(spec);
-    const fillAvail = FH - chartTop - bottomH - gridRows * PANE_TITLE_H - (gridRows - 1) * ROW_GAP;
-    const fillH = Math.floor(fillAvail / gridRows);
     const fillPanes = frame?.fillPanes === true;
-    const fills = fillPanes && fillH >= MIN_CHART_H;
-    const paneChartH = fills ? fillH : fillPanes ? MIN_CHART_H : paneChartH0;
-    // Flooring per row leaves up to gridRows − 1 whole pixels unfilled; renderFigure draws every pane
-    // at one height, so they go to the gaps between rows, one each (at most one per gap). Only the
-    // sub-pixel remainder is left, as on a one-row figure.
-    const extraGapPx = fills ? Math.min(gridRows - 1, Math.max(0, Math.floor(fillAvail - gridRows * fillH))) : 0;
-    const rowGapAfter = (r: number): number => ROW_GAP + (r < extraGapPx ? 1 : 0);
     const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
     // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
     // one inner data width — renderFigure computes them with the live grid's helper
     // (sharedColumnWidths) and reports them as fig.columnWidths, so the export matches the live look.
     // PER-PANE mode: equal columns, unless `pane_widths` splits the row (see colWidth below).
     const equalPaneW = Math.floor((FIW - COL_GAP * (cols - 1)) / cols);
-    const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, ...finalPassOpts(finalInput, opts.hooks) })
-      : // `width` is each equal pane's width; `gridWidth`/`gridGap` are the row a per-pane
-        // `pane_widths` is split across (perPaneColumnWidths). Without pane_widths renderFigure
-        // reads only `width`, so equal per-pane figures are unchanged.
-        renderFigure(spec, rows, { width: equalPaneW, gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, ...finalPassOpts(finalInput, opts.hooks) });
+    const renderAt = (paneChartH: number, hooks: RenderHooks | undefined): FigureRenderResult =>
+      isShared
+        ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, ...finalPassOpts(finalInput, hooks) })
+        : // `width` is each equal pane's width; `gridWidth`/`gridGap` are the row a per-pane
+          // `pane_widths` is split across (perPaneColumnWidths). Without pane_widths renderFigure
+          // reads only `width`, so equal per-pane figures are unchanged.
+          renderFigure(spec, rows, { width: equalPaneW, gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, ...finalPassOpts(finalInput, hooks) });
+    // Pane titles wrap at word boundaries to their column, as the live grid's title block does; a
+    // title that fits is drawn exactly as written. A grid row's title band is as tall as its
+    // tallest title, so the panes of a row stay level. The column widths are the rendered figure's,
+    // which do not depend on the pane height or on the hooks.
+    const titleLinesOf = (f: FigureRenderResult): string[][] =>
+      f.panes.map((pane, i) => wrapPaneTitle(pane.title, f.columnWidths?.[i % cols] ?? equalPaneW));
+    const fillFor = (bands: number[]): { fillAvail: number; fillH: number; fills: boolean; paneChartH: number } => {
+      const fillAvail = FH - chartTop - bottomH - bands.reduce((s, h) => s + h, 0) - (gridRows - 1) * ROW_GAP;
+      const fillH = Math.floor(fillAvail / gridRows);
+      const fills = fillPanes && fillH >= MIN_CHART_H;
+      return { fillAvail, fillH, fills, paneChartH: fills ? fillH : fillPanes ? MIN_CHART_H : paneChartH0 };
+    };
+    // fillPanes sizes the panes to the room the title bands leave, and the bands are known only once
+    // the figure reports its column widths. So with fillPanes the first render is a layout probe at
+    // the one-line bands' height, rendered with no hooks (every hook must run once, on the panes
+    // returned), and the figure is rendered again only when a wrapped title changes that height or
+    // there are hooks to run. Without fillPanes it renders once, with its hooks, as before.
+    const hasHooks = opts.hooks != null && Object.values(opts.hooks).some((h) => h != null);
+    const layoutHooks = fillPanes && hasHooks ? undefined : opts.hooks;
+    const oneLineFill = fillFor(Array.from({ length: gridRows }, () => PANE_TITLE_H));
+    let fig = renderAt(oneLineFill.paneChartH, layoutHooks);
+    const titleLines = titleLinesOf(fig);
+    const titleBands = Array.from({ length: gridRows }, (_, r) => {
+      let n = 1;
+      for (let c = 0; c < cols; c++) n = Math.max(n, titleLines[r * cols + c]?.length ?? 1);
+      return PANE_TITLE_H + (n - 1) * PANE_TITLE_LINE_H;
+    });
+    const { fillAvail, fillH, fills, paneChartH } = fillFor(titleBands);
+    if (paneChartH !== oneLineFill.paneChartH || layoutHooks !== opts.hooks) fig = renderAt(paneChartH, opts.hooks);
+    // Flooring per row leaves up to gridRows − 1 whole pixels unfilled; renderFigure draws every pane
+    // at one height, so they go to the gaps between rows, one each (at most one per gap). Only the
+    // sub-pixel remainder is left, as on a one-row figure.
+    const extraGapPx = fills ? Math.min(gridRows - 1, Math.max(0, Math.floor(fillAvail - gridRows * fillH))) : 0;
+    const rowGapAfter = (r: number): number => ROW_GAP + (r < extraGapPx ? 1 : 0);
     // Cell width per column: the width each pane was RENDERED at. A pane's viewBox is its rendered
     // width, so a cell of any other width rescales the whole pane: with `pane_widths` the bars came
     // out a different width in every pane. renderFigure reports the widths whenever they are not
@@ -834,7 +887,7 @@ export function buildExportSvg(
       let acc = chartTop;
       for (let r = 0; r < gridRows; r++) {
         rowY.push(acc);
-        acc += PANE_TITLE_H + rowHeights[r]! + rowGapAfter(r);
+        acc += titleBands[r]! + rowHeights[r]! + rowGapAfter(r);
       }
     }
     fig.panes.forEach((pane, i) => {
@@ -844,17 +897,17 @@ export function buildExportSvg(
       const w = colWidth(col);
       const y = rowY[row]!;
       const h = paneH(i);
-      root.appendChild(textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }));
+      drawLines(root, titleLines[i]!, x, y + 12, PANE_TITLE_LINE_H, { size: 11, weight: W_SEMI, fill: HEADING });
       if (pane.svg) {
         const ps = pane.svg;
         ps.setAttribute("x", String(x));
-        ps.setAttribute("y", String(y + PANE_TITLE_H));
+        ps.setAttribute("y", String(y + titleBands[row]!));
         ps.setAttribute("width", String(w));
         ps.setAttribute("height", String(h));
         root.appendChild(ps);
       }
     });
-    contentHeight = rowHeights.reduce((s, h) => s + PANE_TITLE_H + h, 0) + (gridRows - 1) * ROW_GAP + extraGapPx;
+    contentHeight = rowHeights.reduce((s, h, r) => s + titleBands[r]! + h, 0) + (gridRows - 1) * ROW_GAP + extraGapPx;
   }
 
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a

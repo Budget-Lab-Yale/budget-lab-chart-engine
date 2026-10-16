@@ -6,9 +6,10 @@
  */
 import type { TidyRow } from "./index.js";
 
-/** Quote a single CSV field if it contains a comma, double-quote, or newline. */
+/** Quote a single CSV field if it contains a comma, double-quote, or line break. A bare `\r` counts:
+ *  unquoted, parseCsv reads it as a line ending and splits the row in two. */
 function quoteCsvField(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+  if (value.includes(",") || value.includes('"') || value.includes("\n") || value.includes("\r")) {
     return '"' + value.replace(/"/g, '""') + '"';
   }
   return value;
@@ -19,7 +20,7 @@ function quoteCsvField(value: string): string {
  *
  * Column order: `time`, `series`, `value` first (if present), then any
  * remaining columns in first-seen order. Fields are quoted when they contain
- * a comma, a double-quote, or a newline. Output uses LF line endings and
+ * a comma, a double-quote, or a line break. Output uses LF line endings and
  * ends with a trailing newline.
  */
 export function rowsToCsv(rows: TidyRow[]): string {

@@ -26,13 +26,26 @@ import type { DataSource } from "../spec/types.js";
  *  - escaped double-quotes ("") inside quoted fields
  *  - CRLF or LF line endings
  *  - trailing newline
+ *  - a leading byte-order mark (dropped)
  *  - leading/trailing whitespace in header names
  *  - empty cells  → ""
  *  - entirely blank rows → skipped
+ *
+ * Throws `CSV line N: …` where a lenient read would drop or shift data without a word: a quoted
+ * field with no closing quote (the rest of the file became one cell), text after a closing quote
+ * (`"x"y,1` shifted every later column), two header columns with one non-blank name (the later one
+ * won), and a non-empty cell past the header's last column (dropped).
  */
 export function parseCsv(text: string): TidyRow[] {
-  // Normalise CRLF and bare CR to LF.
-  const src = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Normalise CRLF and bare CR to LF. A byte-order mark is dropped first: left in, it is the first
+  // header's first character, and a quoted first header kept its quotes ("time" as `"time"`).
+  const src = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const fail = (line: number, msg: string): never => {
+    throw new Error(`CSV line ${line}: ${msg}`);
+  };
+  // The 1-based line each row starts on (a quoted field can span lines), for the errors below.
+  let line = 1;
+  const rowLines: number[] = [1];
 
   // Tokenise into a flat list of cells plus row-break markers.
   // null = end-of-row sentinel.
@@ -49,11 +62,15 @@ export function parseCsv(text: string): TidyRow[] {
       // End of row
       tokens.push(null);
       i++;
+      line++;
+      rowLines.push(line);
       continue;
     }
 
     if (ch === '"') {
       // Quoted field
+      const opened = line;
+      let closed = false;
       let field = "";
       i++; // skip opening quote
       while (i < len) {
@@ -66,15 +83,22 @@ export function parseCsv(text: string): TidyRow[] {
           } else {
             // Closing quote
             i++;
+            closed = true;
             break;
           }
         } else {
+          if (c === "\n") line++;
           field += c;
           i++;
         }
       }
+      if (!closed) fail(opened, "a quoted field has no closing quote");
+      // After a quoted field comes a comma, the end of the row or the end of the file.
+      if (i < len && src[i] !== "," && src[i] !== "\n") {
+        fail(line, `text after the closing quote of "${field}": put the whole cell inside the quotes`);
+      }
       tokens.push(field);
-      // After a quoted field there should be a comma or EOL; skip the comma.
+      // Skip the comma.
       if (i < len && src[i] === ",") i++;
     } else {
       // Unquoted field — read until comma or newline
@@ -112,6 +136,13 @@ export function parseCsv(text: string): TidyRow[] {
   const headerRow = rawRows[0];
   if (headerRow === undefined) return [];
   const headers = headerRow.map((h) => h.trim());
+  const named = new Set<string>();
+  for (const h of headers) {
+    // Blank names repeat legitimately: the stray empty columns a spreadsheet exports (`time,value,,,`).
+    if (h === "") continue;
+    if (named.has(h)) fail(1, `two header columns are named "${h}"`);
+    named.add(h);
+  }
 
   const result: TidyRow[] = [];
 
@@ -120,6 +151,9 @@ export function parseCsv(text: string): TidyRow[] {
     if (cells === undefined) continue;
     // Skip entirely blank rows (blank line or a row with only empty fields).
     if (cells.length === 0 || (cells.length === 1 && cells[0] === "")) continue;
+    if (cells.slice(headers.length).some((c) => c !== "")) {
+      fail(rowLines[r]!, `${cells.length} cells, but the header names ${headers.length} columns`);
+    }
 
     const row: Record<string, string> = {};
     for (let c = 0; c < headers.length; c++) {
@@ -151,6 +185,15 @@ function assertOk(resp: { ok: boolean; status: number; statusText: string }, url
   }
 }
 
+/** parseCsv, with a parse error naming the file or URL it read. */
+function parseCsvFrom(text: string, from: string): TidyRow[] {
+  try {
+    return parseCsv(text);
+  } catch (err) {
+    throw new Error(`loadData: ${from}: ${(err as Error).message}`);
+  }
+}
+
 /** Coerce an unknown value to a non-null string. */
 function coerceString(v: unknown): string {
   if (v === null || v === undefined) return "";
@@ -177,7 +220,7 @@ export async function loadData(
   if ("file" in resolved) {
     const filePath = resolve(opts?.baseDir ?? ".", resolved.file);
     const text = await readFile(filePath, "utf8");
-    return parseCsv(text);
+    return parseCsvFrom(text, filePath);
   }
 
   // Remote source (url)
@@ -185,7 +228,7 @@ export async function loadData(
     const resp = await fetchFn(resolved.url);
     assertOk(resp, resolved.url);
     const text = await resp.text();
-    return parseCsv(text);
+    return parseCsvFrom(text, resolved.url);
   }
 
   // format === "json"

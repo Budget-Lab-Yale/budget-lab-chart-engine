@@ -12,6 +12,30 @@ import { d3 } from "./vendor";
 
 export { TBL_COLORS };
 
+/** CSS4 space/slash syntax (`rgb(0 0 0 / 10%)`, `hsl(0 0% 0%)`) to the comma form d3.color reads
+ *  (`rgba(0, 0, 0, 0.1)`); anything else is returned as-is. */
+function commaColor(color: string): string {
+  const m = /^\s*(rgb|hsl)a?\(\s*([^,()]*?)\s*\)\s*$/i.exec(color);
+  if (!m) return color;
+  const [body, alpha] = m[2]!.split("/").map((s) => s.trim());
+  const parts = body!.split(/\s+/);
+  if (parts.length !== 3) return color;
+  if (alpha === undefined) return `${m[1]}(${parts.join(", ")})`;
+  const a = alpha.endsWith("%") ? Number(alpha.slice(0, -1)) / 100 : Number(alpha);
+  return `${m[1]}a(${parts.join(", ")}, ${a})`;
+}
+
+/** A CSS colour's sRGB channels (0–255) and alpha, as d3.color reads it, the CSS4 space/slash
+ *  rgb()/hsl() forms included: hex of 3, 4, 6 or 8 digits, rgb()/rgba(), hsl()/hsla() and the named
+ *  colours. Null for anything d3.color cannot read (`currentColor`, `var()`, `lab()`, `oklch()`,
+ *  `color()`, `color-mix()`, `hwb()`, a palette name). `transparent` has NaN channels at alpha 0. */
+export function parseCssColor(color: string): { r: number; g: number; b: number; opacity: number } | null {
+  const c = d3.color(commaColor(color));
+  if (!c) return null;
+  const { r, g, b, opacity } = c.rgb();
+  return { r, g, b, opacity };
+}
+
 const BASE = tokens.categorical.map((c) => c.base);
 const LIGHT = tokens.categorical.map((c) => c.light);
 

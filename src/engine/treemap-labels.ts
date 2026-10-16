@@ -2,7 +2,7 @@
 // Figtree table (timelineTextWidth), so a label that fits here fits identically in the live mount, the
 // PNG export and the jsdom goldens. Drawing (marks/treemap) consumes these results as-is.
 import { tokens } from "../theme/tokens";
-import { locateOnRamp } from "./palette";
+import { locateOnRamp, parseCssColor } from "./palette";
 import { timelineTextWidth } from "./timeline-text";
 import { TM_GEOM, treemapTieKey } from "./treemap-layout";
 import { d3 } from "./vendor";
@@ -70,25 +70,12 @@ export function tileFill(hueBase: string, rank: number, n: number, shading: "siz
   return shades ? shades[step(rank, n, shades.length)]! : hueBase;
 }
 
-/** CSS4 space/slash syntax (`rgb(0 0 0 / 10%)`, `hsl(0 0% 0%)`) to the comma form d3.color reads
- *  (`rgba(0, 0, 0, 0.1)`); anything else is returned as-is. */
-function commaColor(color: string): string {
-  const m = /^\s*(rgb|hsl)a?\(\s*([^,()]*?)\s*\)\s*$/i.exec(color);
-  if (!m) return color;
-  const [body, alpha] = m[2]!.split("/").map((s) => s.trim());
-  const parts = body!.split(/\s+/);
-  if (parts.length !== 3) return color;
-  if (alpha === undefined) return `${m[1]}(${parts.join(", ")})`;
-  const a = alpha.endsWith("%") ? Number(alpha.slice(0, -1)) / 100 : Number(alpha);
-  return `${m[1]}a(${parts.join(", ")}, ${a})`;
-}
-
 /** WCAG 2 relative luminance of a colour as painted on the white card: a translucent fill is
  *  composited over white first. Null when the colour does not parse. */
 function luminance(color: string): number | null {
-  const c = d3.color(commaColor(color));
+  const c = parseCssColor(color);
   if (!c) return null;
-  const { r, g, b, opacity } = c.rgb();
+  const { r, g, b, opacity } = c;
   const a = Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1;
   // d3 parses "transparent" with NaN channels; at alpha 0 it is the white card whatever they are.
   const over = (v: number): number => (a === 0 ? 255 : a * v + (1 - a) * 255);

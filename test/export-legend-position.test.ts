@@ -7,6 +7,7 @@
 // it in the download. Reported from a real download. The decision now lives in
 // engine/legend-layout.ts and both paths call it, which is what stops the two drifting again.
 import { describe, it, expect } from "vitest";
+import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
 import { INNER_W, MARGIN } from "../src/embed/figure-chrome";
 import { LEGEND_COLUMN_WIDTH, LEGEND_GAP, resolveLegendPosition } from "../src/engine/legend-layout";
@@ -227,5 +228,60 @@ describe("the PNG export honours the live legend position", () => {
     expect(resolveLegendPosition(spec, 6, rows)).toBe("top");
     const chart = chartSvgOf(buildExportSvg(spec, rows));
     expect(Number(chart.getAttribute("width"))).toBe(INNER_W);
+  });
+});
+
+// A stacked chart is "diverging", and takes a right-hand legend, when a row it DRAWS is negative.
+// `section_order` was already honoured; `series_order` (which drops the series it does not list,
+// pane.ts scopeToSeries) and a figure's `pane_order` (which drops the panes it does not list) were
+// not, so negatives in rows the chart never draws moved its legend to the right, live and in the PNG.
+describe("the diverging test reads only the rows the chart draws", () => {
+  /** Three series over two categories; series "neg" (or pane/section "N") holds the only negatives. */
+  const rows3 = (extra: (s: string) => Record<string, string> = () => ({})): TidyRow[] =>
+    rowsOf(
+      ["A", "B"].flatMap((g) =>
+        ["s0", "s1", "neg"].map((s) => ({ g, s, v: s === "neg" ? "-3" : "2", ...extra(s) })),
+      ),
+    );
+
+  it("a negative series that series_order leaves out does not make the chart diverge", () => {
+    const rows = rows3();
+    const spec = stackedSpec({ series_order: ["s0", "s1"] });
+    expect(resolveLegendPosition(spec, 2, rows)).toBe("top");
+    // Control: listed, the same series does.
+    expect(resolveLegendPosition(stackedSpec({ series_order: ["s0", "s1", "neg"] }), 3, rows)).toBe("right");
+  });
+
+  it("live and in the PNG: the chart keeps its full width and a top legend", () => {
+    const rows = rows3();
+    const spec = stackedSpec({ series_order: ["s0", "s1"] });
+    const host = document.createElement("div");
+    document.body.append(host);
+    try {
+      mountChart(host, { spec, rows, width: INNER_W });
+      expect(host.querySelector(".figure-body--legend-right")).toBeNull();
+      expect(Number(host.querySelector(".figure-canvas-scroll svg")!.getAttribute("width"))).toBe(INNER_W);
+    } finally {
+      host.remove();
+    }
+    expect(Number(chartSvgOf(buildExportSvg(spec, rows)).getAttribute("width"))).toBe(INNER_W);
+  });
+
+  it("a section that section_order leaves out still does not count (unchanged)", () => {
+    const rows = rows3((s) => ({ sec: s === "neg" ? "N" : "P" }));
+    const spec = stackedSpec({ columns: { x: "g", value: "v", series: "s", section: "sec" }, section_order: ["P"] });
+    expect(resolveLegendPosition(spec, 2, rows)).toBe("top");
+    expect(resolveLegendPosition(stackedSpec({ columns: { x: "g", value: "v", series: "s", section: "sec" } }), 3, rows)).toBe("right");
+  });
+
+  it("a small-multiples pane that pane_order leaves out does not count", () => {
+    const rows = rows3((s) => ({ f: s === "neg" ? "N" : "P" }));
+    const sm = (pane_order?: string[]) =>
+      stackedSpec({
+        columns: { x: "g", value: "v", series: "s", facet: "f" },
+        small_multiples: { mode: "shared", ...(pane_order ? { pane_order } : {}) },
+      });
+    expect(resolveLegendPosition(sm(["P"]), 2, rows)).toBe("top");
+    expect(resolveLegendPosition(sm(), 3, rows)).toBe("right");
   });
 });

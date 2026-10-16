@@ -8,7 +8,7 @@
 // PURE — spec + resolved series colors in, LegendItem rows out. No DOM, no data: everything keyed
 // here is declared in the spec, so renderChart and renderFigure both get the same rows.
 import { TBL } from "./theme";
-import { resolveColor, resolveColorOr } from "./palette";
+import { resolveColor, resolveColorOr, parseCssColor } from "./palette";
 import { resolveAnnotations, xMarkerLabel, yMarkerLabel } from "../spec/annotations";
 import { resolveRugTracks } from "../spec/rug";
 import { valueAxisIsX } from "../spec/dumbbell-orientation";
@@ -50,20 +50,23 @@ export function labelMovedToLegend(
 }
 
 /** Flatten `color` at `opacity` over white, so a swatch shows the tint the reader will actually
- *  see on the chart rather than the fill's full-strength hue. Non-hex colors pass through. */
+ *  see on the chart rather than the fill's full-strength hue. Any colour `parseCssColor` reads is
+ *  flattened (the forms CONFIG-SPEC's swatch row lists: hex of every length, named colours, and
+ *  rgb()/hsl() with plain channels in either syntax), and its own alpha multiplies `opacity`, as it
+ *  does where the fill is painted. Anything else (`var()`, `oklch()`, `120deg` …) passes through at
+ *  full strength. */
 export function flattenOverWhite(color: string, opacity: number): string {
   // A fully opaque fill IS its own color — return it untouched rather than a recomputed (and
   // case-normalized) rebuild of the same value, so a swatch and its mark compare equal as strings.
   if (opacity >= 1) return color;
-  const m = /^#([0-9a-f]{6})$/i.exec(color);
-  if (!m) return color;
-  const hex = m[1] as string;
-  const t = Math.max(opacity, 0);
-  const channel = (i: number): number => {
-    const v = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    return Math.round(255 + (v - 255) * t);
-  };
-  const out = [0, 1, 2].map((i) => channel(i).toString(16).padStart(2, "0")).join("");
+  const c = parseCssColor(color);
+  if (!c) return color;
+  const alpha = Number.isFinite(c.opacity) ? Math.min(1, Math.max(0, c.opacity)) : 1;
+  const t = Math.max(opacity, 0) * alpha;
+  // Nothing painted: the white card itself (`transparent` parses with NaN channels at alpha 0).
+  if (t === 0) return "#ffffff";
+  const channel = (v: number): number => Math.round(255 + (Math.min(255, Math.max(0, v)) - 255) * t);
+  const out = [c.r, c.g, c.b].map((v) => channel(v).toString(16).padStart(2, "0")).join("");
   return `#${out}`;
 }
 

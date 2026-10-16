@@ -192,6 +192,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   edge) and renders its math (it printed the source). Footnotes with neither are unchanged.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
+- `xAxisPolicy.anchorAtZero: true` on a numeric x-axis whose values are all negative: the axis now
+  runs to 0, as CONFIG-SPEC says, on a standalone chart and in every small-multiples pane, live and
+  in the PNG. Only the minimum was anchored, so the axis stopped at the largest value. An axis that
+  spans 0 or lies above it is unchanged. No published figure moves: the archive sets the field only
+  to `false`.
+- Stacked charts: a negative value in a series that `series_order` leaves out, or in a
+  small-multiples pane that `pane_order` leaves out, no longer makes the chart count as diverging.
+  The chart draws neither, but the test read every row, so a stack with no negative segment on show
+  took a right-hand legend, live and in the PNG. No published figure moves: no stacked spec in the
+  archive drops rows by either field.
+- PNG export of small multiples: a pane title wider than its column wraps at word boundaries
+  within the column, as the live title does, and its grid row's title band grows by a line per
+  extra line, so every pane in that row starts below it. The title was drawn on one line and ran
+  into the next pane's title. Whether a title fits is measured with Figtree's own advance widths
+  (the table timelines use), not the browser's canvas, so the layout is the same wherever the PNG
+  is made. A title that fits is drawn exactly as before. Under a frame's `fillPanes`, the panes
+  shrink to make room, and every hook still runs once per export pass. No published figure moves:
+  the widest archive pane title (scf `home-sale-exclusion`) fits its 270 px column in the slides'
+  half frame.
+- Annotation legend chips for bands and `shading` fills colored with 3-, 4- or 8-digit hex, a CSS
+  color name, `transparent`, or `rgb()`/`rgba()`/`hsl()`/`hsla()` (whole-number or percentage
+  `rgb` channels, a unitless hue, a number alpha or a `/` percentage, comma- or space-separated):
+  the chip shows the tint the fill paints, flattened over white at its opacity, with the color's own
+  alpha applied too. It showed the color at full strength, about ten times darker than a
+  10 %-opaque band. Every other color (`var()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `hwb()`,
+  `color()`, `color-mix()`, `currentColor`, a hue with a unit, a fractional `rgb` channel, a
+  `none` channel) still keys at full strength, now documented in CONFIG-SPEC.
+  No published figure moves: every archive band and fill color is a palette token or 6-digit hex.
+- CSV data: a byte-order mark before a quoted first header no longer leaves the header's quotes in
+  its name (`"time"` did not match `time`). The data download (charts and tables) and
+  `freezeRemote` quote a field holding a bare carriage return, which read back as two rows.
 - CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
   - Colors: lists the forms validation accepts (hex, the named CSS functions, Plot's CSS keywords) in
     place of "any CSS color passes through". `yellowgreen` is rejected; `"Blue"` is the CSS keyword,
@@ -207,6 +238,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   - Hooks: `legendKey` receives `__annotation:<label>` as `ctx.series` on annotation rows, and markup
     a hook changes is exported unwrapped on every chart type, not only timelines.
   - `barStack.netLabelColor` and `valueLabels.signed` are documented as accepted with no effect.
+  - Point callouts: the frame clamp has a second exception. In the fallback sweep (more than nine
+    auto-placed callouts, or no arrangement meeting every constraint), clearing other callouts'
+    markers can push a label outside the frame even where the column of labels would fit in it.
   - Shading: `side` is measured against `baseline`, not zero.
   - Rug: tracks group by label within bands and within shading (explicit tracks never), painted in
     the first entry's color, while the legend chip keys every entry's color; the full-cover
@@ -228,6 +262,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - `validateSpec` (and `tbl-chart validate`) reports every cross-field rule a spec breaks, not only
   the first rule's errors. The first error is the one it reported before. A field a timeline or
   treemap does not support still ends the report there.
+- CSV data that cannot be read unambiguously is an error naming its line (and, from `loadData`, the
+  file or URL): a quoted field with no closing quote, which took the rest of the file as one cell;
+  text after a closing quote (`"x"y`), which shifted the row's later cells; two header columns
+  with one non-blank name, of which the last silently won (blank names may repeat); and a non-empty cell past the header's last column,
+  which was dropped. A short row is still padded with empty cells. See **Upgrading**.
 - `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while
   printing a `localhost` URL, so another machine on the same network could open every spec under
   the root, data included. `--host <addr>` opts in to another address, and the printed URL is the
@@ -294,6 +333,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     when some title selector colors every option: an accent is then painted over it under every
     selection. The PNG export painted it in its legend pass and threw (see **Fixed**). A
     histogram's `bar_color` still wins over the accent, so it is still checked.
+- **Stricter CSV parsing** (see **Changed**): every CSV in `budget-lab-charts` (165 files) and in
+  `budget-lab-interactives` (473, of which 431 are State of Tariffs data) parses, row for row, to
+  the same rows as on 1.18.0. A data file that now fails was being read wrongly; fix the file.
 - **PNG export legend accent** (see **Fixed**): no published figure moves. No `budget-lab-charts`
   figure has `title_selectors`; the only specs there that do are two slide fixtures, single-series
   lines with no legend rows. In State of Tariffs, `default-scenario/gdp-by-category` (and the same

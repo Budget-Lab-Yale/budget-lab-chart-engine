@@ -242,10 +242,12 @@ export function makeXAdapter(
             tooltipXFormat: (v) => formatNumericX(+v),
           };
         }
-        const xMax = sharedX ? sharedX.scale[1] : (d3.max(data, (d: any) => d._xn) as number);
         // Default OFF: a numeric axis fits its data range. Anchoring at zero is surprising for a
-        // year axis (it squishes all history to the right); opt in with anchorAtZero: true.
+        // year axis (it squishes all history to the right); opt in with anchorAtZero: true. It moves
+        // whichever end is short of 0: the maximum too when every x is negative.
         const anchorAtZero = xAxisPolicy?.anchorAtZero === true;
+        const dataMax = d3.max(data, (d: any) => d._xn) as number;
+        const xMax = sharedX ? sharedX.scale[1] : anchorAtZero && dataMax != null ? Math.max(0, dataMax) : dataMax;
         const xMin = sharedX
           ? sharedX.scale[0]
           : anchorAtZero
