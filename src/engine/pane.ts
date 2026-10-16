@@ -26,16 +26,16 @@ import {
   domainBounds,
   makeTickFormatter,
 } from "./scales";
-import { bandLabelMode, temporalXTicks } from "./axes";
+import { bandLabelMode } from "./axes";
 import type { BandLabelMode } from "./axes";
-import { makeXAdapter, numericAxisDomain } from "./x-adapter";
+import { makeXAdapter, numericAxisDomain, drawnDateDomain, type SidewaysLeader } from "./x-adapter";
 import type { XAdapter, SharedXDomain } from "./x-adapter";
 import { parseDate } from "../spec/parse-time";
 import { binValues, histogramThresholds, normalizeBinned } from "./histogram-bin";
 import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers, MarkContext } from "./marks/index";
-import { assemblePlot, withTickLabelHook, type ResolvedPointCallout } from "./assemble-plot";
+import { assemblePlot, withTickLabelHook, sidewaysLeaderDx, type ResolvedPointCallout } from "./assemble-plot";
 import { TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP } from "./theme";
 import { resolveValueAffixes, isTruthyFlag, formatNumericX, normalizeSpec, minMax } from "./util";
 import { type SeriesHatch } from "./hatch";
@@ -293,25 +293,44 @@ export function renderPane(
   // In the row order the full render sums them (assemblePaneResult sorts its rows the same way): a
   // series' sign is a float sum, so a different order can flip a near-cancelling one and swap shades.
   if (monoBasis) sortByCategoryOrder(spec, monoBasis.dataInScope);
-  const pane = assemblePaneResult(spec, paneOpts, classNameSuffix, adapter, cols, data, monoBasis);
-  // A date axis fits its ticks to the data's span, but a marker, band or callout past the data
-  // widens the scale Plot draws, crowding the labels. Only the render knows that scale, so when it
-  // would thin the ticks, render once more with it explicit (the same domain, so nothing else moves).
-  // Small-multiples panes already arrive with their drawn range in `sharedX`.
-  if (!opts.sharedX && (xType === "temporal" || xType === "quarterly") && pane.xDataExtent && pane.xScaleDomain) {
-    const [d0, d1] = pane.xDataExtent;
-    const [s0, s1] = pane.xScaleDomain;
-    if (s0 < d0 || s1 > d1) {
-      const width = (opts.width ?? 720) - (opts.marginLeft ?? TBL_MARGIN_LEFT) - (opts.marginRight ?? TBL_MARGIN_RIGHT);
-      const dates: [Date, Date] = [new Date(d0), new Date(d1)];
-      // `x_ticks` always: its listed values may lie in the widened part, and its thinning is measured
-      // on the drawn span too.
-      if (spec.x_ticks != null || temporalXTicks(dates, width, [s0, s1]).length !== temporalXTicks(dates, width).length) {
-        return renderPane(spec, rows, { ...opts, sharedX: { data: [d0, d1], scale: [s0, s1] } }, classNameSuffix);
-      }
-    }
+  return assemblePaneResult(spec, paneOpts, classNameSuffix, adapter, cols, data, monoBasis);
+}
+
+/** Every x (epoch ms) at which assemblePlot draws an annotation mark on a continuous axis, under the
+ *  same conditions it draws them: an x marker's rule, both edges of a band, and a point callout with a
+ *  finite y. Keep in step with assemblePlot — a mark drawn there and missed here falls off the frame. */
+function annotationXs(
+  ann: ReturnType<typeof resolveAnnotations>,
+  points: PointCallout[],
+  parseX: (v: string) => number | Date | string,
+): number[] {
+  const ms = (v: string): number | null => {
+    const x = parseX(v);
+    const n = x instanceof Date ? x.getTime() : typeof x === "number" ? x : NaN;
+    return Number.isFinite(n) ? n : null;
+  };
+  const xs: Array<number | null> = [
+    ...ann.xAxis.map((m) => ms(m.x)),
+    ...ann.bands.flatMap((b) => {
+      const [s, e] = [ms(b.start), ms(b.end)];
+      return s != null && e != null ? [s, e] : [];
+    }),
+    ...points.filter((p) => p.x != null && Number.isFinite(p.y as number)).map((p) => ms(p.x as string)),
+  ];
+  return xs.filter((x): x is number => x != null);
+}
+
+/** The point callouts whose connector reaches sideways (`sidewaysLeaderDx`), as `{x, dxPx}` for
+ *  `drawnDateDomain`. Same drawn-point filter as `annotationXs`. */
+function sidewaysLeaders(points: PointCallout[], parseX: (v: string) => number | Date | string): SidewaysLeader[] {
+  const out: SidewaysLeader[] = [];
+  for (const p of points) {
+    if (p.x == null || !Number.isFinite(p.y as number)) continue;
+    const dxPx = sidewaysLeaderDx(p);
+    const x = parseX(p.x);
+    if (dxPx != null && x instanceof Date && Number.isFinite(x.getTime())) out.push({ x: x.getTime(), dxPx });
   }
-  return pane;
+  return out;
 }
 
 /** This pane's rows with every section drawn, when `section_order` leaves some of them out; else
@@ -957,6 +976,26 @@ function assemblePaneResult(
   // margin and their baselines align; otherwise decide per-pane from this pane's width + categories.
   const xLabelMode = opts.xLabelMode ?? bandLabelMode(catsForX, dataWidthForX);
 
+  // A date axis' drawn range. A small-multiples pane arrives with it (`opts.sharedX`); a single chart
+  // computes it here, before anything reads it: Plot fits the scale over every mark, so an x marker,
+  // band, point callout or sideways connector past the data widens it, and the ticks, overlay
+  // `domain: "axis"`, label stagger and callout geometry must all measure against that same span.
+  // The x-axis rug is drawn after the render and clamped to the frame, so it widens nothing. A
+  // histogram's span is its bin edges, which its adapter already holds. A connector is drawn only
+  // with a width and a height (assemblePlot 6c), so only then does it count.
+  const dateAxis = spec.xAxisType === "temporal" || spec.xAxisType === "quarterly";
+  const leaderGeometry = opts.width != null && opts.height != null;
+  const sharedX =
+    opts.sharedX ??
+    (dateAxis && chartType !== "histogram" && xExtent
+      ? drawnDateDomain(
+          xExtent,
+          annotationXs(ann, resolvedPoints, adapter.parseX),
+          leaderGeometry ? sidewaysLeaders(resolvedPoints, adapter.parseX) : [],
+          leaderGeometry ? dataWidthForX : undefined,
+        )
+      : undefined);
+
   // tagCategoryLabels: the hover-accent hook (task 17) is bar/stacked-only — categorical-x line
   // and dot-plot charts share this same adapter path and stay byte-identical.
   // X-axis rug: the strip occupies space between the plot frame and the tick labels. Handed to the
@@ -970,7 +1009,7 @@ function assemblePaneResult(
     dataWidth: dataWidthForX,
     ...(opts.xTickWidth != null ? { tickWidth: opts.xTickWidth } : {}),
     ...(xTickCandidates(spec, adapter, dataInScope, opts.xTickValues) ?? {}),
-    ...(opts.sharedX ? { sharedX: opts.sharedX } : {}),
+    ...(sharedX ? { sharedX } : {}),
   });
   // Faceted vertical bars: the figure forces a shared bottom margin (the max across panes) so every
   // pane's baseline lines up regardless of its own label length. Flows to plotHeight + assemblePlot.
@@ -1011,11 +1050,10 @@ function assemblePaneResult(
 
   // The resolved x-axis domain as a numeric span, for anything that maps px <-> data against the
   // DRAWN axis: annotation-label stagger geometry and point-callout connectors (assemblePlot), and
-  // overlay `domain: "axis"` cropping below. The numeric adapter always supplies a domain (it fits
-  // the data, or anchors at zero); a histogram's is the bin-edge span (Dates on a temporal axis —
-  // convert); temporal/quarterly non-histogram adapters supply none and Plot infers the data
-  // extent, so `xExtent` is the honest fallback there. The categorical band domain is a list of
-  // categories, not a span — never a candidate.
+  // overlay `domain: "axis"` cropping below. Every continuous adapter supplies one: numeric fits
+  // the data (or anchors at zero), a histogram's is the bin-edge span (Dates on a temporal axis —
+  // convert), and a date axis takes `sharedX.scale` (computed above). The categorical band domain
+  // is a list of categories, not a span — never a candidate, so `xExtent` remains the fallback.
   const xAxisDomain = numericAxisDomain(xOpts.xPlotOpts?.domain) ?? xExtent;
 
   const valueAffixes = resolveValueAffixes(spec);
@@ -1096,8 +1134,7 @@ function assemblePaneResult(
   // one place the pane-filtered, domain-cropped lines exist). Empty on every chart with no overlays.
   let overlayTooltips: OverlayTooltipLine[] = [];
   if (spec.overlays?.length && adapter.xField !== "_xc") {
-    // `domain: "axis"` means the resolved x-scale domain when the adapter supplies one (numeric axes
-    // do), else the data extent — the widest honest answer available. See `xAxisDomain` above.
+    // `domain: "axis"` means the drawn x-scale domain. See `xAxisDomain` above.
     const resolvedOverlays = resolveOverlays(spec, dataInScope, {
       xField: adapter.xField as "_xn" | "_xd",
       colors,

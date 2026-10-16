@@ -18,6 +18,7 @@ import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbe
 import { facetsDrawAsGroups } from "../spec/facet-groups";
 import { figurePaneValues } from "../spec/panes";
 import { histogramThresholds } from "./histogram-bin";
+import { domainBounds, isReversedDomain } from "./scales";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, paneXValues, singleChartDrawsNetDots, shapeDomainOver, paneValueExtent } from "./pane";
@@ -976,15 +977,22 @@ export function renderFigure(
   //    Dropping the pane instead lost such a marker's extent and drew it off the frame. Only when
   //    every pane needs the fallback does the figure take it, as the union of their fallback domains.
   const probes = paneValues.map(probePane);
+  //    A REVERSED axis (both bounds pinned, min > max) gives descending pane domains: those are
+  //    unioned on their numeric bounds and the union re-oriented, since min-of-firsts /
+  //    max-of-seconds over [top, floor] pairs is their intersection. The lone-bound pairs above are
+  //    unioned as written.
   const anyAscends = probes.some((p) => !p.yDomainWithoutFallback);
   let yLo = Infinity;
   let yHi = -Infinity;
+  let reversed = false;
   for (const p of probes) {
-    const [lo, hi] = (anyAscends && p.yDomainWithoutFallback) || p.yDomain;
+    const withoutFallback = anyAscends && p.yDomainWithoutFallback;
+    if (!withoutFallback && isReversedDomain(p.yDomain)) reversed = true;
+    const [lo, hi] = withoutFallback || domainBounds(p.yDomain);
     if (lo < yLo) yLo = lo;
     if (hi > yHi) yHi = hi;
   }
-  const sharedYDomain: [number, number] = [yLo, yHi];
+  const sharedYDomain: [number, number] = reversed ? [yHi, yLo] : [yLo, yHi];
 
   // 3. Per-row width math (single source: sharedColumnWidths). The label-less (non-leftmost)
   //    columns drop the label gutter for a small left margin; column OUTER widths are made unequal

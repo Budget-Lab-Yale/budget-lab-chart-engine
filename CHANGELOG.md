@@ -25,6 +25,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   across a daylight-saving change. Under UTC nothing changes. West of UTC (the US) the counts and
   labels are the same, and the edges shift by the UTC offset onto local midnight, in line with the
   axis ticks.
+- Small multiples in `mode: "shared"` with a reversed value axis (`yAxisPolicy.min` > `max`): when
+  the panes' own domains differ (one pane's data overflows into `autoWiden`, or a facet-scoped
+  marker extends one pane), every pane now shares their union. The figure took their intersection,
+  so the wider pane's data or marker ran off the frame. No published figure moves: the archive's
+  two reversed charts are single charts.
+- Single (non-faceted) temporal and quarterly charts with an x marker, band or point callout past
+  the data: overlay `domain: axis` now spans the whole drawn x-axis, as CONFIG-SPEC says, and the
+  top-label auto-stagger and point-callout placement measure positions on it. All three used the
+  data extent at most widths, so an `axis` overlay stopped short of the frame, overlapping labels
+  shared a row, and a callout near the data's end could flip as if at the frame edge; which widths
+  were affected depended on the tick count. The drawn range is now computed before rendering, so a
+  chart renders once (it rendered twice when its ticks thinned) and a small-multiples pane and a
+  single chart measure the same way. A callout connector with `dx` past the data still widens the
+  axis to hold its end, now exactly: the label end sits on the frame edge and the connector is
+  `dx` px long. Blank values at the x-extent boundary: where a date-axis chart's marks drop
+  blank-value rows (a `projected_field` line; scatter and dot plot rendered without validation) and
+  its first or last rows are blank, the axis now spans the full data extent, as a plain line or
+  area chart's already did. It used to stop at the first and last tick label, which moved with the
+  width. No published figure moves: in every archive temporal chart the annotations lie inside the
+  data, and none is a point chart, uses `projected_field` or has a blank boundary row.
 - Small multiples with a categorical x-axis, line marks and a legend: the hover cursor no longer
   drops out when the pointer is within a few pixels of a line. The invisible click targets that let
   a click on a line pin its series were stacked above the hover area instead of below it.

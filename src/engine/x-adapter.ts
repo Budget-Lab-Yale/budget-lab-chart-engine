@@ -51,8 +51,9 @@ export interface BuildXOptsOptions {
    *  ticks to, so unequal `pane_widths` still give every pane the same ticks and bottom margin.
    *  Absent → `dataWidth`. */
   tickWidth?: number;
-  /** Small multiples on a continuous axis: the range every pane shares (see `SharedXDomain`).
-   *  Absent → the axis fits this pane's own rows. Ignored on the categorical axis. */
+  /** Small multiples on a continuous axis: the range every pane shares (see `SharedXDomain`); a
+   *  single date-axis chart: its own drawn range (`drawnDateDomain`). Absent → the axis fits this
+   *  pane's own rows. Ignored on the categorical axis. */
   sharedX?: SharedXDomain;
   /** `x_ticks`: the candidate tick positions in the axis' units (epoch ms on a date axis) — the
    *  data's x values or the listed ones. Values outside the drawn range are dropped and the rest
@@ -60,14 +61,16 @@ export interface BuildXOptsOptions {
   tickValues?: number[];
 }
 
-/** One x range for every pane of a small-multiples figure, in the axis' own units (epoch ms on a
- *  date axis). Two spans because a temporal axis takes them from different places: its ticks come
- *  from the DATA, while Plot fits its scale over every mark, so a marker or band past the data
- *  widens the scale but not the ticks. A numeric axis has one span and both fields hold it. */
+/** One x range for every pane of a small-multiples figure, or a single date-axis chart's own
+ *  (`drawnDateDomain`), in the axis' own units (epoch ms on a date axis). Two spans because a
+ *  temporal axis takes them from different places: its ticks come from the DATA, while Plot fits
+ *  its scale over every mark, so a marker or band past the data widens the scale but not the
+ *  ticks. A numeric axis has one span and both fields hold it. */
 export interface SharedXDomain {
-  /** Union of every pane's data extent. */
+  /** The data extent: in a figure, the union of every pane's; on a single chart, its own. */
   data: [number, number];
-  /** Union of every pane's drawn x-scale domain. */
+  /** The drawn x-scale domain: in a figure, the union of every pane's; on a single chart, its data
+   *  widened to its annotations and connectors (`drawnDateDomain`). */
   scale: [number, number];
 }
 
@@ -101,6 +104,53 @@ function dateAxisTicks(
 
 function sortedInRange(values: number[], lo: number, hi: number): number[] {
   return [...new Set(values)].filter((v) => v >= lo && v <= hi).sort((a, b) => a - b);
+}
+
+/** A point-callout connector whose label end sits `dxPx` px along x from its point at `x` (epoch ms):
+ *  assemblePlot draws that end at `x + dxPx * span / plotWidth`, a data coordinate. */
+export interface SidewaysLeader {
+  x: number;
+  dxPx: number;
+}
+
+/** The range a single (non-small-multiples) date-axis chart is DRAWN over: its data extent widened
+ *  to every x its annotations draw at (`annotationXs`, epoch ms), then to the label end of every
+ *  sideways connector (`leaders`), so that everything that maps px <-> data before the render
+ *  (overlay `domain: "axis"`, label stagger, callout geometry) reads the scale actually drawn. The
+ *  axis is handed this span explicitly, as a figure pane's `sharedX` is.
+ *
+ *  A connector's end depends on the span it widens (its px offset is converted at span / plotWidth
+ *  data units per px), so the span is the least one that holds every end: for the binding right end
+ *  `x_r + b_r*s` and left end `x_l + b_l*s` (b = dxPx / plotWidth), s = (x_r - x_l) / (1 - b_r + b_l),
+ *  maximised over the candidate pairs (the annotation-widened edges count, with b = 0). Exact, so
+ *  the binding end lands ON the frame edge rather than past it. A connector reaching a full plot
+ *  width or more (1 - b_r + b_l <= 0) has no such span and is left to overhang. */
+export function drawnDateDomain(
+  dataExtent: [number, number],
+  annotationXs: number[],
+  leaders: SidewaysLeader[] = [],
+  plotWidth?: number,
+): SharedXDomain {
+  let [lo, hi] = dataExtent;
+  for (const x of annotationXs) {
+    if (x < lo) lo = x;
+    if (x > hi) hi = x;
+  }
+  if (leaders.length && plotWidth! > 0) {
+    const w = plotWidth!;
+    const right: Array<[number, number]> = [[hi, 0], ...leaders.filter((l) => l.dxPx > 0).map((l): [number, number] => [l.x, l.dxPx / w])];
+    const left: Array<[number, number]> = [[lo, 0], ...leaders.filter((l) => l.dxPx < 0).map((l): [number, number] => [l.x, l.dxPx / w])];
+    let span = hi - lo;
+    for (const [xr, br] of right) {
+      for (const [xl, bl] of left) {
+        const den = 1 - br + bl;
+        if (den > 0) span = Math.max(span, (xr - xl) / den);
+      }
+    }
+    for (const [x, b] of right) hi = Math.max(hi, x + b * span);
+    for (const [x, b] of left) lo = Math.min(lo, x + b * span);
+  }
+  return { data: dataExtent, scale: [lo, hi] };
 }
 
 /** Reads an `XOpts.xPlotOpts.domain` as a numeric span, for callers that map px <-> data against

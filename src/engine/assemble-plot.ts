@@ -243,11 +243,11 @@ export interface AssembleOptions {
    *  so the resolved coordinates render. */
   points?: ResolvedPointCallout[];
   /** The resolved x-axis domain as a numeric span [min,max] (ms for dates) — the coordinate space
-   *  the marks are actually DRAWN in, so px estimates match what a reader sees. Falls back to the
-   *  data extent only where the adapter supplies no explicit domain (temporal/quarterly
-   *  non-histogram, where Plot infers the domain from the data). Used to estimate label px
-   *  positions for annotation-label collision avoidance and to convert a point callout's px
-   *  connector offset back to data space. Absent → no auto-stagger, no connector leader. */
+   *  the marks are actually DRAWN in, so px estimates match what a reader sees. A date axis' span
+   *  includes any marker, band or callout past the data (x-adapter.ts `drawnDateDomain`). Used to
+   *  estimate label px positions for annotation-label collision avoidance and to convert a point
+   *  callout's px connector offset back to data space. Absent → no auto-stagger, no connector
+   *  leader. */
   xAxisDomain?: [number, number];
   width?: number;
   height?: number;
@@ -309,6 +309,40 @@ export interface AssembleResult {
    *  when nothing filled was painted for it (every line chart), in which case the colour map is the
    *  right answer and the key falls back to it. */
   seriesPainted: Map<string, string>;
+}
+
+// A callout that draws a connector sits 12px above its point, not the 28 it used to: the 1.14.0
+// visual review read labels that far out as floating free of any point, and the research
+// consensus (ggrepel, cartographic leader-line practice) is a label CLOSE to its point with a
+// short leader only when something pushed it away. The no-connector default (6, below) is
+// deliberately untouched — two published figures render on it.
+const LABEL_CONNECTOR_DY = 12;
+// The leader stops MARK_POINT_R + 2 px short of the point CENTRE, so 2px of white separates its
+// end from the scatter marker's outline. The old `insetEnd: 4` was SHORTER than the 4.6px marker
+// radius, so the line ended underneath the dot and read as touching it. One inset for every chart
+// type, including those with no marker at the point (a line vertex): there the leader simply
+// stops a hair short of the vertex, which reads the same.
+const LEADER_END_INSET = MARK_POINT_R + 2;
+
+/** A point callout's label offset (px, SVG-down) when nothing auto-placed it. */
+const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -LABEL_CONNECTOR_DY : -6);
+
+/** Whether a leader from a label offset (dx, dy) px from its point has a shaft left once it starts
+ *  `startInset` clear of the label and stops LEADER_END_INSET short of the point. */
+function leaderShaftFits(dx: number, dy: number, startInset: number): boolean {
+  return Math.hypot(dx, dy) - startInset - LEADER_END_INSET > 0;
+}
+
+/** The px x-offset of the label end of a point callout's connector, for the one kind of leader that
+ *  reaches sideways past its point: a callout with an author's `dx` (fixed, so neither the
+ *  frame-edge flip nor the sweep moves it) whose shaft fits. The flip only ever moves a label 6px
+ *  INWARD of a point already on the axis. The end is a data coordinate (6c), so on a date axis it
+ *  is part of the range the chart is drawn over — see pane.ts. Null when no such leader is drawn
+ *  (also when the chart has no width or height, where 6c falls back to a dot). */
+export function sidewaysLeaderDx(p: PointCallout): number | null {
+  if (!p.connector || p.dx == null || p.dx === 0) return null;
+  // A fixed callout's dy is its default; a dx leaves the label clear by the 2px of air alone.
+  return leaderShaftFits(p.dx, defaultDy(p), 2) ? p.dx : null;
 }
 
 /** Wrap a tick formatter with the caller's `tickLabel` hook. `null` from the hook means "engine
@@ -432,18 +466,6 @@ export function assemblePlot({
   // Lateral offset a point-callout label takes when the frame edge flips it off centre — the same
   // magnitude the xAxis/yAxis marker labels use for their own side placement (section 6a).
   const LABEL_FLIP_DX = 6;
-  // A callout that draws a connector sits 12px above its point, not the 28 it used to: the 1.14.0
-  // visual review read labels that far out as floating free of any point, and the research
-  // consensus (ggrepel, cartographic leader-line practice) is a label CLOSE to its point with a
-  // short leader only when something pushed it away. The no-connector default (6, below) is
-  // deliberately untouched — two published figures render on it.
-  const LABEL_CONNECTOR_DY = 12;
-  // The leader stops MARK_POINT_R + 2 px short of the point CENTRE, so 2px of white separates its
-  // end from the scatter marker's outline. The old `insetEnd: 4` was SHORTER than the 4.6px marker
-  // radius, so the line ended underneath the dot and read as touching it. One inset for every chart
-  // type, including those with no marker at the point (a line vertex): there the leader simply
-  // stops a hair short of the vertex, which reads the same.
-  const LEADER_END_INSET = MARK_POINT_R + 2;
   /** Shortest shaft worth drawing. A leader is there to say WHICH point a label names; a hairline
    *  does not, so placement puts a displaced leader-drawing label far enough out to earn this. */
   const LEADER_MIN_SHAFT = 4;
@@ -925,7 +947,6 @@ export function assemblePlot({
   //     than merely leaving the frame.
   const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
   const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
-  const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -LABEL_CONNECTOR_DY : -6);
   const autoDy = new Map<number, number>();
   const autoDx = new Map<number, number>();
   if (xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null && innerHForPx > 0 && yDomain[1] !== yDomain[0]) {
@@ -1039,7 +1060,7 @@ export function assemblePlot({
     // the dot below: that fallback is for an axis with no pixel geometry, where a pinned
     // callout still needs its point marked. Here the label already touches its point, and a
     // dot under it is the redundant mark the 1.14.0 review rejected.
-    const leaderFits = Math.hypot(dx, dy) - leaderStartInset - LEADER_END_INSET > 0;
+    const leaderFits = leaderShaftFits(dx, dy, leaderStartInset);
     // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
     // a category-anchored callout falls back to the simple dot (or no marker).
     if (leader && typeof px !== "string" && xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null) {
