@@ -2,7 +2,7 @@
 //
 // Tests for the embed live-render layer: mountChart + buildStandaloneHtml.
 import { describe, it, expect } from "vitest";
-import { mountChart, computeChartHeight, netLabelFill, formatValue } from "../src/engine/render-live";
+import { mountChart, computeChartHeight, formatValue } from "../src/engine/render-live";
 import { renderLegend } from "../src/engine/legend";
 import { buildStandaloneHtml } from "../src/embed/bundle-standalone";
 import { CHART_CSS } from "../src/embed/styles";
@@ -1077,9 +1077,9 @@ describe("renderLegend handle.toggle (single source of truth)", () => {
     svg.querySelectorAll("[data-series]").forEach((r) =>
       expect(r.classList.contains("tbl-dimmed")).toBe(false),
     );
-    parent.querySelectorAll(".tbl-legend-item").forEach((b) =>
-      expect(b.classList.contains("is-pinned")).toBe(false),
-    );
+    const buttons = parent.querySelectorAll(".tbl-legend-item");
+    expect(buttons.length).toBeGreaterThan(0);
+    buttons.forEach((b) => expect(b.classList.contains("is-pinned")).toBe(false));
   });
 
   it("two-way sync: a legend-button click and a toggle converge on the same pinned set", () => {
@@ -1123,25 +1123,6 @@ describe("formatValue tooltip precision", () => {
   it("carries both affixes, with the prefix inside the minus sign", () => {
     expect(formatValue(1200, { prefix: "$", suffix: " bn" })).toBe("$1200.00 bn");
     expect(formatValue(-5, { prefix: "$", suffix: "" })).toBe("-$5.00");
-  });
-});
-
-describe("netLabelFill (pure color decision)", () => {
-  const DARK = "#1A1A2E"; // tokens.structural.text_heading
-  const WHITE = "#FFFFFF";
-
-  it("dimmed behind segment → dark", () => {
-    expect(netLabelFill(true, true)).toBe(DARK);
-  });
-
-  it("active behind segment → white", () => {
-    expect(netLabelFill(false, true)).toBe(WHITE);
-  });
-
-  it("no segment behind (over white background) → dark", () => {
-    expect(netLabelFill(false, false)).toBe(DARK);
-    // hasBehind=false wins regardless of the dimmed flag.
-    expect(netLabelFill(true, false)).toBe(DARK);
   });
 });
 
@@ -1299,12 +1280,12 @@ describe("mountChart two-way selection wiring", () => {
     const series = hit.getAttribute("data-series")!;
     const btn = container.querySelector<HTMLButtonElement>(`.tbl-legend-item[data-series="${series}"]`)!;
     btn.click();
-    svg.querySelectorAll('path[data-series="B"]').forEach((p) =>
-      expect(p.classList.contains("tbl-dimmed")).toBe(true),
-    );
-    svg.querySelectorAll('path[data-series="A"]').forEach((p) =>
-      expect(p.classList.contains("tbl-dimmed")).toBe(false),
-    );
+    const bPaths = svg.querySelectorAll('path[data-series="B"]');
+    const aPaths = svg.querySelectorAll('path[data-series="A"]');
+    expect(bPaths.length).toBeGreaterThan(0);
+    expect(aPaths.length).toBeGreaterThan(0);
+    bPaths.forEach((p) => expect(p.classList.contains("tbl-dimmed")).toBe(true));
+    aPaths.forEach((p) => expect(p.classList.contains("tbl-dimmed")).toBe(false));
   });
 
   it("a click resolving to a bar's series pins it (toggle path), proving chart→legend sync", () => {
@@ -1322,9 +1303,9 @@ describe("mountChart two-way selection wiring", () => {
     // is the same single-source-of-truth toggle. After pinning 2022, the 2019 rects dim.
     const btn = container.querySelector<HTMLButtonElement>('.tbl-legend-item[data-series="2022"]')!;
     btn.click();
-    svg.querySelectorAll('rect[data-series="2019"]').forEach((r) =>
-      expect(r.classList.contains("tbl-dimmed")).toBe(true),
-    );
+    const rects2019 = svg.querySelectorAll('rect[data-series="2019"]');
+    expect(rects2019.length).toBeGreaterThan(0);
+    rects2019.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(true));
     svg.querySelectorAll('rect[data-series="2022"]').forEach((r) =>
       expect(r.classList.contains("tbl-dimmed")).toBe(false),
     );
@@ -1412,9 +1393,9 @@ describe("mountChart small multiples", () => {
     const bPaths = container.querySelectorAll('.figure-grid path[data-series="B"]');
     expect(bPaths.length).toBeGreaterThan(1); // one per pane
     bPaths.forEach((p) => expect(p.classList.contains("tbl-dimmed")).toBe(true));
-    container.querySelectorAll('.figure-grid path[data-series="A"]').forEach((p) =>
-      expect(p.classList.contains("tbl-dimmed")).toBe(false),
-    );
+    const aPaths = container.querySelectorAll('.figure-grid path[data-series="A"]');
+    expect(aPaths.length).toBeGreaterThan(1); // one per pane
+    aPaths.forEach((p) => expect(p.classList.contains("tbl-dimmed")).toBe(false));
   });
 
   it("does not throw and produces a card for a single-pane figure", () => {
@@ -1474,9 +1455,9 @@ describe("mountChart small multiples", () => {
     const otherRects = container.querySelectorAll('.figure-grid rect[data-series="2025"]');
     expect(otherRects.length).toBeGreaterThan(1); // multiple panes
     otherRects.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(true));
-    container.querySelectorAll('.figure-grid rect[data-series="2019"]').forEach((r) =>
-      expect(r.classList.contains("tbl-dimmed")).toBe(false),
-    );
+    const pinnedRects = container.querySelectorAll('.figure-grid rect[data-series="2019"]');
+    expect(pinnedRects.length).toBeGreaterThan(1); // multiple panes
+    pinnedRects.forEach((r) => expect(r.classList.contains("tbl-dimmed")).toBe(false));
   });
 });
 

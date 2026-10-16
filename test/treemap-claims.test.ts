@@ -208,10 +208,13 @@ describe("treemap.shading", () => {
     const flatMany = flatRows(Array.from({ length: 12 }, (_, i): [string, number] => [`t${i}`, 100 - i]));
     const allFills = (svg: SVGSVGElement): string[] => q(svg, "rect.tbl-treemap-tile").map((r) => r.getAttribute("fill")!);
     // shading: size (default): flat data runs blue's shades 500 → 200, never 50.
-    for (const f of allFills(renderChart(FLAT, flatMany, { width: 920 }).svg)) expect(fifties.has(f)).toBe(false);
+    const flatFills = allFills(renderChart(FLAT, flatMany, { width: 920 }).svg);
+    expect(flatFills).toHaveLength(12);
+    for (const f of flatFills) expect(fifties.has(f)).toBe(false);
     // Grouped: blue's band (500 … 200) stops short of 50; amber's (its base is at amber-100) ends on it,
     // as does any band around a colour at the light end, a series_colors blue-50 included.
     const sized = renderChart(TM, many, { width: 920 }).svg;
+    expect(tileFills(sized, "A").length).toBeGreaterThan(0);
     for (const f of tileFills(sized, "A")) expect(fifties.has(f)).toBe(false);
     expect(tileFills(sized, "B").at(-1)).toBe(tokens.scales.amber["50"]);
     const light = renderChart({ ...TM, series_colors: { A: "blue-50" } } as ChartSpec, many, { width: 920 }).svg;
@@ -219,7 +222,9 @@ describe("treemap.shading", () => {
     expect(tileFills(light, "A").at(-1)).toBe(tokens.scales.blue["50"]);
     // shading: none: the default hues are not 50 tiers, so without series_colors none appears ...
     const none = { ...TM, treemap: { shading: "none" } } as ChartSpec;
-    for (const f of allFills(renderChart(none, many, { width: 920 }).svg)) expect(fifties.has(f)).toBe(false);
+    const noneFills = allFills(renderChart(none, many, { width: 920 }).svg);
+    expect(noneFills.length).toBeGreaterThan(0);
+    for (const f of noneFills) expect(fifties.has(f)).toBe(false);
     // ... and a series_colors 50 tier fills its group's tiles as written.
     const svg = renderChart({ ...none, series_colors: { A: "blue-50" } } as ChartSpec, many, { width: 920 }).svg;
     expect(new Set(tileFills(svg, "A"))).toEqual(new Set([tokens.scales.blue["50"]]));

@@ -1,15 +1,17 @@
 import type { ChartSpec, ValueAffixes } from "../spec/types";
 import type { RenderHooks, ValueLabelHookCtx } from "../spec/hooks";
 import { categoryText } from "../spec/section-key";
-import { facetsAsGroups } from "../spec/facet-groups";
+import { assertNoHorizontalFacet } from "../spec/facet-groups";
 
 /** `spec` as every exported entry that takes one renders it: renderChart, renderFigure, mountChart,
  *  buildExportSvg, and the renderers they dispatch to that are exported in their own right
  *  (renderPane, shapeDomainOver, renderTreemap, renderTimeline). Repeated order entries are dropped
- *  (withoutRepeatedOrderEntries) and a horizontal chart's `columns.facet` is drawn as groups
- *  (spec/facet-groups.ts, Ruling 80). A spec neither touches is returned as is, the same object. */
+ *  (withoutRepeatedOrderEntries), and a horizontal chart's `columns.facet`, which validation rejects,
+ *  throws that validation message (spec/facet-groups.ts) rather than drawing. A spec with no repeat is
+ *  returned as is, the same object. */
 export function normalizeSpec(spec: ChartSpec): ChartSpec {
-  return facetsAsGroups(withoutRepeatedOrderEntries(spec));
+  assertNoHorizontalFacet(spec);
+  return withoutRepeatedOrderEntries(spec);
 }
 
 /** `spec` with each repeated `series_order` / `shape_order` entry dropped, the first kept. A repeat is
@@ -26,6 +28,28 @@ export function withoutRepeatedOrderEntries(spec: ChartSpec): ChartSpec {
     if (unique.length !== list.length) (out ??= { ...spec })[field] = unique;
   }
   return out ?? spec;
+}
+
+/** `[Math.min(...values), Math.max(...values)]` without the spread. A spread passes every element
+ *  as a call argument, and past roughly 125k of them V8 throws RangeError (call stack overflow), so
+ *  a histogram of microdata or a long line chart with CI bounds failed to render (B7). Use this, not
+ *  a spread, for any list whose length grows with the data.
+ *
+ *  The semantics are Math.min/max's EXACTLY, not d3.min/max's, so every call site keeps its empty
+ *  and NaN behaviour: an empty list gives `[Infinity, -Infinity]`; any NaN (after the same ToNumber
+ *  coercion Math.min applies, so `undefined` counts as NaN and `null` as 0) makes both NaN; and -0
+ *  sorts below +0, so `[-0, 0]` gives `[-0, 0]`. d3.min/max instead skip NaN and return undefined
+ *  for an empty list. `Math.min(a, ...xs)` is `Math.min(a, minMax(xs)[0])`. */
+export function minMax(values: Iterable<number>): [number, number] {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const raw of values) {
+    const v = +raw;
+    if (v !== v) return [NaN, NaN];
+    if (v < lo || (v === 0 && lo === 0 && Object.is(v, -0))) lo = v;
+    if (v > hi || (v === 0 && hi === 0 && Object.is(hi, -0))) hi = v;
+  }
+  return [lo, hi];
 }
 
 /** HTML-escape a value for safe interpolation into innerHTML (tooltip/legend). */
@@ -69,10 +93,10 @@ export function applyValueAffixes(formatted: string, affixes: ValueAffixes): str
  *  and into the PNG export, and RENDERED output must not depend on the rendering machine —
  *  `toLocaleString()` with no locale yields `2,59` on a de-DE host. `marks/stacked.ts` states that
  *  rule. It applies to rendered text, NOT to every formatter in the engine: the hover card's
- *  y-value formatters (`crosshair.ts`, ten `opts.yFormat` fallbacks) deliberately follow the host
- *  locale, because a card is DOM that is never rasterised. The line is rendered-vs-hover, and an
- *  earlier version of this comment claimed the two formatters below were the only locale-pinned
- *  formatters anywhere, which was simply false. `histogram-label.ts` is pinned too, for a related
+ *  y-value formatter (`defaultYFormat` in crosshair/attach.ts, every `opts.yFormat` fallback)
+ *  deliberately follows the host locale, because a card is DOM that is never rasterised. The line
+ *  is rendered-vs-hover, and an earlier version of this comment claimed the two formatters below
+ *  were the only locale-pinned formatters anywhere, which was simply false. `histogram-label.ts` is pinned too, for a related
  *  reason recorded there: its bin header sits directly under this axis. */
 const NUMERIC_X_LOCALE = "en-US";
 

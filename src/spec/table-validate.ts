@@ -28,7 +28,7 @@ function richStrings(spec: TableSpec): Array<{ where: string; value: string }> {
   if (typeof spec.stub_header === "string") add("stub_header", spec.stub_header);
   else if (spec.stub_header) for (const [k, v] of Object.entries(spec.stub_header)) add(`stub_header.${k}`, v);
   for (const e of spec.stub ?? []) if (typeof e !== "string") add("stub.label", e.label);
-  for (const rec of ["column_labels", "row_labels", "group_labels", "header_labels", "sublabels", "group_notes", "pane_titles"] as const) {
+  for (const rec of ["column_labels", "row_labels", "group_labels", "header_labels", "sublabels", "group_notes", "pane_titles", "footnotes"] as const) {
     const m = spec[rec];
     if (m) for (const [k, v] of Object.entries(m)) add(`${rec}.${k}`, v);
   }
@@ -58,6 +58,14 @@ export function validateTableData(spec: TableSpec, rows: TidyRow[]) {
   const roles = [...spec.stub.map(labelOf), ...spec.header, spec.value];
   if (spec.pane != null) roles.push(spec.pane);
   for (const c of roles) if (!cols.has(c)) errors.push(`config/data mismatch: column "${c}" not found`);
+  // Read per cell by name (table/model.ts); a column the data lacks would silently drop every
+  // emphasis flag or footnote marker.
+  for (const field of ["emphasis_column", "footnote_column"] as const) {
+    const c = spec[field];
+    if (c && !cols.has(c)) {
+      errors.push(`config/data mismatch: ${field} is "${c}" but no such column exists (columns: ${JSON.stringify([...cols].sort())})`);
+    }
+  }
   if (errors.length) return { valid: false, errors };
   const stubCols = spec.stub.map(labelOf);
   const SEP = "\x1F";

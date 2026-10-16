@@ -26,29 +26,21 @@ import {
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
 } from "../axes";
-import { categoryBand, fyCategoryBandLayer, bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
+import { categoryBand, encounterCategories, fyCategoryBandLayer, bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
+import { rowEmissionOrder } from "./emission-order";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
 // Below this, bars are so dense the chart is out of spec for grouped bars; warn (no throw).
 const TOO_DENSE_PX = 10;
 
-/** The series, in the order Plot emits faceted grouped-bar <rect>s: by facet (the category
- *  band, in `categories` = fx/fy-domain render order), and WITHIN each facet by DATA-ROW order
- *  (Plot renders one rect per datum in input order, not inner-band order). Used to map each rect
- *  to its `data-series` so legend hover/pin dims the correct bars. */
-function rectTagOrder(
-  data: PreparedRow[],
-  catField: string,
-  categories: string[],
-): string[] {
-  const order: string[] = [];
-  for (const cat of categories) {
-    for (const r of data) {
-      if ((r as unknown as Record<string, unknown>)[catField] === cat) order.push(r.series);
-    }
-  }
-  return order;
+/** The series of each faceted grouped-bar <rect>, in the order Plot emits them: facet by facet in
+ *  the facet `domain`'s order (the fx/fy band, section-grouped when sectioned), and within a facet in
+ *  data-row order, not inner-band order (marks/emission-order.ts). Maps each rect to its
+ *  `data-series` so legend hover/pin dims, and `series_patterns` textures, the right bars. */
+function rectTagOrder(data: PreparedRow[], catField: string, domain: string[]): string[] {
+  const catOf = (r: PreparedRow) => (r as unknown as Record<string, string | undefined>)[catField];
+  return rowEmissionOrder(data, catOf, domain, true).map((r) => r.series);
 }
 
 export function buildBarMarks(
@@ -70,17 +62,7 @@ export function buildBarMarks(
   const isMulti = seriesNames.length > 1;
 
   // Category (group) domain in data-encounter order - declaration order is authoritative.
-  const categories: string[] = [];
-  {
-    const seen = new Set<string>();
-    for (const r of data) {
-      const cat = (r as unknown as Record<string, unknown>)[catField] as string | undefined;
-      if (typeof cat === "string" && cat !== "" && !seen.has(cat)) {
-        seen.add(cat);
-        categories.push(cat);
-      }
-    }
-  }
+  const categories = encounterCategories(data, catField);
 
   // Sectioned horizontal category axis (columns.section): categories grouped by section, with a
   // fixed gap for each header (see category-band.ts). Vertical / unsectioned: the plain band.
@@ -278,12 +260,11 @@ export function buildBarMarks(
     overlay.push(Plot.barX(data, { fy: catField, y: "series", x: "_y", fill: fillChannel, ...clipOpt }));
 
     // --- Rect tagging order (horizontal grouped) ---
-    // Plot emits one <rect> PER DATUM, partitioned by the fy facet (rendered in fy-domain =
-    // `categories` order) and, WITHIN a facet, in DATA-ROW order — NOT inner-band order. So the
-    // tag order must follow the data, grouped by category in facet order. (Using the series-band
-    // order misaligns whenever a category's rows aren't in seriesNames order — the cause of the
-    // legend→bar highlight mismatch.)
-    const hRectSeriesOrder = rectTagOrder(data, catField, categories);
+    // Plot emits one <rect> PER DATUM, facet by facet in the fy DOMAIN's order — `bandDomain`,
+    // section-grouped when sectioned, which is not the encounter order whenever `section_order`
+    // differs from the data or sections interleave — and within a facet in DATA-ROW order, not
+    // inner-band order.
+    const hRectSeriesOrder = rectTagOrder(data, catField, band.drawnOrder);
 
     // Group band on `fy` via the SHARED fyCategoryBandLayer (declaration order; never
     // auto-sort — Style-Guide §9). Inner series band on `y`: domain in series order,
@@ -309,11 +290,8 @@ export function buildBarMarks(
   overlay.push(Plot.barY(data, { fx: catField, x: "series", y: "_y", fill: fillChannel, ...clipOpt }));
 
   // --- Rect tagging order ---
-  // Plot emits one <rect> PER DATUM, partitioned by the fx facet (rendered in fx-domain =
-  // `categories` order) and, WITHIN a facet, in DATA-ROW order — NOT inner x-band order. So the
-  // tag order must follow the data, grouped by category in facet order. (Using the series-band
-  // order misaligns whenever a category's rows aren't in seriesNames order — the cause of the
-  // legend→bar highlight mismatch.)
+  // Plot emits one <rect> PER DATUM, facet by facet in the fx domain's order (`categories`, the
+  // domain set below) and within a facet in DATA-ROW order, not inner x-band order.
   const rectSeriesOrder = rectTagOrder(data, catField, categories);
 
   // Group band (fx): explicit domain in data-declaration order (Style-Guide sec 9: never
@@ -337,7 +315,7 @@ export function buildBarMarks(
     fxScaleOpts: groupBandOpts,
     xScaleOpts: innerBandOpts,
     xScaleField: "fx",
-    xAxisMarks: tblBandXAxis(categories, "fx", undefined, ctx.xLabelMode ?? "single", true),
+    xAxisMarks: tblBandXAxis(categories, "fx", ctx.xLabelMode ?? "single", true),
   };
 }
 

@@ -104,45 +104,10 @@ export function gridAndYLabels(
   return marks;
 }
 
-/** One pane of a small-multiples grid: its (col,row) cell coordinate + its display title. */
-export interface PaneTitleCell {
-  /** Grid column index (drives the `fx` facet channel via String(col)). */
-  col: number;
-  /** Grid row index (drives the `fy` facet channel via String(row)). */
-  row: number;
-  /** Display title for the pane (falls back to the raw facet value upstream). */
-  title: string;
-}
-
-// Per-facet pane title for shared-mode small-multiples grids. Renders one title at each
-// pane cell's TOP-LEFT, 11pt/700 in the heading color. The text mark facets on BOTH `fx`
-// (=String(col)) and `fy` (=String(row)) so Plot places exactly one title in its (col,row)
-// cell. Tagged with PANE_TITLE_CLASS so the chrome pass / tests can find it (it is never
-// collapsed — one per pane is correct).
-export function paneTitleMark(cells: PaneTitleCell[]): Mark[] {
-  return [
-    Plot.text(cells, {
-      fx: (d: PaneTitleCell) => String(d.col),
-      fy: (d: PaneTitleCell) => String(d.row),
-      text: (d: PaneTitleCell) => d.title,
-      frameAnchor: "top-left",
-      dy: -8,
-      textAnchor: "start",
-      fill: TBL.color.text,
-      fontSize: 11,
-      fontWeight: 700,
-      className: "tbl-pane-title",
-    }),
-  ];
-}
-
 // X-axis tick labels (numeric): left-anchored at each tick, just below the bottom
-// gridline. `className` (faceted small-multiples only): tags the axis-label group so the grid
-// chrome collapse can keep the bottom-row copies. Left undefined for single-frame charts so
-// their output stays byte-identical (Plot omits the class attribute entirely).
+// gridline.
 export function tblXAxis(
   { xTickFormat, ticks }: { xTickFormat?: (d: unknown) => string; ticks?: number[] } = {},
-  className?: string,
   /** Extra px to push the tick labels DOWN, away from the axis. The x-axis rug uses it to open a
    *  gap for its strip (the caller grows marginBottom by the same amount). Default 0. */
   labelDy = 0,
@@ -158,7 +123,6 @@ export function tblXAxis(
       fontWeight: 500,
       tickFormat: xTickFormat,
       ...(ticks ? { ticks } : {}),
-      ...(className ? { className } : {}),
     }),
   ];
 }
@@ -313,14 +277,10 @@ function ticksAtCadence(xDomain: [Date, Date], cadence: number): Date[] {
 // Two-line temporal x-axis: month name on top, year below (January only). When every
 // tick lands on January (yearly+ cadence) the "Jan" line is redundant, so just the
 // year renders at the top-line position.
-// `className` (faceted small-multiples only): tags the x-axis-label text group(s) so the
-// grid chrome collapse can keep the bottom-row copies and drop the rest. Left undefined for
-// single-frame charts so their output stays byte-identical (Plot omits the class attribute).
 export function tblTemporalXAxis(
   xDomain: [Date, Date],
   /** The plot's data width (px), so crowded ticks thin — see `temporalXTicks`. */
   dataWidth?: number,
-  className?: string,
   /** Extra px to push the tick labels DOWN (see tblXAxis). Default 0. */
   labelDy = 0,
   /** The drawn range when wider than the data — see `temporalXTicks`. */
@@ -331,7 +291,6 @@ export function tblTemporalXAxis(
   const ticks = chosen ?? temporalXTicks(xDomain, dataWidth, scaleDomain);
   const yearTicks = ticks.filter((d) => d.getMonth() === 0);
   const allJanuary = ticks.length > 0 && yearTicks.length === ticks.length;
-  const cls = className ? { className } : {};
 
   if (allJanuary) {
     return [
@@ -345,7 +304,6 @@ export function tblTemporalXAxis(
         fill: TBL.color.axis,
         fontSize: TBL.size.axis,
         fontWeight: 500,
-        ...cls,
       }),
     ];
   }
@@ -362,7 +320,6 @@ export function tblTemporalXAxis(
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
-      ...cls,
     }),
     // Year (bottom line, January only)
     Plot.text(yearTicks, {
@@ -375,7 +332,6 @@ export function tblTemporalXAxis(
       fill: TBL.color.axis,
       fontSize: TBL.size.axis,
       fontWeight: 500,
-      ...cls,
     }),
   ];
 }
@@ -391,9 +347,6 @@ export function tblTemporalXAxis(
 //
 // `scaleField`: "x" for single-series bars (categories ARE the x band); "fx" for grouped
 // bars (categories are the facet groups; `x` carries the inner series).
-// `className` (faceted small-multiples only): tags the label group so the grid chrome collapse
-// can keep the bottom-row copies. Left undefined for single-frame charts so their output stays
-// byte-identical (Plot omits the class attribute entirely).
 /** How categorical band labels are laid out to avoid collision, in escalating order:
  *  - "single": one horizontal line (default);
  *  - "wrap":   multi-WORD labels break onto two lines (single-word labels stay one line);
@@ -403,17 +356,14 @@ export type BandLabelMode = "single" | "wrap" | "rotate";
 export function tblBandXAxis(
   categories: string[],
   scaleField: "x" | "fx" = "x",
-  className?: string,
   mode: BandLabelMode = "single",
   /** Stamp the hover-accent hook class (CAT_LABEL_CLASS). Explicit opt-in because this function
    *  is shared infrastructure across every categorical chart type (bar, stacked, categorical-x
    *  line, dot plot) via x-adapter.ts's single-band "x" path — only bar/stacked callers pass true,
-   *  so line/dotplot output (out of this task's scope) stays byte-identical. Ignored when
-   *  `className` is already set (shared-mode grid faceting: Plot's `className` mark option accepts
-   *  exactly ONE CSS-ident token, so the two can't combine — the grid-collapse class wins). */
+   *  so line/dotplot output (out of this task's scope) stays byte-identical. */
   tagCategoryLabels = false,
 ): Mark[] {
-  const cls = { className: className ?? (tagCategoryLabels ? CAT_LABEL_CLASS : undefined) };
+  const cls = { className: tagCategoryLabels ? CAT_LABEL_CLASS : undefined };
   const textOf = (s: string): string => (mode === "wrap" ? wrapBandLabel(s) : s);
   // Per-mode layout props. Rotated labels are CENTER-anchored and turned 45° (counter-clockwise,
   // reading bottom-left → top-right): center-anchoring keeps each label's bounding-box center on
@@ -670,8 +620,7 @@ export const FACETED_CAT_LABEL_PX = 13;
 
 /** Class stamped on every category-axis label mark (bar/stacked, both orientations, faceted and
  *  standalone alike) — a hook the live layer uses to find + accent the hovered category's label
- *  (bolding it) without matching on textContent (which can collide with a tick string).
- *  Combined with a mark's OWN faceted-grid class (e.g. X_AXIS_LABEL_CLASS) when both apply. */
+ *  (bolding it) without matching on textContent (which can collide with a tick string). */
 export const CAT_LABEL_CLASS = "tbl-cat-label";
 
 // Band (categorical) y-axis for HORIZONTAL bars: one label per category at the band's

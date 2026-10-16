@@ -634,8 +634,7 @@ describe("onRender — resize dispatch sees the finished DOM (Part 1)", () => {
 //
 // Task 6 (hooks.afterRender) shipped a double-fire from a throwaway pre-render once already, so
 // this asserts the COUNT, not just that the phase value is reachable: exactly ONE "restack" event
-// per user click, not one per pin the restoration loop (currentLegendHandle.toggle(s), fired
-// while suppressRestack is still true) re-toggles afterward.
+// per user click, however many pins the restack's draw() carries onto the fresh legend.
 describe('onRender — phase: "restack" (area click-to-restack)', () => {
   const AREA_SPEC: ChartSpec = {
     chartType: "area",
@@ -667,7 +666,7 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
     legendItem(container, "C")!.click();
 
     const restackEvents = seen.filter((c) => c.phase === "restack");
-    expect(restackEvents.length).toBe(1); // not 2+ from the pin-restoration re-toggle loop
+    expect(restackEvents.length).toBe(1);
     expect(restackEvents[0]!.svg).toBe(container.querySelector(".figure-canvas svg"));
   });
 
@@ -731,8 +730,8 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
     expect((caught[0] as Error).message).toBe("consumer bug in onRender");
     expect(restackCount).toBe(1);
 
-    // NOT desynced: the throw happened AFTER draw() rebuilt the legend (fresh, unpinned) but the
-    // finally-guarded pin-restoration loop still re-pinned "C" on that fresh legend.
+    // NOT desynced: the throw happened AFTER draw() rebuilt the legend and carried the "C" pin onto
+    // it, so the fresh legend still shows it pinned.
     const cBtn = legendItem(container, "C")!;
     expect(cBtn.getAttribute("aria-pressed")).toBe("true");
     expect(cBtn.classList.contains("is-pinned")).toBe(true);
@@ -747,19 +746,16 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
     expect(order.slice(0, 2)).toEqual(["C", "B"]); // C first (pinned first) then B, at the bottom
   });
 
-  // The SECOND throw site in the same restack, and the reason the outer try/finally alone was not
-  // enough: the pin-restoration loop itself calls legend.toggle(s) -> applyHighlight -> onHighlight
-  // -> notify(onLegendSelect). A consumer callback that throws THERE throws from inside the
-  // `finally`, which is not covered by that finally -- so `suppressRestack = false` was skipped and
-  // every later restack on the mount was silently dead. Unlike the onRender case above, this throw
-  // is NOT swallowed by jsdom at the toggle call (we call toggle() directly, not via dispatchEvent);
-  // it propagates up to the legend button's click listener, where jsdom reports it.
-  it("a throwing onLegendSelect during pin restoration does not permanently disable future restacks", () => {
+  // The SECOND consumer callback in a restack: the pin's own onLegendSelect. A throw there must not
+  // leave `suppressRestack` stuck true, which would silently kill every later restack on the mount.
+  // (It used to be thrown from a pin-restoration loop inside the reset's `finally`; draw() now carries
+  // the pins itself and calls no consumer callback for them.) The throw propagates up to the legend
+  // button's click listener, where jsdom reports it.
+  it("a throwing onLegendSelect on a restacking pin does not permanently disable future restacks", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
-    // Armed only for the first notify carrying a NON-EMPTY active set after the click. Call order
-    // inside one restack is: draw()'s fresh legend build (active = [], skipped by the length test),
-    // then the pin-restoration toggle (active = ["C"]) -- the site under test.
+    // Armed only for the first notify carrying a NON-EMPTY active set after the click: the pin's
+    // own notification (active = ["C"]) -- the site under test.
     let armed = false;
     const seen: string[][] = [];
     mountChart(container, {
@@ -782,7 +778,7 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
     expect(caught.length).toBe(1);
     expect((caught[0] as Error).message).toBe("consumer bug in onLegendSelect");
 
-    // The pin itself was restored (togglePin mutates its state and the DOM BEFORE it notifies).
+    // The pin itself landed (togglePin mutates its state BEFORE it notifies, and draw() carried it).
     expect(legendItem(container, "C")!.getAttribute("aria-pressed")).toBe("true");
 
     // The observable proof that suppressRestack was reset: a SUBSEQUENT restack still works. With
@@ -795,9 +791,9 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
   });
 
   // BOTH throw sites firing in the SAME restack. The render failure comes first and is the more
-  // informative of the two -- the legend error is a consequence of cleaning up after it -- but the
-  // cleanup ran inside a `finally`, and an exception thrown from a `finally` REPLACES the pending
-  // one, so the render failure was discarded and the consumer only ever saw the legend error.
+  // informative of the two, but the pin's onLegendSelect must still run after it, and an exception
+  // thrown while cleaning up after another REPLACES the pending one if it is not carried -- the
+  // consumer would see only the legend error.
   it("surfaces the FIRST error when both onRender and onLegendSelect throw in one restack", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -812,7 +808,7 @@ describe('onRender — phase: "restack" (area click-to-restack)', () => {
         if (restackCount === 1) throw new Error("E1-onRender");
       },
       onLegendSelect: (ctx) => {
-        // Same arming as the test above: only the pin-restoration toggle carries a non-empty set.
+        // Same arming as the test above: the pin's own notification carries the non-empty set.
         if (armed && ctx.active.length > 0) {
           armed = false;
           throw new Error("E2-onLegendSelect");

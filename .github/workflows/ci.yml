@@ -2,7 +2,7 @@ name: CI
 
 # Typecheck + test gate for the engine. `npm ci` runs the `prepare` script, which builds dist/.
 #
-# A browser IS needed. Four suites launch Chromium, and they are the ones measuring facts no other
+# A browser IS needed. Nine suites launch Chromium, and they are the ones measuring facts no other
 # kind of test can reach: whether an icon's ink is cut by its box, whether a hatch key reads as the
 # character it names, and whether a faceted clip confines marks to their own cell. Some of them
 # guard with `describe.skipIf(!HAS_BROWSER)`, so without a browser they pass CI by not running —
@@ -32,9 +32,13 @@ jobs:
       image: mcr.microsoft.com/playwright:v1.61.0-noble
     steps:
       - uses: actions/checkout@v5
+      # checkout's safe.directory entry lives in a temporary config it removes afterwards. Inside the
+      # container the workspace is owned by another uid, so without this every later git command
+      # reports "Not a git repository".
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
       - run: npm ci
       # The same test HAS_BROWSER makes: a drifted image tag would otherwise skip the browser
@@ -45,5 +49,34 @@ jobs:
           if (!require('fs').existsSync(p)) { console.error('No Chromium at ' + p + ': set the container
           image tag in ci.yml to the playwright version in package-lock.json.'); process.exit(1); }
           console.log(p);"
+      # A committed generated file must match its generator. gen-assets and sync-theme pin their
+      # embedded text to CRLF, so they reproduce on this LF checkout. gen-grapheme-data reproduces only
+      # on the Node whose Unicode version its header records (the table is frozen at that version).
+      # gen-timeline-metrics has its own step below. Not rerun: gen-script-metrics needs fonts not in
+      # the repo. (The image installs git; see its Dockerfile.)
+      - name: Generated files match their generators
+        run: |
+          node scripts/gen-assets.mjs
+          node scripts/sync-theme.mjs
+          frozen="$(sed -n 's#^// Unicode \([0-9.]*\), frozen.*#\1#p' src/engine/grapheme-data.ts)"
+          if [ "$(node -p process.versions.unicode)" = "$frozen" ]; then
+            node scripts/gen-grapheme-data.mjs
+          else
+            echo "::notice::grapheme-data.ts is frozen at Unicode $frozen; this Node has $(node -p process.versions.unicode), so it was not regenerated"
+          fi
+          git diff --exit-code -- src/embed/assets.ts src/theme/tokens.ts src/engine/grapheme-data.ts
+      # gen-timeline-metrics measures the committed Figtree TTF in this image's Chromium. The table was
+      # measured on Windows and has not yet been reproduced on Linux, whose font stack may round
+      # advances differently, so this step reports without blocking. Make it blocking (drop
+      # continue-on-error) once it has passed on the Linux runner.
+      - name: Timeline metrics match their generator (non-blocking until proven on Linux)
+        continue-on-error: true
+        run: |
+          node scripts/gen-timeline-metrics.mjs
+          git diff --exit-code -- src/engine/timeline-metrics.ts
       - run: npm run typecheck
+      # Every golden-bearing test file with snapshot writing off: a missing or moved golden fails by name.
+      - run: npm run goldens
       - run: npm test
+      # Renders the built dist/ twice in Chromium and compares pixels; `npm ci` has built dist/.
+      - run: npm run snapshot:selftest

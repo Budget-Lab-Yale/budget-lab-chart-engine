@@ -6,9 +6,35 @@
 // sync-theme.mjs from each hue's tonal scale — see theme/tokens.ts.
 import { tokens } from "../theme/tokens";
 import { TBL_COLORS, isPaletteName } from "../spec/color-ref";
+import { resolveActiveOptionColor } from "../spec/title";
+import type { ChartSpec } from "../spec/types";
 import { d3 } from "./vendor";
 
 export { TBL_COLORS };
+
+/** CSS4 space/slash syntax (`rgb(0 0 0 / 10%)`, `hsl(0 0% 0%)`) to the comma form d3.color reads
+ *  (`rgba(0, 0, 0, 0.1)`); anything else is returned as-is. */
+function commaColor(color: string): string {
+  const m = /^\s*(rgb|hsl)a?\(\s*([^,()]*?)\s*\)\s*$/i.exec(color);
+  if (!m) return color;
+  const [body, alpha] = m[2]!.split("/").map((s) => s.trim());
+  const parts = body!.split(/\s+/);
+  if (parts.length !== 3) return color;
+  if (alpha === undefined) return `${m[1]}(${parts.join(", ")})`;
+  const a = alpha.endsWith("%") ? Number(alpha.slice(0, -1)) / 100 : Number(alpha);
+  return `${m[1]}a(${parts.join(", ")}, ${a})`;
+}
+
+/** A CSS colour's sRGB channels (0–255) and alpha, as d3.color reads it, the CSS4 space/slash
+ *  rgb()/hsl() forms included: hex of 3, 4, 6 or 8 digits, rgb()/rgba(), hsl()/hsla() and the named
+ *  colours. Null for anything d3.color cannot read (`currentColor`, `var()`, `lab()`, `oklch()`,
+ *  `color()`, `color-mix()`, `hwb()`, a palette name). `transparent` has NaN channels at alpha 0. */
+export function parseCssColor(color: string): { r: number; g: number; b: number; opacity: number } | null {
+  const c = d3.color(commaColor(color));
+  if (!c) return null;
+  const { r, g, b, opacity } = c.rgb();
+  return { r, g, b, opacity };
+}
 
 const BASE = tokens.categorical.map((c) => c.base);
 const LIGHT = tokens.categorical.map((c) => c.light);
@@ -38,6 +64,20 @@ export function resolveColor(value: string | undefined): string | undefined {
   return isPaletteName(value) ? TBL_COLORS[value] : value;
 }
 
+/** The title-selector accent (`RenderOptions.accentColor`) for `selections`: the active option's
+ *  colour (spec/title.ts `resolveActiveOptionColor`), palette-resolved, or `undefined` when no
+ *  selector resolves one. `selections` must be fully resolved (`resolveSelections`). The one
+ *  resolution behind the live chart, the live figure and the PNG export; each caller decides
+ *  WHEN to call it, which is when it reads the selections. */
+export function resolveAccentColor(
+  spec: Pick<ChartSpec, "title_selectors" | "series_colors">,
+  selections: Record<string, string>,
+): string | undefined {
+  if (!spec.title_selectors) return undefined;
+  const raw = resolveActiveOptionColor(spec.title_selectors, selections, spec.series_colors);
+  return raw ? resolveColor(raw) : undefined;
+}
+
 /** `resolveColor` with a default: the shape almost every caller wants, since a color ref is
  *  optional nearly everywhere in the spec. Relies on resolveColor's contract — a raw "#hex" or an
  *  unknown name comes back unchanged, undefined/empty comes back falsy — so this is the whole rule. */
@@ -53,7 +93,7 @@ const TONAL_TIERS = ["50", "100", "200", "300", "400", "500", "600", "700"] as c
  *  resolved colour (the engine resolves everything to hex before it reaches the marks) step along
  *  the same hue instead of guessing in colour space — see hatch.ts `defaultHatchStroke`.
  *  Keyed upper-case; the generated tokens are upper-case hex. */
-export const TONAL_BY_HEX: ReadonlyMap<string, { family: string; tiers: string[]; index: number }> =
+const TONAL_BY_HEX: ReadonlyMap<string, { family: string; tiers: string[]; index: number }> =
   (() => {
     const m = new Map<string, { family: string; tiers: string[]; index: number }>();
     for (const [family, scale] of Object.entries(

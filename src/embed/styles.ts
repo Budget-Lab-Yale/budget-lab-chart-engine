@@ -15,6 +15,17 @@
 
 import { TOKENS_CSS } from "../theme/tokens";
 import { ICON_BOX } from "../engine/icon";
+import { CROSSHAIR_HIT_CLASSES } from "../engine/hover-classes";
+
+/** The click-to-select cursor rule's targets: the marks plus every hover overlay, from the one
+ *  list crosshair.ts appends (a hand-kept list here had dropped two of the four). */
+const SELECTABLE_CURSOR_SELECTOR = [".figure-canvas", ".figure-grid"]
+  .flatMap((scope) =>
+    ["[data-series]", ...CROSSHAIR_HIT_CLASSES.map((c) => `.${c}`)].map(
+      (target) => `.figure-card.is-selectable ${scope} svg ${target}`,
+    ),
+  )
+  .join(",\n");
 
 // Color custom properties (--tbl-navy, --tbl-text-*, etc.) come from TOKENS_CSS, generated
 // verbatim from the Style-Guide palette so the HTML/CSS matches the SVG side exactly. Only
@@ -493,14 +504,6 @@ body {
 .figure-grid svg .tbl-dimmed {
   opacity: 0.15;
 }
-/* The diverging net-total LABEL is a wide text over the bar center; it is tagged with the
-   Total key so it DIMS with the dot, but it must not steal clicks from the segments beneath
-   it. Make it non-interactive so clicks fall through to the segment — only the small net
-   DOT (tbl-net-marker) selects Total. */
-.figure-canvas svg .tbl-net-label,
-.figure-grid svg .tbl-net-label {
-  pointer-events: none;
-}
 
 /* =========================================================================
  * Click-to-select cursor — only on interactive (has-legend) charts.
@@ -509,12 +512,7 @@ body {
  * marks, so its cursor wins where they overlap; give it the same pointer cursor so the
  * affordance is consistent across the whole plot when selection is on.
  * ========================================================================= */
-.figure-card.is-selectable .figure-canvas svg [data-series],
-.figure-card.is-selectable .figure-canvas svg .tbl-crosshair-hit,
-.figure-card.is-selectable .figure-canvas svg .tbl-band-crosshair-hit,
-.figure-card.is-selectable .figure-grid svg [data-series],
-.figure-card.is-selectable .figure-grid svg .tbl-crosshair-hit,
-.figure-card.is-selectable .figure-grid svg .tbl-band-crosshair-hit {
+${SELECTABLE_CURSOR_SELECTOR} {
   cursor: pointer;
 }
 
@@ -832,6 +830,21 @@ body {
   text-align: left;
 }
 
+/* Sortable leaf header (spec sort): mount.ts moves the label into a native button so the th keeps
+   its columnheader role and aria-sort. The button must not change how the label looks: inherited
+   type and alignment come from the th, and it fills the cell's content box like the bare label
+   did (a block-level button still shrinks to fit its text, hence the explicit width). */
+.tbl-table thead th .tbl-table-sort-btn {
+  all: unset;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+}
+.tbl-table thead th .tbl-table-sort-btn:focus-visible {
+  outline: 2px solid var(--tbl-navy);
+  outline-offset: 2px;
+}
+
 /* ---- Sub-label: displayed on its own line below the leaf header text ---- */
 .tbl-table-sublabel {
   display: block;
@@ -1119,18 +1132,22 @@ td.is-neg {
 /* ---- Inline math: sub/superscripts + stacked sub+super ---- */
 /* Math scripts (from \( … \) markup) inherit the cell's text color — overriding the muted
    footnote <sup> styling above — and use a slightly smaller size. */
+/* The footnote list renders math too and sits outside the <table>, so it gets the same rules. */
 .tbl-table sup.tbl-math,
-.tbl-table sub.tbl-math {
+.tbl-table sub.tbl-math,
+.tbl-table-footnotes sup.tbl-math,
+.tbl-table-footnotes sub.tbl-math {
   font-size: 0.72em;
   line-height: 0;
   color: inherit;
 }
-.tbl-table sup.tbl-math { vertical-align: super; }
-.tbl-table sub.tbl-math { vertical-align: sub; }
+.tbl-table sup.tbl-math, .tbl-table-footnotes sup.tbl-math { vertical-align: super; }
+.tbl-table sub.tbl-math, .tbl-table-footnotes sub.tbl-math { vertical-align: sub; }
 /* Stacked sub+super (e.g. \theta_1^K → θ with K above, 1 below): a tight inline column placed
    right after the base glyph, sized down like a script and left-aligned so digits/letters of
    different widths share a common left edge. */
-.tbl-table .tbl-msubsup {
+.tbl-table .tbl-msubsup,
+.tbl-table-footnotes .tbl-msubsup {
   display: inline-flex;
   flex-direction: column;
   /* Center the two-line stack on the text's midline so the super sits at cap height and the

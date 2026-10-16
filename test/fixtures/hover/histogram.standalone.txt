@@ -1,0 +1,21 @@
+# card
+<div class="tbl-tooltip-head">
+  "0 \u2013 5"
+</div>
+<div class="tbl-tooltip-row">
+  <span class="tbl-tooltip-swatch">
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <rect x="0" y="0" width="14" height="14" rx="1" style="fill:#0072B2"/>
+    </svg>
+  </span>
+  <span>
+    <span class="tbl-tooltip-value">
+      "5.00"
+    </span>
+  </span>
+</div>
+# pane 0 (hovered)
+<rect class="tbl-hist-hover-hl" fill="#BBBBBB" opacity="0.12" style="pointer-events: none;" x="44" y="18" width="165" height="360"/>
+<rect class="tbl-hist-hover-hit" x="0" y="0" width="720" height="400" fill="transparent" style="cursor: default; pointer-events: all;"/>
+# onHover (last payload)
+(no onHover call)

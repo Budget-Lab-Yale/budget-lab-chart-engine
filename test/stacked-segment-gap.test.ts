@@ -13,7 +13,7 @@
 // The pass is shrink-only and never moves a rect, which is what guarantees the invariants below:
 // the first segment still starts at the baseline and the last still ends at the total.
 import { describe, it, expect } from "vitest";
-import { renderChart, renderPane } from "../src/engine/index";
+import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -66,6 +66,7 @@ function stacks(list: Box[], axis: "y" | "x"): Box[][] {
 describe("barStack.segmentGap, vertical", () => {
   it("opens a gap of exactly N px between adjacent segments", () => {
     for (const gap of [1, 3]) {
+      expect(stacks(boxes(gapSpec(gap)), "y").length).toBeGreaterThan(0);
       for (const stack of stacks(boxes(gapSpec(gap)), "y")) {
         expect(stack.length).toBeGreaterThan(1);
         for (let i = 0; i < stack.length - 1; i++) {
@@ -112,6 +113,7 @@ describe("barStack.segmentGap, horizontal", () => {
   it("opens the gap along the stacking axis", () => {
     const gap = 2;
     const s = horizontal({ barStack: { segmentGap: gap } });
+    expect(stacks(boxes(s), "x").length).toBeGreaterThan(0);
     for (const stack of stacks(boxes(s), "x")) {
       expect(stack.length).toBeGreaterThan(1);
       for (let i = 0; i < stack.length - 1; i++) {
@@ -174,6 +176,7 @@ describe("thin segments", () => {
 describe("segmentGap with the rest of the stacked feature set", () => {
   it("honours the gap on a 100%-normalized stack", () => {
     const s = gapSpec(2, { barStack: { normalize: true } });
+    expect(stacks(boxes(s), "y").length).toBeGreaterThan(0);
     for (const stack of stacks(boxes(s), "y")) {
       for (let i = 0; i < stack.length - 1; i++) {
         expect(stack[i + 1]!.y - (stack[i]!.y + stack[i]!.h)).toBeCloseTo(2, 5);
@@ -338,36 +341,29 @@ describe("segmentGap with in-segment value labels", () => {
 
 // --- Facets ---
 //
-// The pass groups segments by band position WITHIN their own facet group, because two panes share a
+// The pass groups segments by band position WITHIN their own facet group, because two facets share a
 // band position and their segments must not be interleaved into one stack. Interleaved, the sort
-// along the value axis would spare only one pane's bottom segment and shrink the other's — opening
-// a gap below a baseline, which is precisely what this feature promises never to do. Plot's grid
-// faceting is reached through renderPane's `facetInfo` (dormant for live figures, still the only
-// path that produces per-facet groups — see FacetInfo in engine/index.ts).
-describe("segmentGap under Plot's facet grid", () => {
-  const FACET_ROWS = ROWS.map((r, i) => ({
+// along the value axis would spare only one facet's first segment and shrink the other's — opening
+// a gap at a baseline, which is precisely what this feature promises never to do. A sectioned
+// horizontal stack is the live chart with that shape: every category is its own `fy` facet, and
+// every bar sits in the same single inner `y` slot, so all of them share ONE band position.
+describe("segmentGap on a sectioned horizontal stack (one fy facet per category)", () => {
+  const SECTION_ROWS = ROWS.map((r, i) => ({
     ...(r as unknown as Record<string, string>),
-    facet: i < 3 ? "P" : "Q",
+    section: i < 3 ? "P" : "Q",
   })) as unknown as TidyRow[];
 
-  const facetSpec = (gap: number) =>
+  const sectionedSpec = (gap: number) =>
     ({
       ...BASE,
-      columns: { ...BASE.columns, facet: "facet" },
+      orientation: "horizontal",
+      columns: { ...BASE.columns, section: "section" },
       ...(gap ? { barStack: { segmentGap: gap } } : {}),
     }) as unknown as ChartSpec;
 
   /** Rects grouped by facet `<g>`, then by band, ordered along the value axis. */
   const facetStacks = (gap: number): Box[][] => {
-    const svg = renderPane(facetSpec(gap), FACET_ROWS, OPTS, "p0", {
-      facetField: "facet",
-      cellFor: new Map([
-        ["P", { col: 0, row: 0, title: "P" }],
-        ["Q", { col: 1, row: 0, title: "Q" }],
-      ]),
-      columns: 2,
-      rows: 1,
-    }).svg;
+    const svg = renderChart(sectionedSpec(gap), SECTION_ROWS, OPTS).svg;
     const byFacet = new Map<Element, Box[]>();
     for (const r of svg.querySelectorAll('g[aria-label="bar"] rect')) {
       const facet = r.parentElement!;
@@ -379,25 +375,28 @@ describe("segmentGap under Plot's facet grid", () => {
         h: +r.getAttribute("height")!,
       });
     }
+    const all = [...byFacet.values()].flat();
+    // The hazard this block exists for: more than one facet, all at one band position.
     expect(byFacet.size).toBeGreaterThan(1);
-    return [...byFacet.values()].flatMap((rects) => stacks(rects, "y"));
+    expect(new Set(all.map((b) => b.y)).size).toBe(1);
+    return [...byFacet.values()].flatMap((rects) => stacks(rects, "x"));
   };
 
-  it("gaps each facet's stacks on their own, leaving every facet's baseline and total put", () => {
+  it("gaps each facet's stack on its own, leaving every facet's baseline and total put", () => {
     const plain = facetStacks(0);
     const gapped = facetStacks(3);
     expect(gapped).toHaveLength(plain.length);
     plain.forEach((stack, s) => {
       const g = gapped[s]!;
       expect(g.length).toBe(stack.length);
-      // Interleaving two facets' segments would spare only one facet's bottom rect and shrink the
-      // other's, lifting that baseline off the axis.
-      expect(g[0]!.y).toBeCloseTo(stack[0]!.y, 5);
+      // Interleaving two facets' segments would spare only one facet's first rect and shrink the
+      // other's, pulling that bar off the baseline.
+      expect(g[0]!.x).toBeCloseTo(stack[0]!.x, 5);
       const lastPlain = stack[stack.length - 1]!;
       const lastGapped = g[g.length - 1]!;
-      expect(lastGapped.y + lastGapped.h).toBeCloseTo(lastPlain.y + lastPlain.h, 5);
+      expect(lastGapped.x + lastGapped.w).toBeCloseTo(lastPlain.x + lastPlain.w, 5);
       for (let i = 0; i < g.length - 1; i++) {
-        expect(g[i + 1]!.y - (g[i]!.y + g[i]!.h), `boundary ${i}`).toBeCloseTo(3, 5);
+        expect(g[i + 1]!.x - (g[i]!.x + g[i]!.w), `boundary ${i}`).toBeCloseTo(3, 5);
       }
     });
   });

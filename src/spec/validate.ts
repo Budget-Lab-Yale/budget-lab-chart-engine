@@ -2,8 +2,9 @@
 // one-chart model:
 //   1. Structural  — the ajv JSON schema (schema.ts), additionalProperties:false, so typos
 //                     (`xAxisTpye`), bad enums, wrong types, and missing required fields fail.
-//   2. Cross-ref   — every series named by series_order / series_colors / series_styles /
-//                     series_labels / confidence_bands.series must appear in the data.
+//   2. Cross-ref   — every spec key that names a series, shape value, category, section or pane
+//                     must appear in the data (the one table in data-refs.ts, read by every
+//                     chart type's path).
 //   3. CSV format  — required columns exist; each row's `time` parses under the declared
 //                     xAxisType; `value` and CI columns are numeric or empty.
 // Layers 2-3 need the data, so they live in validateChartData(spec, rows). Each failure is a
@@ -11,17 +12,17 @@
 import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
+import { POLY_DEFAULT_DEGREE, SHADE_FILL_OPACITY, Y_BOUND_LIMIT } from "./defaults";
 // Imported, deliberately NOT re-exported: a re-export here would hand browser-bundled code a path
 // back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
 import { isHorizontalDumbbell, valueAxisIsX } from "./dumbbell-orientation";
-import { facetsDrawAsGroups, facetGroupErrors } from "./facet-groups";
-import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
+import { horizontalFacetErrors } from "./facet-groups";
+import { colorRefError, monoBaseError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
-import { resolveColumns, isPreBinned, categoryOrderFor, SINGLE_SERIES_KEY } from "./columns";
+import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY } from "./columns";
 import { rowsInSectionOrder } from "./section-key";
 import { resolveAnnotations } from "./annotations";
-import { ownValue } from "./own-key";
 import { resolveRugTracks, fullyHiddenRugTracks, rugBoundPosition } from "./rug";
 import { temporalValueError, quarterValueError } from "./parse-time";
 import type { ResolvedColumns } from "./columns";
@@ -31,6 +32,10 @@ import { overlayKind, overlayPerSeries } from "./overlays";
 import type { Overlay } from "./types";
 import { timelineDataErrors, timelineColumns } from "./timeline";
 import { treemapDataErrors, treemapColumns } from "./treemap";
+import { keyReferenceErrors } from "./data-refs";
+import { figurePaneValues } from "./panes";
+import { textureGroundErrors } from "./texture-grounds";
+import type { RefDomains } from "./data-refs";
 
 export interface ValidationResult {
   valid: boolean;
@@ -38,7 +43,7 @@ export interface ValidationResult {
 }
 
 const ajv = new Ajv({ allErrors: true });
-const validateStructural = ajv.compile(CHART_SPEC_SCHEMA);
+const validateStructural = ajv.compile<ChartSpec>(CHART_SPEC_SCHEMA);
 
 function formatAjvError(e: ErrorObject, spec: unknown): string {
   const path = e.instancePath || "(root)";
@@ -59,7 +64,8 @@ function formatAjvError(e: ErrorObject, spec: unknown): string {
     return `${path}: missing required property "${e.params.missingProperty}"`;
   }
   if ((e.keyword === "minimum" || e.keyword === "maximum") && /^\/yAxisPolicy\/(min|max)$/.test(path)) {
-    return `${path}: must be between -1e300 and 1e300`;
+    const bound = Y_BOUND_LIMIT.toExponential().replace("e+", "e"); // "1e300", as authors write it
+    return `${path}: must be between -${bound} and ${bound}`;
   }
   return `${path}: ${e.message ?? "invalid"}`;
 }
@@ -154,16 +160,24 @@ function tooltipSeriesNameChartTypeError(spec: {
   return `tooltip_series_name is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)}) — on other chart types the series name labels a tooltip ROW, not the header`;
 }
 
+/** `highlightSeries` is read by marks/bar.ts and marks/histogram.ts only; on any other chart type it
+ *  rendered exactly as its absence. PRESENCE, not value, as the sibling gates above. The timeline
+ *  and treemap gates reject it first, with their own message. */
+function highlightSeriesChartTypeError(spec: { chartType?: unknown; highlightSeries?: unknown }): string | null {
+  if (spec.highlightSeries === undefined) return null;
+  if (spec.chartType === "bar" || spec.chartType === "histogram") return null;
+  return `highlightSeries is supported on chartType "bar" and "histogram" only (got ${JSON.stringify(spec.chartType)})`;
+}
+
 /** `tooltip_section` puts the section in the hover CARD's header, so it needs sections: rejected
- *  without `columns.section` (no section to name), or a horizontal chart's `columns.facet`, whose
- *  values draw as sections (spec/facet-groups.ts). PRESENCE, not value, as the sibling gates.
+ *  without `columns.section` (no section to name). PRESENCE, not value, as the sibling gates.
  *  Accepted on every chart type `columns.section` allows (horizontal bar / stacked / dumbbell, by
  *  sectionColumnError): where the chart hovers with value pills rather than a card (a bar, a stack in
  *  pills mode) it is a no-op, since a stack's hover mode can depend on the data
  *  (`barStack.netDisplay: auto`). */
 function tooltipSectionError(spec: ChartSpec): string | null {
   if (spec.tooltip_section === undefined) return null;
-  if (spec.columns?.section == null && !facetsDrawAsGroups(spec)) {
+  if (spec.columns?.section == null) {
     return `tooltip_section needs columns.section — it names the hovered row's section in the hover card's header`;
   }
   return null;
@@ -234,7 +248,7 @@ function dumbbellAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): 
  *  Keyed on the two literals ON PURPOSE. `FILLED_CHART_TYPES` (./filled-chart-types) is the
  *  tempting import and the wrong one: it also holds `histogram` (numeric/temporal by design),
  *  `area` (usually temporal) and `waterfall` (already checked, with its own vertical-only message
- *  that a second check here would make unreachable). This must never read as
+ *  that a second check here would only duplicate). This must never read as
  *  "categorical implies bar" either — line and area on a categorical axis render correctly and are
  *  used by published figures. */
 function barBandAxisError(spec: { chartType?: unknown; xAxisType?: unknown }): string | null {
@@ -359,11 +373,19 @@ function waterfallSpecError(spec: {
   return null;
 }
 
+/** Calendar interval names a temporal histogram's `binWidth` may hold (engine/histogram-bin.ts
+ *  `calendarEdges`). */
+const HISTOGRAM_INTERVALS = ["day", "week", "month", "quarter", "year"];
+
 /** Histogram cross-field constraints the JSON schema can't express: the x-axis must be
  *  numeric or temporal (a histogram bins a continuous axis); pre-binned mode (columns.x0 +
  *  columns.x1 both mapped) requires BOTH edges, not just one; and bin config (bins/binWidth/
  *  domain/weight) is meaningless — and therefore rejected — once the data already carries its
- *  own bin edges. */
+ *  own bin edges. And the bin config's values: the binner falls back to automatic bins for a
+ *  binWidth <= 0, any string on a numeric axis, and on a temporal one a string that is neither an
+ *  interval name nor a positive day count; an infinite binWidth draws one bin; and a reversed
+ *  domain is read as a single unit bin. Each would publish a differently binned chart with no
+ *  message. */
 function histogramSpecError(spec: {
   chartType?: unknown;
   xAxisType?: unknown;
@@ -391,6 +413,29 @@ function histogramSpecError(spec: {
     errors.push(
       "histogram: bin config (bins/binWidth/domain/weight) is not allowed with pre-binned data (columns.x0/x1)",
     );
+  }
+  const bw = spec.histogram?.binWidth;
+  if (typeof bw === "number" && !(Number.isFinite(bw) && bw > 0)) {
+    errors.push(`histogram.binWidth must be a finite number greater than 0 (got ${bw})`);
+  } else if (typeof bw === "string") {
+    // A temporal axis reads a numeric string as a day count, exactly as the bare number
+    // (histogram-bin.ts temporalThresholds), so "7" stays valid there; a numeric axis ignores it.
+    const days = Number(bw);
+    if (spec.xAxisType !== "temporal") {
+      errors.push(
+        `histogram.binWidth ${JSON.stringify(bw)} is a string: on xAxisType ${JSON.stringify(spec.xAxisType)} give a number of x-units (calendar interval names need xAxisType "temporal")`,
+      );
+    } else if (!HISTOGRAM_INTERVALS.includes(bw) && !(bw.trim() !== "" && Number.isFinite(days) && days > 0)) {
+      errors.push(
+        bw.trim() !== "" && !Number.isNaN(days)
+          ? `histogram.binWidth must be a finite number greater than 0 (got ${JSON.stringify(bw)})`
+          : `histogram.binWidth ${JSON.stringify(bw)} is not a calendar interval (allowed: ${HISTOGRAM_INTERVALS.join(", ")}) — or give a number of days`,
+      );
+    }
+  }
+  const domain = spec.histogram?.domain;
+  if (Array.isArray(domain) && !((domain[0] as number) < (domain[1] as number))) {
+    errors.push(`histogram.domain must satisfy min < max (got [${domain[0]}, ${domain[1]}])`);
   }
   return errors;
 }
@@ -726,7 +771,7 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
     if (!keyed || !s.label || s.color) return;
     // A rug-flagged fill keys SOLID, everything else keys by its tint — different rules, so they
     // can't collide with each other.
-    const scope = `${s.series ?? "*"}|${s.rug === true ? "solid" : (s.fillOpacity ?? 0.5)}`;
+    const scope = `${s.series ?? "*"}|${s.rug === true ? "solid" : (s.fillOpacity ?? SHADE_FILL_OPACITY)}`;
     const labels = derivedChips.get(scope) ?? [];
     if (!labels.includes(s.label)) labels.push(s.label);
     derivedChips.set(scope, labels);
@@ -778,9 +823,12 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
   // Every interval, declared or derived, parsed on this chart's axis. An unparseable bound would
   // silently drop its block; a reversed one would draw a zero-width sliver at the floor width.
   // Indexed BEFORE the rug filter, so `annotations.bands[2]` names the entry the author wrote.
-  const allIntervals: Array<{ where: string; from?: string; to?: string }> = [
-    ...bands.map((b, i) => ({ where: `annotations.bands[${i}]`, from: b.start, to: b.end, e: b })),
-    ...shading.map((s, i) => ({ where: `shading[${i}]`, from: s.from, to: s.to, e: s })),
+  // On a date axis `dateCoordinateErrors` has already parsed every band and shading bound against the
+  // same grammar, so only the rug's own tracks report a bad bound here (`parsedAbove`).
+  const parsedAbove = xAxisType === "temporal" || xAxisType === "quarterly";
+  const allIntervals: Array<{ where: string; from?: string; to?: string; parsedAbove: boolean }> = [
+    ...bands.map((b, i) => ({ where: `annotations.bands[${i}]`, from: b.start, to: b.end, e: b, parsedAbove })),
+    ...shading.map((s, i) => ({ where: `shading[${i}]`, from: s.from, to: s.to, e: s, parsedAbove })),
   ]
     .filter(({ e }) => e.rug === true)
     .concat(
@@ -790,6 +838,7 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
           from: iv.from,
           to: iv.to,
           e: {} as LegendFlagged,
+          parsedAbove: false,
         })),
       ),
     );
@@ -798,8 +847,8 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
       if (iv.from == null || iv.to == null) continue;
       const fromErr = timeParseError(xAxisType, iv.from);
       const toErr = timeParseError(xAxisType, iv.to);
-      if (fromErr) errors.push(`${iv.where}: rug bound \`from\`: ${fromErr}`);
-      if (toErr) errors.push(`${iv.where}: rug bound \`to\`: ${toErr}`);
+      if (fromErr && !iv.parsedAbove) errors.push(`${iv.where}: rug bound \`from\`: ${fromErr}`);
+      if (toErr && !iv.parsedAbove) errors.push(`${iv.where}: rug bound \`to\`: ${toErr}`);
       if (!fromErr && !toErr && rugBoundPosition(xAxisType, iv.from) > rugBoundPosition(xAxisType, iv.to)) {
         errors.push(`${iv.where}: rug interval runs backwards (${iv.from} → ${iv.to})`);
       }
@@ -855,7 +904,9 @@ const TIMELINE_REJECTED_COLUMNS = ["value", "facet", "shape", "point_label", "se
 /** Timeline cross-field rules, plus the reverse direction: the timeline-only column roles and the
  *  `timeline:` block are errors on every other chart type. Off a timeline this can only fire on a
  *  field that did not exist before 1.15.0, so no existing spec changes validity. */
-function timelineSpecErrors(spec: Record<string, unknown>): string[] {
+function timelineSpecErrors(chartSpec: ChartSpec): string[] {
+  // Read by field NAME (the TIMELINE_*_FIELDS lists), so through an index view.
+  const spec = chartSpec as unknown as Readonly<Record<string, unknown>>;
   const errors: string[] = [];
   const cols = (spec.columns ?? {}) as Record<string, unknown>;
   if (spec.chartType !== "timeline") {
@@ -911,7 +962,9 @@ const TREEMAP_ALLOWED_COLUMNS: readonly string[] = ["x", "value", "series"];
 /** Treemap cross-field rules, plus the reverse direction: the `treemap:` block is an error on every
  *  other chart type. Off a treemap this can only fire on a field that did not exist before it, so
  *  no existing spec changes validity. */
-function treemapSpecErrors(spec: Record<string, unknown>): string[] {
+function treemapSpecErrors(chartSpec: ChartSpec): string[] {
+  // Read by field NAME (the TREEMAP_*_FIELDS lists), so through an index view.
+  const spec = chartSpec as unknown as Readonly<Record<string, unknown>>;
   const errors: string[] = [];
   if (spec.chartType !== "treemap") {
     if (spec.treemap != null) errors.push(`the treemap block is only valid on chartType "treemap"`);
@@ -936,113 +989,72 @@ function treemapSpecErrors(spec: Record<string, unknown>): string[] {
   return errors;
 }
 
-/** Layer 1: structural validation against the JSON schema, plus the point-chart axis-type
- *  constraint (a cross-field rule outside the schema). */
-export function validateSpec(spec: unknown): ValidationResult {
-  const ok = validateStructural(spec);
-  if (!ok) {
-    const errors = (validateStructural.errors ?? []).map((e) => formatAjvError(e, spec));
-    return { valid: false, errors };
-  }
-  // First, so a timeline's rejected fields report as such instead of tripping a chart-type rule
-  // further down with a less specific message (e.g. tooltip_x_format's axis check).
-  // The treemap check goes before the timeline's so a treemap carrying a timeline-only column or the
-  // timeline block reports as unsupported on a treemap, not as "only valid on a timeline".
-  const tmErrors = treemapSpecErrors(spec as unknown as Record<string, unknown>);
-  if (tmErrors.length) return { valid: false, errors: tmErrors };
-  const tlErrors = timelineSpecErrors(spec as unknown as Record<string, unknown>);
-  if (tlErrors.length) return { valid: false, errors: tlErrors };
-  const axisErr = pointChartAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
-  if (axisErr) return { valid: false, errors: [axisErr] };
-  const plErr = pointLabelChartTypeError(spec as { chartType?: unknown; columns?: { point_label?: unknown } });
-  if (plErr) return { valid: false, errors: [plErr] };
-  const pcErrors = pointCalloutSpecErrors(
-    spec as { chartType?: unknown; columns?: { point_label?: unknown }; annotations?: { points?: [] } },
-  );
-  if (pcErrors.length) return { valid: false, errors: pcErrors };
-  const tsnErr = tooltipSeriesNameChartTypeError(spec as { chartType?: unknown; tooltip_series_name?: unknown });
-  if (tsnErr) return { valid: false, errors: [tsnErr] };
-  const tsecErr = tooltipSectionError(spec as ChartSpec);
-  if (tsecErr) return { valid: false, errors: [tsecErr] };
-  const talErr = tooltipAxisLabelChartTypeError(
-    spec as { chartType?: unknown; tooltip_x_label?: unknown; tooltip_y_label?: unknown },
-  );
-  if (talErr) return { valid: false, errors: [talErr] };
-  const dbErr = dumbbellAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
-  if (dbErr) return { valid: false, errors: [dbErr] };
-  const tsErr = titleSelectorsError(spec as { title?: unknown; title_selectors?: Record<string, { options?: Array<{ id?: string }>; default?: string }> });
-  if (tsErr) return { valid: false, errors: [tsErr] };
-  const secErr = sectionColumnError(
-    spec as { chartType?: unknown; orientation?: unknown; columns?: { section?: unknown } },
-  );
-  if (secErr) return { valid: false, errors: [secErr] };
-  const fgErrors = facetGroupErrors(spec as ChartSpec);
-  if (fgErrors.length) return { valid: false, errors: fgErrors };
-  const hymErr = horizontalYAxisMarkerError(spec as ChartSpec);
-  if (hymErr) return { valid: false, errors: [hymErr] };
-  const ticksErr = xAxisTicksOrientationError(
-    spec as { x_axis_ticks?: unknown; chartType?: unknown; orientation?: unknown },
-  );
-  if (ticksErr) return { valid: false, errors: [ticksErr] };
-  const wfErr = waterfallSpecError(
-    spec as { chartType?: unknown; orientation?: unknown; xAxisType?: unknown },
-  );
-  if (wfErr) return { valid: false, errors: [wfErr] };
-  const histErrors = histogramSpecError(
-    spec as {
-      chartType?: unknown;
-      xAxisType?: unknown;
-      columns?: { x0?: unknown; x1?: unknown };
-      histogram?: { bins?: unknown; binWidth?: unknown; domain?: unknown; weight?: unknown };
-    },
-  );
-  if (histErrors.length) return { valid: false, errors: histErrors };
-  const overlayErrors = overlaySpecErrors(
-    spec as {
-      overlays?: Overlay[];
-      xAxisType?: unknown;
-      chartType?: unknown;
-      orientation?: unknown;
-    },
-  );
-  if (overlayErrors.length) return { valid: false, errors: overlayErrors };
-  // Deliberately AFTER `overlaySpecErrors`, not up with the other axis checks: a horizontal
-  // bar/stacked chart carrying an overlay violates BOTH rules, and the overlay message is the more
-  // specific of the two. Placed with its family, this guard would report first and make the
-  // horizontal-bar/stacked branch of `overlaySpecErrors` unreachable dead code.
-  const barAxisErr = barBandAxisError(spec as { chartType?: unknown; xAxisType?: unknown });
-  if (barAxisErr) return { valid: false, errors: [barAxisErr] };
-  const shadeErr = shadingSpecError(spec as { chartType?: unknown; shading?: unknown[] });
-  if (shadeErr) return { valid: false, errors: [shadeErr] };
-  const txfErr = tooltipXFormatError(spec as { xAxisType?: unknown; tooltip_x_format?: unknown });
-  if (txfErr) return { valid: false, errors: [txfErr] };
-  const xTicksErr = xTicksError(spec as { xAxisType?: unknown; chartType?: unknown; x_ticks?: unknown });
-  if (xTicksErr) return { valid: false, errors: [xTicksErr] };
-  // A texture over a ground the band deriver cannot PARSE: paintable, so `colorErrors` passes it, and
-  // a hard throw at render. Checked against the AUTHORED colour — a palette default is always a hex.
-  const groundErrors: string[] = [];
-  for (const series of Object.keys((spec as { series_patterns?: Record<string, unknown> }).series_patterns ?? {})) {
-    const declared = ownValue((spec as { series_colors?: Record<string, unknown> }).series_colors, series);
-    const authored = declared ?? (series === "" ? (spec as { bar_color?: unknown }).bar_color : undefined);
-    const err = hatchGroundError(
-      declared !== undefined ? `series_colors[${JSON.stringify(series)}]` : "bar_color",
-      series,
-      authored,
-    );
-    if (err) groundErrors.push(err);
-  }
-  if (groundErrors.length) return { valid: false, errors: groundErrors };
+/** A cross-field rule over a structurally valid spec: every error it finds, in the order it finds
+ *  them (none when the spec passes). */
+type SpecRule = (spec: ChartSpec) => readonly string[];
 
-  const patErr = seriesPatternsError(spec as { chartType?: unknown; series_patterns?: unknown });
-  if (patErr) return { valid: false, errors: [patErr] };
-  const colErrors = colorErrors(spec as ChartSpec);
-  if (colErrors.length) return { valid: false, errors: colErrors };
-  // Before the rug checks, which would otherwise report a malformed rug-flagged band bound twice.
-  const coordErrors = dateCoordinateErrors(spec as ChartSpec);
-  if (coordErrors.length) return { valid: false, errors: coordErrors };
-  const rugErrors = legendAndRugErrors(spec as ChartSpec);
-  if (rugErrors.length) return { valid: false, errors: rugErrors };
-  return { valid: true, errors: [] };
+/** A rule that reports at most one error. */
+const single =
+  (rule: (spec: ChartSpec) => string | null): SpecRule =>
+  (spec) => {
+    const err = rule(spec);
+    return err ? [err] : [];
+  };
+
+/** Chart-type admission. A failing gate ENDS validation: it names a field the chart type does not
+ *  honour, and every rule below would only re-describe that same field with a less specific message
+ *  (e.g. tooltip_x_format's axis check). The treemap gate goes before the timeline's so a treemap
+ *  carrying a timeline-only column or the timeline block reports as unsupported on a treemap, not as
+ *  "only valid on a timeline". */
+const SPEC_GATES: readonly SpecRule[] = [treemapSpecErrors, timelineSpecErrors];
+
+/** The cross-field rules, run in this order and ALL reported: errors[0] is the first failing rule's
+ *  first error, and tests and downstream CI read it, so the order is a contract — a new rule goes at
+ *  the end unless it must report before an existing one. */
+const SPEC_RULES: readonly SpecRule[] = [
+  single(pointChartAxisError),
+  single(pointLabelChartTypeError),
+  pointCalloutSpecErrors,
+  single(tooltipSeriesNameChartTypeError),
+  single(tooltipSectionError),
+  single(tooltipAxisLabelChartTypeError),
+  single(dumbbellAxisError),
+  single(titleSelectorsError),
+  single(sectionColumnError),
+  horizontalFacetErrors,
+  single(horizontalYAxisMarkerError),
+  single(xAxisTicksOrientationError),
+  single(waterfallSpecError),
+  histogramSpecError,
+  overlaySpecErrors,
+  // AFTER `overlaySpecErrors`, not up with the other axis checks: a horizontal bar/stacked chart
+  // carrying an overlay violates BOTH rules, and the overlay message is the more specific of the two,
+  // so it reports first.
+  single(barBandAxisError),
+  single(shadingSpecError),
+  single(tooltipXFormatError),
+  single(xTicksError),
+  single(seriesPatternsError),
+  colorErrors,
+  // Before the rug rule, which leaves a band or shading bound on a date axis to this one.
+  dateCoordinateErrors,
+  legendAndRugErrors,
+  single(highlightSeriesChartTypeError),
+];
+
+const ajvValidationErrors = (spec: unknown): string[] =>
+  (validateStructural.errors ?? []).map((e) => formatAjvError(e, spec));
+
+/** Layer 1: structural validation against the JSON schema (every schema error), then the
+ *  chart-type gates (the first failing one), then every cross-field rule's errors. */
+export function validateSpec(spec: unknown): ValidationResult {
+  if (!validateStructural(spec)) return { valid: false, errors: ajvValidationErrors(spec) };
+  for (const gate of SPEC_GATES) {
+    const errors = gate(spec);
+    if (errors.length) return { valid: false, errors: [...errors] };
+  }
+  const errors = SPEC_RULES.flatMap((rule) => rule(spec));
+  return { valid: errors.length === 0, errors };
 }
 
 /** Returns an error string if `value` doesn't parse under `xAxisType`, else null. A date axis reads
@@ -1064,7 +1076,58 @@ function timeParseError(xAxisType: XAxisType, value: string): string | null {
   return `unknown xAxisType ${JSON.stringify(xAxisType)}`;
 }
 
-const isNumericOrEmpty = (v: string): boolean => v === "" || Number.isFinite(Number(v));
+/** A numeric cell is a number or EMPTY (blank means absent, CONFIG-SPEC.md). A whitespace-only
+ *  cell is neither: `Number(" ")` is 0, so the engine would draw it as a zero. */
+const isNumericOrEmpty = (v: string): boolean => v === "" || (v.trim() !== "" && Number.isFinite(Number(v)));
+
+/** The per-row error for a cell `isNumericOrEmpty` rejects. */
+function notNumericError(rowNum: number, col: string, v: string): string {
+  const hint = v !== "" && v.trim() === "" ? " — leave the cell empty for a missing observation" : "";
+  return `row ${rowNum}: ${col} ${JSON.stringify(v)} is not numeric${hint}`;
+}
+
+function missingColumnErrors(roles: Array<[string, string]>, columns: Set<string>): string[] {
+  return roles
+    .filter(([, col]) => !columns.has(col))
+    .map(([role, col]) => `config/data mismatch: columns.${role} is "${col}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`);
+}
+
+/** The key sets the reference table (data-refs.ts) checks against, for the shared and histogram
+ *  paths. A chart with NO series column has one implicit series keyed "" (SINGLE_SERIES_KEY), which
+ *  no data cell spells out, so it is added or every key naming that series is rejected — including
+ *  the documented `series_colors: {"": color}` idiom. Only when the column is absent: with a series
+ *  column present, "" names nothing and IS a mistake. Assumes every declared column exists. */
+function refDomains(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns, columns: Set<string>): RefDomains {
+  const values = (col: string): Set<string> => new Set(rows.map((r) => r[col] as string));
+  const series = cols.series ? values(cols.series) : new Set([SINGLE_SERIES_KEY]);
+  const facet = spec.small_multiples && cols.facet && columns.has(cols.facet) ? cols.facet : null;
+  const facetValues = facet ? values(facet) : null;
+  return {
+    series,
+    shape: cols.shape ? values(cols.shape) : undefined,
+    category: spec.xAxisType === "categorical" ? { column: cols.x, values: values(cols.x) } : undefined,
+    section: cols.section ? { column: cols.section, values: values(cols.section) } : undefined,
+    pane: facet && facetValues
+      ? { column: facet, values: facetValues, rendered: new Set(figurePaneValues(spec, rows, facet)) }
+      : undefined,
+    faceted: spec.small_multiples != null,
+  };
+}
+
+/** `small_multiples.pane_widths`: one proportion per grid column. Columns = the explicit config,
+ *  else a single row (all panes) when pane_widths is set. */
+function paneWidthsErrors(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns, columns: Set<string>): string[] {
+  const pw = spec.small_multiples?.pane_widths;
+  if (!Array.isArray(pw) || !cols.facet || !columns.has(cols.facet)) return [];
+  const facetField = cols.facet;
+  // The pane LIST the grid lays out (repeats included, blanks not), from the figure's own function.
+  const paneCount = figurePaneValues(spec, rows, facetField).length;
+  const cfgCols = spec.small_multiples?.columns;
+  const resolvedCols = cfgCols && cfgCols > 0 ? Math.min(cfgCols, paneCount) : paneCount;
+  return pw.length === resolvedCols
+    ? []
+    : [`small_multiples.pane_widths has ${pw.length} proportions but the grid has ${resolvedCols} column(s) — the array length must equal the column count`];
+}
 
 /** Histogram data validation. A histogram breaks the shared x/value contract two ways: a RAW
  * histogram derives each bar's height from the row COUNT (or a summed weight column), so `value`
@@ -1080,7 +1143,7 @@ function validateHistogramData(
 ): ValidationResult {
   const errors: string[] = [];
 
-  // series / facet column existence — mirrors the shared path.
+  // series / facet column existence — the only declared columns a histogram reads.
   const requiredRoles: Array<[string, string]> = [];
   if (cols.series) requiredRoles.push(["series", cols.series]);
   if (spec.small_multiples) {
@@ -1096,13 +1159,7 @@ function validateHistogramData(
     const x0 = cols.x0 as string;
     const x1 = cols.x1 as string;
     requiredRoles.push(["x0", x0], ["x1", x1], ["value", cols.value]);
-    for (const [role, col] of requiredRoles) {
-      if (!columns.has(col)) {
-        errors.push(
-          `config/data mismatch: columns.${role} is "${col}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
-        );
-      }
-    }
+    errors.push(...missingColumnErrors(requiredRoles, columns));
     if (errors.length) return { valid: false, errors };
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] as TidyRow;
@@ -1121,23 +1178,16 @@ function validateHistogramData(
         );
       }
       const valRaw = (row[cols.value] as string) ?? "";
-      if (!isNumericOrEmpty(valRaw)) {
-        errors.push(`row ${rowNum}: ${cols.value} ${JSON.stringify(valRaw)} is not numeric`);
-      }
+      if (!isNumericOrEmpty(valRaw)) errors.push(notNumericError(rowNum, cols.value, valRaw));
     }
+    errors.push(...histogramReferenceErrors(spec, rows, cols, columns));
     return { valid: errors.length === 0, errors };
   }
 
   // Raw (count mode): the x column is required; `value` is NOT (bar height = row count). Only a
   // mapped histogram.weight column is required + numeric-checked.
   requiredRoles.push(["x", cols.x]);
-  for (const [role, col] of requiredRoles) {
-    if (!columns.has(col)) {
-      errors.push(
-        `config/data mismatch: columns.${role} is "${col}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
-      );
-    }
-  }
+  errors.push(...missingColumnErrors(requiredRoles, columns));
   const weightCol = spec.histogram?.weight;
   if (weightCol && !columns.has(weightCol)) {
     errors.push(
@@ -1152,44 +1202,36 @@ function validateHistogramData(
     if (xErr) errors.push(`row ${rowNum}: ${cols.x}: ${xErr}`);
     if (weightCol) {
       const w = (row[weightCol] as string) ?? "";
-      if (!isNumericOrEmpty(w)) errors.push(`row ${rowNum}: ${weightCol} ${JSON.stringify(w)} is not numeric`);
+      if (!isNumericOrEmpty(w)) errors.push(notNumericError(rowNum, weightCol, w));
     }
   }
+  errors.push(...histogramReferenceErrors(spec, rows, cols, columns));
   return { valid: errors.length === 0, errors };
 }
 
-/** Unknown-key error for one series_* field, in the ONE wording every chart type uses — shared by
- *  the normal path's series/shape/etc. cross-reference below and by `validateTimelineKeys`, so
- *  neither can hold a second (drifting) copy of the message. Returns 0 or 1 error, spreadable into
- *  a caller's `errors` array. */
-function unknownSeriesKeyErrors(
-  seriesSeen: Set<string>,
-  named: string[] | Record<string, unknown> | undefined,
-  source: string,
-): string[] {
-  if (!named) return [];
-  const keys = Array.isArray(named) ? named : Object.keys(named);
-  const unknown = keys.filter((k) => !seriesSeen.has(k));
-  if (!unknown.length) return [];
-  const knownSeries = JSON.stringify([...seriesSeen].sort());
-  return [`${source} names series ${JSON.stringify(unknown)} not found in the data (data series: ${knownSeries})`];
+/** A histogram's references: the same table as every other chart type, plus pane_widths and the
+ *  colours a texture is laid over. Its rows are binned, not drawn one per row, but the series, pane
+ *  and scope keys name the same cells. */
+function histogramReferenceErrors(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns, columns: Set<string>): string[] {
+  return [
+    ...keyReferenceErrors(spec, refDomains(spec, rows, cols, columns)),
+    ...paneWidthsErrors(spec, rows, cols, columns),
+    ...textureGroundErrors(spec, rows, cols),
+  ];
 }
 
-/** series_order / series_colors / series_labels keys must name categories present in the data —
- *  see `unknownSeriesKeyErrors`. */
+/** A timeline's series keys, through the shared reference table (data-refs.ts). Only the series
+ *  domain exists here: every other referencing field is rejected on a timeline by validateSpec. */
 function validateTimelineKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
   const cols = timelineColumns(spec, rows);
   const seriesSeen = new Set<string>();
   for (const r of rows) seriesSeen.add(cols.series ? ((r[cols.series] as string) ?? "") : SINGLE_SERIES_KEY);
-  const errors = [
-    ...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"),
-    ...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"),
-    ...unknownSeriesKeyErrors(seriesSeen, spec.series_labels, "series_labels"),
-  ];
+  const errors = keyReferenceErrors(spec, { series: seriesSeen });
   return { valid: errors.length === 0, errors };
 }
 
-/** series_order / series_colors / series_labels keys must name groups present in the data. A flat
+/** series_order / series_colors / series_labels keys must name groups present in the data, through
+ *  the shared reference table with the groups as the series domain. A flat
  *  treemap has no groups, so any key there is an error: the bar chart's `{"": color}` idiom would
  *  otherwise validate and then be ignored (a flat treemap is always blue). */
 function validateTreemapKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResult {
@@ -1206,11 +1248,7 @@ function validateTreemapKeys(spec: ChartSpec, rows: TidyRow[]): ValidationResult
   }
   const seriesSeen = new Set<string>();
   for (const r of rows) seriesSeen.add((r[cols.group] as string) ?? "");
-  const errors = [
-    ...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"),
-    ...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"),
-    ...unknownSeriesKeyErrors(seriesSeen, spec.series_labels, "series_labels"),
-  ];
+  const errors = keyReferenceErrors(spec, { series: seriesSeen });
   return { valid: errors.length === 0, errors };
 }
 
@@ -1260,20 +1298,18 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   const rawPointLabel = spec.columns?.point_label;
   if (rawPointLabel) requiredRoles.push(["point_label", rawPointLabel]);
   if (spec.projected_field) requiredRoles.push(["projected_field", spec.projected_field]);
-  if (spec.small_multiples || facetsDrawAsGroups(spec)) {
+  // Only where the column is read: validateSpec admits `columns.section` on sectionable charts
+  // alone, and only a waterfall reads `columns.kind` (elsewhere a missing one changes nothing).
+  if (cols.section) requiredRoles.push(["section", cols.section]);
+  if (cols.kind && spec.chartType === "waterfall") requiredRoles.push(["kind", cols.kind]);
+  if (spec.small_multiples) {
     if (!cols.facet) {
       errors.push(`small_multiples requires a facet column — set columns.facet`);
     } else {
       requiredRoles.push(["facet", cols.facet]);
     }
   }
-  for (const [role, col] of requiredRoles) {
-    if (!columns.has(col)) {
-      errors.push(
-        `config/data mismatch: columns.${role} is "${col}" but no such column exists (columns: ${JSON.stringify([...columns].sort())})`,
-      );
-    }
-  }
+  errors.push(...missingColumnErrors(requiredRoles, columns));
 
   // A `point:` callout must match EXACTLY one row's raw `columns.point_label` cell, across every row
   // (a faceted chart's match lives in one pane; the pane drop happens at render). Zero matches is a
@@ -1286,12 +1322,12 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // The one matched row must also carry a numeric value — an empty value cell is legal data (the
   // per-row check below allows it) but gives the callout no y — and must be a row the figure DRAWS:
   // `series_order` and the shape domain are inclusion filters (buildPointMarks draws no dot for a
-  // row outside either — the inferred shape domain omits a blank cell, index.ts), the callout's own
+  // row outside either — the inferred shape domain omits a blank cell, pane.ts), the callout's own
   // `facet:` keeps it out of every pane but that one (where its row is absent), and a blank facet
   // cell or one `small_multiples.pane_order` omits is not a rendered pane (figure.ts). In each case
   // the label would point at an observation that is not drawn — or not be drawn itself — without a
-  // word, and the row "supplies x and y" is the documented contract. Mirrors the overlays[].facet
-  // check below.
+  // word, and the row "supplies x and y" is the documented contract. The rendered-pane rule is the
+  // one the overlays[].facet entry of the reference table (data-refs.ts) applies.
   if (rawPointLabel && columns.has(rawPointLabel)) {
     (spec.annotations?.points ?? []).forEach((p, i) => {
       if (p.point == null) return;
@@ -1303,9 +1339,9 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches ${n} rows — a keyed callout must name exactly one; disambiguate the ${JSON.stringify(rawPointLabel)} cells or anchor the callout by x and y`);
       } else {
         const row = matched[0] as TidyRow;
-        // Blank exactly as the engine reads it (`valRaw === ""` gives `_y: null`, index.ts); a
-        // whitespace-only cell parses to 0 there and draws. Non-numeric cells are already reported
-        // once per row below, so only blankness is this callout's own error.
+        // Blank exactly as the engine reads it (`valRaw === ""` gives `_y: null`, pane.ts). A
+        // whitespace-only or non-numeric cell is already reported once per row below, so only
+        // blankness is this callout's own error.
         const valRaw = (row[cols.value] as string | undefined) ?? "";
         if (columns.has(cols.value) && valRaw === "") {
           errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches a row whose ${JSON.stringify(cols.value)} cell is empty — the callout takes its y from that cell`);
@@ -1369,7 +1405,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
 
   // INVARIANT: every column whose cells the value axis reads gets ONE numeric-or-empty check —
   // `value` above, the CI columns, and a `column` overlay's column. The overlay column is not
-  // optional here: engine/index.ts reads it with unary `+` and skips anything non-finite, so a
+  // optional here: engine/pane.ts reads it with unary `+` and skips anything non-finite, so a
   // mistyped cell does not drop a point, it drops the VERTEX and reroutes the line straight from
   // its neighbours — byte-identical to a blank cell and invisible to the author. A genuinely blank
   // cell stays legitimate (isNumericOrEmpty accepts ""): blank means absent, per CONFIG-SPEC.md.
@@ -1379,84 +1415,35 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // just repeat the same missing-column failure for every row.
   if (errors.length) return { valid: false, errors };
 
-  // Per-row: x parses under xAxisType; value + numericCols numeric-or-empty. Collect the series +
-  // shape sets.
-  const seriesSeen = new Set<string>();
-  const shapeSeen = new Set<string>();
+  // Per-row: x parses under xAxisType; value + numericCols numeric-or-empty.
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i] as TidyRow;
     const rowNum = i + 2; // row 1 = header, data starts at 2
     const xErr = timeParseError(spec.xAxisType, (row[cols.x] as string) ?? "");
     if (xErr) errors.push(`row ${rowNum}: ${cols.x}: ${xErr}`);
     const valRaw = (row[cols.value] as string) ?? "";
-    if (!isNumericOrEmpty(valRaw)) {
-      errors.push(`row ${rowNum}: ${cols.value} ${JSON.stringify(valRaw)} is not numeric`);
-    }
+    if (!isNumericOrEmpty(valRaw)) errors.push(notNumericError(rowNum, cols.value, valRaw));
     for (const col of numericCols) {
       const v = row[col] ?? "";
-      if (!isNumericOrEmpty(v)) errors.push(`row ${rowNum}: ${col} ${JSON.stringify(v)} is not numeric`);
+      if (!isNumericOrEmpty(v)) errors.push(notNumericError(rowNum, col, v));
     }
-    if (cols.series) seriesSeen.add(row[cols.series] as string);
-    if (cols.shape) shapeSeen.add(row[cols.shape] as string);
   }
 
-  // Cross-reference: every config-named series must appear in the data.
-  // A chart with NO series column has one implicit series keyed "" (SINGLE_SERIES_KEY), which no
-  // data cell spells out — so it has to be added here or every key naming that series is rejected,
-  // including the documented `series_colors: {"": color}` idiom and any hatch on a single-series bar.
-  // Only when the column is absent: with a series column present, "" names nothing and IS a mistake.
-  if (!cols.series) seriesSeen.add(SINGLE_SERIES_KEY);
+  // Cross-reference: every spec key that names a series, shape value, category, section or pane
+  // must appear in the data (data-refs.ts holds the one table every chart type reads).
+  const domains = refDomains(spec, rows, cols, columns);
+  const seriesSeen = domains.series as Set<string>;
   const knownSeries = JSON.stringify([...seriesSeen].sort());
-  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_order, "series_order"));
-  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_colors, "series_colors"));
-  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_patterns, "series_patterns"));
-  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_styles, "series_styles"));
-  errors.push(...unknownSeriesKeyErrors(seriesSeen, spec.series_labels, "series_labels"));
+  errors.push(...keyReferenceErrors(spec, domains));
+  errors.push(...paneWidthsErrors(spec, rows, cols, columns));
+  // A texture over an unreadable colour that only the data shows will be painted under it.
+  errors.push(...textureGroundErrors(spec, rows, cols));
 
-  // Cross-reference: every config-named shape value must appear in the shape column's data.
-  if (cols.shape) {
-    const knownShapes = JSON.stringify([...shapeSeen].sort());
-    const checkShapes = (named: string[] | Record<string, unknown> | undefined, source: string): void => {
-      if (!named) return;
-      const keys = Array.isArray(named) ? named : Object.keys(named);
-      const unknown = keys.filter((k) => !shapeSeen.has(k));
-      if (unknown.length) {
-        errors.push(
-          `${source} names shape values ${JSON.stringify(unknown)} not found in the data (data shapes: ${knownShapes})`,
-        );
-      }
-    };
-    checkShapes(spec.shape_order, "shape_order");
-    checkShapes(spec.shape_labels, "shape_labels");
-  }
-  for (const b of spec.confidence_bands ?? []) {
-    if (!seriesSeen.has(b.series)) {
-      errors.push(
-        `confidence_bands names series ${JSON.stringify(b.series)} not found in the data (data series: ${knownSeries})`,
-      );
-    }
-  }
-
-  // Cross-reference: `shading` regions against the data — the series they name, the categories
-  // their bounds name, and whether a `side` filter can ever match anything.
+  // `shading` regions: whether a `side` filter can ever match anything. A region naming an unknown
+  // series is reported by the table above and has nothing to measure here.
   for (const [i, region] of (spec.shading ?? []).entries()) {
+    if (region.series != null && !seriesSeen.has(region.series)) continue;
     const where = `shading[${i}]`;
-    if (region.series != null && !seriesSeen.has(region.series)) {
-      errors.push(
-        `${where} names series ${JSON.stringify(region.series)} not found in the data (data series: ${knownSeries})`,
-      );
-      continue;
-    }
-    if (spec.xAxisType === "categorical") {
-      const xValues = new Set(rows.map((r) => r[cols.x] as string));
-      for (const [key, bound] of [["from", region.from], ["to", region.to]] as const) {
-        if (bound != null && !xValues.has(bound)) {
-          errors.push(
-            `${where}.${key} names category ${JSON.stringify(bound)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
-          );
-        }
-      }
-    }
     // A side filter that can never match is a spec mistake, and it is decidable from the DATA (does
     // this series ever cross the baseline?) without knowing the resolved y-domain.
     const side = region.side ?? "both";
@@ -1480,19 +1467,15 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // A sectioned row is identified by section + category (spec/section-key.ts), so the same label may
   // repeat across sections — but one section + category carries one value per series. A second row
   // would be drawn on top of the first, or merged into it by the hover, unseen. Only the sections
-  // section_order keeps: an excluded section's rows are never drawn. A horizontal chart's facets draw
-  // as sections (spec/facet-groups.ts), ordered by small_multiples.pane_order, and are named so here.
-  const groupsByFacet = facetsDrawAsGroups(spec);
-  const groupField = groupsByFacet ? cols.facet : cols.section;
-  const groupNoun = groupsByFacet ? "facet" : "section";
-  if (groupField && columns.has(groupField) && spec.xAxisType === "categorical") {
-    const groupOrder = groupsByFacet ? spec.small_multiples?.pane_order : spec.section_order;
+  // section_order keeps: an excluded section's rows are never drawn.
+  if (cols.section && columns.has(cols.section) && spec.xAxisType === "categorical") {
+    const secField = cols.section;
     const seen = new Set<string>();
     const reported = new Set<string>();
-    for (const r of rowsInSectionOrder(rows, groupOrder, (r) => r[groupField] as string)) {
+    for (const r of rowsInSectionOrder(rows, spec.section_order, (r) => r[secField] as string)) {
       const cat = r[cols.x] as string;
       if (cat == null || cat === "") continue;
-      const sec = (r[groupField] as string) ?? "";
+      const sec = (r[secField] as string) ?? "";
       const series = cols.series ? ((r[cols.series] as string) ?? "") : null;
       const id = JSON.stringify([sec, cat, series]);
       if (!seen.has(id)) { seen.add(id); continue; }
@@ -1500,127 +1483,14 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       reported.add(id);
       const what = series != null ? `more than one ${JSON.stringify(series)} value` : "more than one value";
       errors.push(
-        `category ${JSON.stringify(cat)} in ${groupNoun} ${JSON.stringify(sec)} has ${what} — rows are identified by ${groupNoun} + category, so each ${groupNoun}'s row carries one value per series`,
+        `category ${JSON.stringify(cat)} in section ${JSON.stringify(sec)} has ${what} — rows are identified by section + category, so each section's row carries one value per series`,
       );
     }
   }
 
-
-  // Cross-reference: every category named by x_order must appear in the categorical x column.
-  // x_order is order-only (it never filters), so a value the data lacks is almost certainly a
-  // typo. Only checked on a categorical x-axis (it is a no-op for numeric/temporal x).
-  const catOrder = categoryOrderFor(spec);
-  if (spec.xAxisType === "categorical" && catOrder?.length) {
-    const xValues = new Set(rows.map((r) => r[cols.x] as string));
-    const unknown = catOrder.filter((v) => !xValues.has(v));
-    if (unknown.length) {
-      const field = spec.category_order ? "category_order" : "x_order";
-      errors.push(
-        `${field} names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
-      );
-    }
-  }
-
-  // Cross-reference: every category named by category_colors must appear in the categorical x
-  // column — mirrors the x_order unknown-value check above (a typo'd key would otherwise silently
-  // no-op). category_colors is single-series scope at render time, but its KEYS are x-category
-  // values regardless of series count, so the same check applies. Only checked on a categorical
-  // x-axis (a no-op for numeric/temporal x).
-  if (spec.xAxisType === "categorical" && spec.category_colors) {
-    const xValues = new Set(rows.map((r) => r[cols.x] as string));
-    const unknown = Object.keys(spec.category_colors).filter((v) => !xValues.has(v));
-    if (unknown.length) {
-      errors.push(
-        `category_colors names categories ${JSON.stringify(unknown)} not found in x column "${cols.x}" (data values: ${JSON.stringify([...xValues].sort())})`,
-      );
-    }
-  }
-
-  // Cross-reference: small_multiples pane_order / pane_titles keys must correspond to actual
-  // distinct values in the facet column. (The facet column's existence is already enforced above
-  // via the resolved-columns check, which bails before this point if it's missing.)
-  if (spec.small_multiples && cols.facet && columns.has(cols.facet)) {
-    const facetField = cols.facet;
-    const { pane_order, pane_titles } = spec.small_multiples;
-    const facetValues = new Set(rows.map((r) => r[facetField] as string));
-    const knownFacets = JSON.stringify([...facetValues].sort());
-    if (pane_order) {
-      const unknown = pane_order.filter((v) => !facetValues.has(v));
-      if (unknown.length) {
-        errors.push(
-          `small_multiples.pane_order names panes ${JSON.stringify(unknown)} not found in facet column "${facetField}" (data values: ${knownFacets})`,
-        );
-      }
-    }
-    if (pane_titles) {
-      const unknown = Object.keys(pane_titles).filter((v) => !facetValues.has(v));
-      if (unknown.length) {
-        errors.push(
-          `small_multiples.pane_titles names panes ${JSON.stringify(unknown)} not found in facet column "${facetField}" (data values: ${knownFacets})`,
-        );
-      }
-    }
-    // pane_widths proportion array: length must match the resolved grid column count. Columns =
-    // the explicit config, else a single row (all panes) when pane_widths is set, else the default.
-    const pw = spec.small_multiples.pane_widths;
-    if (Array.isArray(pw)) {
-      const paneCount = pane_order && pane_order.length
-        ? pane_order.filter((v) => facetValues.has(v)).length
-        : facetValues.size;
-      const cfgCols = spec.small_multiples.columns;
-      const resolvedCols =
-        cfgCols && cfgCols > 0 ? Math.min(cfgCols, paneCount) : paneCount; // pane_widths ⇒ single row default
-      if (pw.length !== resolvedCols) {
-        errors.push(
-          `small_multiples.pane_widths has ${pw.length} proportions but the grid has ${resolvedCols} column(s) — the array length must equal the column count`,
-        );
-      }
-    }
-  }
-
-  // Cross-reference: overlays[].facet must name a pane the figure actually RENDERS (present in the
-  // facet column AND not filtered out by pane_order), and only means anything on a chart that
-  // actually facets. annotation-legend.ts's buildAnnotationLegendItems pushes an overlay's legend
-  // row straight from the spec, guarding only `kind == null` — its own comment there says a
-  // malformed entry "must not get a legend row for a line that is never drawn", and a misspelled
-  // `facet`, a pane pane_order drops, or a `facet` on a spec with no small_multiples at all is
-  // exactly that: nothing will ever paint it. That legend builder gets the spec and no rows, so it
-  // CANNOT tell a misspelled facet from a real one — this validator is the only place that can, and
-  // is deliberately the only gate. (cols.facet's existence is already enforced above, same as the
-  // pane_order check.)
-  for (const [i, o] of (spec.overlays ?? []).entries()) {
-    if (o.facet == null) continue;
-    if (!spec.small_multiples) {
-      errors.push(
-        `overlays[${i}].facet is set but the chart has no small_multiples — remove \`facet\` or add small_multiples`,
-      );
-    } else if (cols.facet) {
-      const facetField = cols.facet;
-      // Checked against the panes actually RENDERED, not every value in the column: pane_order is
-      // an inclusion filter (CONFIG-SPEC.md), so a pane it omits is never drawn and an overlay
-      // scoped to it paints nothing while still keying its legend row. Resolved with the same idiom
-      // as the pane_widths pane count above and figure.ts's own pane partition — including its
-      // treatment of a blank facet cell, which is not a pane there and so is not one here.
-      const facetValues = new Set(
-        rows.map((r) => r[facetField] as string).filter((v) => v != null && v !== ""),
-      );
-      const paneOrder = spec.small_multiples.pane_order;
-      const panes =
-        paneOrder && paneOrder.length
-          ? new Set(paneOrder.filter((v) => facetValues.has(v)))
-          : facetValues;
-      if (!panes.has(o.facet)) {
-        errors.push(
-          facetValues.has(o.facet)
-            ? `overlays[${i}].facet names pane ${JSON.stringify(o.facet)}, which small_multiples.pane_order excludes — that pane is never rendered, so the line would be drawn nowhere while still keying a legend row (rendered panes: ${JSON.stringify([...panes])})`
-            : `overlays[${i}].facet names pane ${JSON.stringify(o.facet)} not found in facet column "${facetField}" (data values: ${JSON.stringify([...facetValues].sort())})`,
-        );
-      }
-    }
-  }
 
   // Cross-reference: a `legend: true` overlay must be able to draw SOMETHING. Sibling of the
-  // `facet` check above, and for the same reason: `buildAnnotationLegendItems` emits an entry's
+  // `overlays[].facet` check (data-refs.ts), and for the same reason: `buildAnnotationLegendItems` emits an entry's
   // legend row from the spec alone, while `resolveOverlays` DROPS an entry it cannot compute from
   // the data — a `method` fit with fewer usable points than its degree needs, a `column` with fewer
   // than two finite cells. The two disagreed, so a one-point `lm` with `legend: true` rendered zero
@@ -1669,7 +1539,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       if (!field || !columns.has(field)) continue; // absent column: already reported above
       // What `resolveOverlays` needs from ONE group: fitPoly wants degree + 1 finite pairs, and
       // columnPoints wants 2 real points. Both counted over finite cells of the driving column.
-      const need = kind === "column" ? 2 : (o.method === "poly" ? (o.degree ?? 2) : 1) + 1;
+      const need = kind === "column" ? 2 : (o.method === "poly" ? (o.degree ?? POLY_DEFAULT_DEGREE) : 1) + 1;
       const perSeries = overlayPerSeries(o);
       const counts = new Map<string, number>();
       for (const r of rows) {

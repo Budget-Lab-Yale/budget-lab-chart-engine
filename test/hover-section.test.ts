@@ -11,6 +11,7 @@ import type { BandHoverCtx } from "../src/engine/crosshair";
 import { mockRect1to1 } from "./helpers/hover-harness";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => {
@@ -49,12 +50,7 @@ const BAR = { ...base, chartType: "bar" } as ChartSpec;
 const STACKED = { ...base, chartType: "stacked" } as ChartSpec;
 
 function translateY(el: Element): number {
-  let y = 0;
-  for (let n: Element | null = el; n && n.tagName.toLowerCase() !== "svg"; n = n.parentElement) {
-    const m = /translate\(\s*-?[\d.]+[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) y += Number(m[1]);
-  }
-  return y;
+  return translateOf(el)[1];
 }
 /** Row centres, top to bottom: the mean of each row's rect centres. */
 function rowCentres(svg: SVGSVGElement): number[] {
@@ -118,12 +114,8 @@ describe("onHover reports the hovered row's section", () => {
     expect(last().category).toBe("Top 1%");
   });
 
-  it("a horizontal chart's facets are its sections: onHover reports the facet value as the section", () => {
-    const spec = {
-      ...BAR,
-      columns: { x: "group", series: "measure", value: "rate", facet: "ranking" },
-      small_multiples: { pane_order: [WEALTH, INCOME] },
-    } as ChartSpec;
+  it("section_order putting the second section first: onHover reports the section of the row under the pointer", () => {
+    const spec = { ...BAR, section_order: [WEALTH, INCOME] } as ChartSpec;
     const { svgs, hover, last } = mount(spec, rowsOf());
     const ys = rowCentres(svgs[0]!);
     expect(ys).toHaveLength(4);

@@ -42,7 +42,7 @@ export interface TooltipHookCtx {
 /** One legend row. `rendered` is the engine's own key markup for THIS row, in `medium`'s
  *  vocabulary, so a hook can wrap rather than replace it. `color` is `undefined` for a row with
  *  no colour of its own — e.g. a cumulative stack's Total row, whose dot draws the neutral `net`
- *  ink instead — matching `LegendItem.color` (engine/index.ts), which the declared `string` here
+ *  ink instead — matching `LegendItem.color` (engine/legend-items.ts), which the declared `string` here
  *  did not.
  *
  *  A RETURNED string must be written for `medium`, not merely echo `rendered` unchanged and hope:
@@ -52,6 +52,8 @@ export interface TooltipHookCtx {
  *  and the row is correct on screen and missing from the download — invisible to anyone who only
  *  checks the screen, which is why this is spelled out rather than left to be discovered. */
 export interface LegendKeyHookCtx {
+  /** The row's series key; `__annotation:<label>` on a row keyed from an annotation, `shading`
+   *  region, overlay or rug track. */
   series: string;
   label: string;
   color: string | undefined;
@@ -97,10 +99,15 @@ export interface AfterRenderCtx {
  *  passing no `hooks` at all.
  *
  *  A throwing hook is handled inconsistently, not uniformly forbidden: `tickLabel`/`valueLabel`/
- *  `afterRender` throw inside `mountChart`'s try/catch and surface as an in-card `.figure-error`,
- *  while `legendKey`/`tooltip` run after that try/catch and a throw there propagates uncaught,
- *  leaving the mount without a legend or hover wiring until the next resize (see CONFIG-SPEC.md's
- *  Hooks section for the full account). */
+ *  `afterRender` throw inside the draw's try/catch and surface as an in-card `.figure-error`.
+ *  `legendKey` runs after it, uncaught: on the first draw the throw leaves `mountChart` itself (no
+ *  teardown returned, no ResizeObserver attached, the card left with its chart and no legend; a
+ *  standalone chart's title selector no longer redraws it either, as `requestAccentRedraw` is
+ *  assigned after that draw); on a later redraw it leaves that chart without a legend and escapes
+ *  the redraw. `tooltip` runs only on hover: a throw escapes the event handler and that move does
+ *  not update the card — none appears if none was showing, and a card from an earlier successful
+ *  move stays with its earlier content (the band handler builds the HTML before touching it). See
+ *  CONFIG-SPEC.md's Hooks section, gated by test/config-spec-claims.test.ts. */
 export interface RenderHooks {
   /** Screen-only — see `TooltipHookCtx`. Replaces a band tooltip's content; the engine keeps
    *  hit-testing, positioning and the band highlight. */

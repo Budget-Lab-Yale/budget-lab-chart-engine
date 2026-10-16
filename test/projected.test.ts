@@ -5,24 +5,13 @@
 // area veil's paint-order-after-fill (but before annotations) are all proven end to end, not
 // just at the mark-layer/splitter unit level (see test/projected-runs.test.ts for that).
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import { TBL } from "../src/engine/theme";
+import { csvFixtureReader } from "./helpers/csv";
 
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 
 const LINE_PROJECTED_SPEC: ChartSpec = {
   chartType: "line",

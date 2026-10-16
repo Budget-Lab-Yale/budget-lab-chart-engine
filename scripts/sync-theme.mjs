@@ -37,7 +37,10 @@ const colors = JSON.parse(readFileSync(colorsPath, "utf8"));
 const cssPath = colorsPath.replace(/colors\.json$/, "colors.css");
 let tokensCss = "";
 if (existsSync(cssPath)) {
-  const cssText = readFileSync(cssPath, "utf8");
+  // CRLF on purpose, whatever the checkout gives: TOKENS_CSS heads CHART_CSS, which ships in every
+  // published page, and has always carried the CRLF of a Windows checkout. Changing it to LF changes
+  // those published bytes and needs a named exception.
+  const cssText = readFileSync(cssPath, "utf8").replace(/\r?\n/g, "\r\n");
   const rootMatch = /:root\s*\{[^}]*\}/.exec(cssText);
   if (!rootMatch) {
     console.error(`sync-theme: no :root block found in ${cssPath}`);

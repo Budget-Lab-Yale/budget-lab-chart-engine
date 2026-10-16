@@ -1,7 +1,7 @@
 // Overlay marks: the resolved polylines (engine/overlays.ts) turned into Plot marks.
 //
 // Not a chartType builder — overlays apply to every numeric/temporal-x chart type, so they are built
-// once in index.ts and pushed into whichever builder's layers, for the same reason assemblePlot owns
+// once in pane.ts and pushed into whichever builder's layers, for the same reason assemblePlot owns
 // the generic chrome rather than each builder repeating it.
 //
 // The line paints in `overlay` (above the data marks: a fit hidden behind a dense scatter is not a fit
@@ -10,7 +10,7 @@
 // That split is what `confidence_bands` already does.
 //
 // CLIPPING: both carry `clip: true` UNCONDITIONALLY, not from ctx.clipMarks. That flag is computed
-// from the DATA's drawn extent (index.ts) and knows nothing about overlays, while the y domain is
+// from the DATA's drawn extent (pane.ts) and knows nothing about overlays, while the y domain is
 // pinned (assemble-plot.ts) — so `method: lm` with `domain: axis` on a steep slope, or `fun: "x^2"`,
 // would paint over the axis labels and the title. Overlay LABELS are not clipped, per the standing
 // decision recorded on MarkContext.clipMarks: a half-cut label reads worse than one past the axis.
@@ -32,8 +32,6 @@ const OVERLAY_DASH = "4 3";
 
 export interface OverlayMarkContext {
   xField: "_xn" | "_xd";
-  fxField?: string;
-  fyField?: string;
   /** The frame the reader can actually see, used to keep an in-frame LABEL on the canvas. Omitted
    *  ⇒ no filtering, which is the pre-1.13 behaviour (and what a caller with no resolved scales
    *  gets). Only the label builder reads these; the LINE still draws over its full domain and is
@@ -85,8 +83,6 @@ export function buildOverlayMarks(
   const overlay: unknown[] = [];
   const tagging: MarkLayers["tagging"] = [];
   if (!resolved.length) return { underlay, overlay, tagging };
-
-  const facetChannels = ctx.fxField && ctx.fyField ? { fx: ctx.fxField, fy: ctx.fyField } : {};
 
   // Every overlay line shares ONE class (`OVERLAY_LINE_CLASS`) rather than a per-entry class:
   // Plot validates `className` as a single CSS-ident token with no whitespace, so a compound
@@ -148,7 +144,6 @@ export function buildOverlayMarks(
             fillOpacity: 0.18,
             className: OVERLAY_BAND_CLASS,
             clip: true,
-            ...facetChannels,
           },
         ),
       );
@@ -172,7 +167,6 @@ export function buildOverlayMarks(
         strokeLinecap: "round",
         className: OVERLAY_LINE_CLASS,
         clip: true,
-        ...facetChannels,
       }),
     );
 
@@ -312,7 +306,6 @@ export function buildOverlayLabelMarks(
   ctx: OverlayMarkContext,
 ): unknown[] {
   const marks: unknown[] = [];
-  const facetChannels = ctx.fxField && ctx.fyField ? { fx: ctx.fxField, fy: ctx.fyField } : {};
 
   for (const o of resolved) {
     // A keyed overlay's text moved to a legend row, so there is nothing in-frame to draw.
@@ -455,7 +448,6 @@ export function buildOverlayLabelMarks(
         fontWeight: 600,
         className: OVERLAY_LABEL_CLASS,
         ...LABEL_HALO,
-        ...facetChannels,
       }),
     );
   }

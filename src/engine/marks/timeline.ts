@@ -2,16 +2,12 @@
 // hand-built SVG. Static: no hover, no crosshair; the legend's existing
 // `[data-series], [data-annotation]` dim selector handles pin/dim because every event element
 // carries data-series. All text is SVG <text> (HTML inside an SVG does not rasterise).
-//
-// Imports buildColorMap back from ../index, which imports renderTimeline from here: the same
-// ES-module cycle figure.ts uses. Safe because both references resolve at call time, never while
-// either module is still evaluating.
 import { d3 } from "../vendor";
 import { TBL } from "../theme";
 import { tokens } from "../../theme/tokens";
 import { isTruthyFlag, withoutRepeatedOrderEntries } from "../util";
 import { LABEL_HALO } from "../assemble-plot";
-import { buildColorMap } from "../index";
+import { buildColorMap } from "../color-map";
 import type { LegendItem, RenderOptions, RenderResult } from "../index";
 import type { ChartSpec } from "../../spec/types";
 import type { TidyRow } from "../../data/index";

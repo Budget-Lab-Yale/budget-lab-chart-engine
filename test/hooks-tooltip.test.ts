@@ -6,9 +6,8 @@
 // hook, because a static PNG has no hover state).
 //
 // SCOPE: this hook reaches buildBandTooltipHtml's two call sites only — attachBandCrosshair and
-// attachCategoricalLineCrosshair. attachCrosshair / attachFacetCrosshair / attachHistogramHover /
-// attachPointHover build their card markup elsewhere and are NOT reached (documented at Task 9 /
-// CONFIG-SPEC.md).
+// attachCategoricalLineCrosshair. attachCrosshair / attachHistogramHover / attachPointHover build
+// their card markup elsewhere and are NOT reached (documented at Task 9 / CONFIG-SPEC.md).
 //
 // Being forwarded to those two is NOT the same as being reachable on their chart types: the call
 // sits below `emitOnly` and below `if (!tip)`, so the hook fires only where a card is actually

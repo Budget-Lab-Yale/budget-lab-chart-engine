@@ -11,6 +11,7 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import type { TidyRow } from "./index.js";
+import { rowsToCsv } from "./csv-browser.js";
 import type { DataSource } from "../spec/types.js";
 
 // ---------------------------------------------------------------------------
@@ -25,13 +26,26 @@ import type { DataSource } from "../spec/types.js";
  *  - escaped double-quotes ("") inside quoted fields
  *  - CRLF or LF line endings
  *  - trailing newline
+ *  - a leading byte-order mark (dropped)
  *  - leading/trailing whitespace in header names
  *  - empty cells  → ""
  *  - entirely blank rows → skipped
+ *
+ * Throws `CSV line N: …` where a lenient read would drop or shift data without a word: a quoted
+ * field with no closing quote (the rest of the file became one cell), text after a closing quote
+ * (`"x"y,1` shifted every later column), two header columns with one non-blank name (the later one
+ * won), and a non-empty cell past the header's last column (dropped).
  */
 export function parseCsv(text: string): TidyRow[] {
-  // Normalise CRLF and bare CR to LF.
-  const src = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Normalise CRLF and bare CR to LF. A byte-order mark is dropped first: left in, it is the first
+  // header's first character, and a quoted first header kept its quotes ("time" as `"time"`).
+  const src = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const fail = (line: number, msg: string): never => {
+    throw new Error(`CSV line ${line}: ${msg}`);
+  };
+  // The 1-based line each row starts on (a quoted field can span lines), for the errors below.
+  let line = 1;
+  const rowLines: number[] = [1];
 
   // Tokenise into a flat list of cells plus row-break markers.
   // null = end-of-row sentinel.
@@ -48,11 +62,15 @@ export function parseCsv(text: string): TidyRow[] {
       // End of row
       tokens.push(null);
       i++;
+      line++;
+      rowLines.push(line);
       continue;
     }
 
     if (ch === '"') {
       // Quoted field
+      const opened = line;
+      let closed = false;
       let field = "";
       i++; // skip opening quote
       while (i < len) {
@@ -65,15 +83,22 @@ export function parseCsv(text: string): TidyRow[] {
           } else {
             // Closing quote
             i++;
+            closed = true;
             break;
           }
         } else {
+          if (c === "\n") line++;
           field += c;
           i++;
         }
       }
+      if (!closed) fail(opened, "a quoted field has no closing quote");
+      // After a quoted field comes a comma, the end of the row or the end of the file.
+      if (i < len && src[i] !== "," && src[i] !== "\n") {
+        fail(line, `text after the closing quote of "${field}": put the whole cell inside the quotes`);
+      }
       tokens.push(field);
-      // After a quoted field there should be a comma or EOL; skip the comma.
+      // Skip the comma.
       if (i < len && src[i] === ",") i++;
     } else {
       // Unquoted field — read until comma or newline
@@ -111,6 +136,13 @@ export function parseCsv(text: string): TidyRow[] {
   const headerRow = rawRows[0];
   if (headerRow === undefined) return [];
   const headers = headerRow.map((h) => h.trim());
+  const named = new Set<string>();
+  for (const h of headers) {
+    // Blank names repeat legitimately: the stray empty columns a spreadsheet exports (`time,value,,,`).
+    if (h === "") continue;
+    if (named.has(h)) fail(1, `two header columns are named "${h}"`);
+    named.add(h);
+  }
 
   const result: TidyRow[] = [];
 
@@ -119,6 +151,9 @@ export function parseCsv(text: string): TidyRow[] {
     if (cells === undefined) continue;
     // Skip entirely blank rows (blank line or a row with only empty fields).
     if (cells.length === 0 || (cells.length === 1 && cells[0] === "")) continue;
+    if (cells.slice(headers.length).some((c) => c !== "")) {
+      fail(rowLines[r]!, `${cells.length} cells, but the header names ${headers.length} columns`);
+    }
 
     const row: Record<string, string> = {};
     for (let c = 0; c < headers.length; c++) {
@@ -133,54 +168,10 @@ export function parseCsv(text: string): TidyRow[] {
 }
 
 // ---------------------------------------------------------------------------
-// rowsToCsv
+// rowsToCsv — implemented in csv-browser.ts (no Node imports, so the browser bundle can use it)
 // ---------------------------------------------------------------------------
 
-/** Quote a single CSV field if it contains a comma, double-quote, or newline. */
-function quoteCsvField(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return '"' + value.replace(/"/g, '""') + '"';
-  }
-  return value;
-}
-
-/**
- * Serialise TidyRow[] back to CSV text.
- *
- * Column order: `time`, `series`, `value` first (if present), then any
- * remaining columns in first-seen order. Fields are quoted when they contain
- * a comma, a double-quote, or a newline. Output uses LF line endings and
- * ends with a trailing newline.
- */
-export function rowsToCsv(rows: TidyRow[]): string {
-  if (rows.length === 0) return "";
-
-  // Build stable column order.
-  const PRIORITY = ["time", "series", "value"] as const;
-  const seenExtra = new Set<string>();
-  for (const row of rows) {
-    for (const key of Object.keys(row)) {
-      if (!(PRIORITY as readonly string[]).includes(key)) {
-        seenExtra.add(key);
-      }
-    }
-  }
-
-  // Which of the priority columns actually appear in any row?
-  const allKeys = new Set(rows.flatMap((r) => Object.keys(r)));
-  const headers: string[] = [
-    ...PRIORITY.filter((k) => allKeys.has(k)),
-    ...seenExtra,
-  ];
-
-  const lines: string[] = [headers.map(quoteCsvField).join(",")];
-
-  for (const row of rows) {
-    lines.push(headers.map((h) => quoteCsvField(row[h] ?? "")).join(","));
-  }
-
-  return lines.join("\n") + "\n";
-}
+export { rowsToCsv };
 
 // ---------------------------------------------------------------------------
 // loadData
@@ -191,6 +182,15 @@ export function rowsToCsv(rows: TidyRow[]): string {
 function assertOk(resp: { ok: boolean; status: number; statusText: string }, url: string): void {
   if (!resp.ok) {
     throw new Error(`loadData: HTTP ${resp.status} ${resp.statusText} fetching ${url}`);
+  }
+}
+
+/** parseCsv, with a parse error naming the file or URL it read. */
+function parseCsvFrom(text: string, from: string): TidyRow[] {
+  try {
+    return parseCsv(text);
+  } catch (err) {
+    throw new Error(`loadData: ${from}: ${(err as Error).message}`);
   }
 }
 
@@ -220,7 +220,7 @@ export async function loadData(
   if ("file" in resolved) {
     const filePath = resolve(opts?.baseDir ?? ".", resolved.file);
     const text = await readFile(filePath, "utf8");
-    return parseCsv(text);
+    return parseCsvFrom(text, filePath);
   }
 
   // Remote source (url)
@@ -228,7 +228,7 @@ export async function loadData(
     const resp = await fetchFn(resolved.url);
     assertOk(resp, resolved.url);
     const text = await resp.text();
-    return parseCsv(text);
+    return parseCsvFrom(text, resolved.url);
   }
 
   // format === "json"

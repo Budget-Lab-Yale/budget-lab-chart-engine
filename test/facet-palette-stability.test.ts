@@ -82,6 +82,7 @@ for (const mode of ["shared", "per-pane"] as const) {
         ["two", AMBER],
       ]);
       for (const pane of f.panes) {
+        expect(painted(pane.svg).size, `${pane.value}: nothing painted`).toBeGreaterThan(0);
         for (const [series, stroke] of painted(pane.svg)) {
           expect(f.legendItems?.find((l) => l.series === series)?.color, `${pane.value}/${series}`).toBe(stroke);
         }
@@ -104,6 +105,7 @@ for (const mode of ["shared", "per-pane"] as const) {
         // Exactly what a line pane's crosshair resolves: figure legend first, pane key rows for the
         // gaps, and no recolour step (only bar/histogram panes have one).
         const icons = resolveTooltipIcons({ legendItems: f.legendItems, keyRows: pane.seriesKeyRows });
+        expect(painted(pane.svg).size, `${pane.value}: nothing painted`).toBeGreaterThan(0);
         for (const [series, stroke] of painted(pane.svg)) {
           expect(icons.get(series)?.color, `${pane.value}/${series}`).toBe(stroke);
         }

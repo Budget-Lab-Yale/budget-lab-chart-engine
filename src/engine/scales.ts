@@ -2,7 +2,8 @@
 import { d3 } from "./vendor";
 import type { ChartSpec, ChartType, ValueAffixes } from "../spec/types";
 import type { PreparedRow } from "./marks/index";
-import { applyValueAffixes } from "./util";
+import { applyValueAffixes, minMax } from "./util";
+import { tickFractionDigits, valueLabelDecimals } from "./value-decimals";
 
 export interface YAxisResult {
   domain: [number, number];
@@ -198,8 +199,9 @@ export function computeBarYExtent(
 
   if (chartType === "bar") {
     // Grouped bar: bars rise/fall from zero; extent over raw _y values.
-    const dataMax = Math.max(0, ...nums);
-    const dataMin = Math.min(0, ...nums);
+    const [numsMin, numsMax] = minMax(nums);
+    const dataMax = Math.max(0, numsMax);
+    const dataMin = Math.min(0, numsMin);
     return floorDegenerateExtent({ min: dataMin, max: dataMax * HEADROOM_DEFAULT });
   }
 
@@ -227,10 +229,10 @@ export function computeBarYExtent(
   }
 
   const posMax = posSumByCategory.size
-    ? Math.max(0, ...posSumByCategory.values())
+    ? Math.max(0, minMax(posSumByCategory.values())[1])
     : 0;
   const negMin = negSumByCategory.size
-    ? Math.min(0, ...negSumByCategory.values())
+    ? Math.min(0, minMax(negSumByCategory.values())[0])
     : 0;
 
   const hasNegatives = negMin < 0;
@@ -273,8 +275,7 @@ export function computeDumbbellValueExtent(
 ): { min: number; max: number } {
   const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (!nums.length) return { min: 0, max: 1 };
-  const lo = Math.min(...nums);
-  const hi = Math.max(...nums);
+  const [lo, hi] = minMax(nums);
   const span = hi - lo;
   // Zero-span (all dots equal): pad off the value's magnitude so the axis is finite, or ±1 at 0.
   const pad = span > 0 ? span * DUMBBELL_PAD_FRACTION : Math.abs(hi) * DUMBBELL_PAD_FRACTION || 1;
@@ -354,8 +355,7 @@ export function computeWaterfallYExtent(data: PreparedRow[]): { min: number; max
     if (s.kind === "skip") continue;
     vals.push(s.base, s.top);
   }
-  const lo = Math.min(...vals);
-  const hi = Math.max(...vals);
+  const [lo, hi] = minMax(vals);
   return {
     min: lo < 0 ? lo * HEADROOM_NET_TEXT : lo,
     max: hi > 0 ? hi * HEADROOM_NET_TEXT : hi,
@@ -391,8 +391,8 @@ export function stackedExtent(
   }
   if (!posSum.size && !negSum.size) return null;
   return {
-    min: negSum.size ? Math.min(0, ...negSum.values()) : 0,
-    max: posSum.size ? Math.max(0, ...posSum.values()) : 0,
+    min: negSum.size ? Math.min(0, minMax(negSum.values())[0]) : 0,
+    max: posSum.size ? Math.max(0, minMax(posSum.values())[1]) : 0,
   };
 }
 
@@ -422,21 +422,24 @@ export function computeDrawnValueExtent(
       if (finite(r._hi)) vals.push(r._hi as number);
     }
     if (!vals.length) return null;
-    return { min: Math.min(...vals), max: Math.max(...vals) };
+    const [min, max] = minMax(vals);
+    return { min, max };
   }
 
   if (chartType === "histogram") {
     // Bin heights, drawn from zero. `_y` is already the (possibly normalized) height.
     const vals = data.map((r) => r._y).filter(finite);
     if (!vals.length) return null;
-    return { min: Math.min(0, ...vals), max: Math.max(0, ...vals) };
+    const [lo, hi] = minMax(vals);
+    return { min: Math.min(0, lo), max: Math.max(0, hi) };
   }
 
   if (chartType === "bar") {
     // Every bar spans 0 → value, so zero is always painted.
     const vals = data.map((r) => r._y).filter(finite);
     if (!vals.length) return null;
-    return { min: Math.min(0, ...vals), max: Math.max(0, ...vals) };
+    const [lo, hi] = minMax(vals);
+    return { min: Math.min(0, lo), max: Math.max(0, hi) };
   }
 
   if (chartType === "stacked") {
@@ -455,7 +458,8 @@ export function computeDrawnValueExtent(
     // (see computeDumbbellValueExtent) — and no padding here, unlike that one.
     const vals = data.map((r) => r._y).filter(finite);
     if (!vals.length) return null;
-    return { min: Math.min(...vals), max: Math.max(...vals) };
+    const [min, max] = minMax(vals);
+    return { min, max };
   }
 
   if (chartType === "waterfall") {
@@ -465,7 +469,8 @@ export function computeDrawnValueExtent(
       if (s.kind === "skip") continue;
       vals.push(s.base, s.top);
     }
-    return { min: Math.min(...vals), max: Math.max(...vals) };
+    const [min, max] = minMax(vals);
+    return { min, max };
   }
 
   return null;
@@ -481,15 +486,7 @@ export function waterfallValueDecimals(data: PreparedRow[], explicit?: number): 
     if (s.kind === "skip") continue;
     vals.push(s.delta, s.level);
   }
-  return Math.min(
-    2,
-    vals.reduce((max, v) => {
-      if (!Number.isFinite(v)) return max;
-      const str = String(v);
-      const i = str.indexOf(".");
-      return Math.max(max, i < 0 ? 0 : str.length - i - 1);
-    }, 0),
-  );
+  return valueLabelDecimals(vals);
 }
 
 /** A tick formatter that uses the minimum decimal precision needed across the whole
@@ -499,12 +496,7 @@ export function makeTickFormatter(
   ticks: number[],
   affixes: ValueAffixes = { prefix: "", suffix: "" },
 ): (d: number) => string {
-  const maxFrac = ticks.reduce((max, t) => {
-    if (!Number.isFinite(t)) return max;
-    const s = String(t);
-    const i = s.indexOf(".");
-    return Math.max(max, i < 0 ? 0 : s.length - i - 1);
-  }, 0);
+  const maxFrac = tickFractionDigits(ticks);
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     return applyValueAffixes(d.toFixed(maxFrac), affixes);

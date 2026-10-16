@@ -18,7 +18,7 @@ import type { XAxisType } from "./types";
  *  50. `setFullYear` is the documented escape and is a no-op for every year above 99. Both spellings
  *  `parseDate` accepts route through here so they cannot diverge: correcting only the bare-year
  *  branch would have made `"0050"` and `"0050-06-15"` land 1900 years apart. */
-function atLocalMidnight(year: number, month: number, day: number): Date {
+export function atLocalMidnight(year: number, month: number, day: number): Date {
   const d = new Date(year, month, day);
   d.setFullYear(year, month, day);
   return d;

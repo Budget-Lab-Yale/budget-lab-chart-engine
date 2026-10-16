@@ -12,6 +12,7 @@ import { MARK_POINT_R } from "../src/engine/theme";
 import { renderChart } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const ROW_H = 13;
 // `top`/`bottom` are the FRAME edges; placePointCallouts insets each label by its own half-height.
@@ -450,6 +451,37 @@ describe("placePointCallouts — seeded property check", () => {
   });
 });
 
+// CONFIG-SPEC's frame clamp has an exception besides a column taller than the frame: the fallback
+// sweep also pushes labels off other callouts' markers, and where those markers leave the column too
+// little room inside the frame, a label ends up outside it although the labels alone would fit.
+// Pinned so the documented exception stays true of the code (and is revisited if the code changes).
+describe("placePointCallouts — marker clearance can carry a swept label out of the frame", () => {
+  it("five one-row labels (65px) in a 120px frame: one ends below the frame", () => {
+    const o = { gap: 6, top: 10, bottom: 130, leaderClearance: 10.6 };
+    const withDisk = (x0: number, x1: number, y: number, wantsLeader: boolean): CalloutBox => ({
+      x0, x1, y, h: ROW_H, fixed: false, wantsLeader, disk: { x: (x0 + x1) / 2, y: y + 12, r: MARK_POINT_R + 2 },
+    });
+    const boxes = [
+      withDisk(117, 156, 34.17, false),
+      withDisk(122, 172, 56.22, true),
+      withDisk(125, 180, 76.15, true),
+      withDisk(110, 162, 84.55, false),
+      withDisk(104, 155, 42.37, false),
+    ];
+    expect(boxes.reduce((s, b) => s + b.h, 0)).toBeLessThan(o.bottom - o.top); // the labels alone fit
+    const ys = placePointCallouts(boxes, o);
+    const outside = boxes.filter((b, i) => ys[i]! + b.h / 2 > o.bottom + 1e-9 || ys[i]! - b.h / 2 < o.top - 1e-9);
+    expect(outside.length).toBeGreaterThan(0);
+    // The labels still do not overlap one another.
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const near = boxes[i]!.x0 < boxes[j]!.x1 + o.gap && boxes[j]!.x0 < boxes[i]!.x1 + o.gap;
+        if (near) expect(Math.abs(ys[i]! - ys[j]!)).toBeGreaterThanOrEqual(ROW_H - 1e-9);
+      }
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Rendered — the four-callout scorecard shape from the issue
 // ---------------------------------------------------------------------------
@@ -488,17 +520,7 @@ const withPoints = (points: unknown[]): ChartSpec => ({ ...SCORECARD, annotation
 /** Absolute (x, y) of a <text>, accumulating every translate() up to the <svg> (Plot puts the mark's
  *  dx/dy on the group and the data position on the element). */
 function absPos(el: Element): { x: number; y: number } {
-  let x = 0;
-  let y = 0;
-  let n: Element | null = el;
-  while (n && n.tagName.toLowerCase() !== "svg") {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) {
-      x += Number(m[1]);
-      y += Number(m[2]);
-    }
-    n = n.parentElement;
-  }
+  const [x, y] = translateOf(el);
   return { x, y };
 }
 

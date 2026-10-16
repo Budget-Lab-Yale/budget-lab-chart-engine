@@ -120,6 +120,23 @@ describe("hooks.afterRender — small multiples (per pane)", () => {
     for (const pane of fig.panes) expect(pane.svg?.getAttribute("data-mine")).toBe("1");
   });
 
+  // Both modes render through one pane loop (figure.ts renderPanes): each pane's hook fires in pane
+  // order on THAT pane's SVG. Per-pane mode was not pinned before the loops were merged.
+  for (const mode of ["shared", "per-pane"] as const) {
+    it(`${mode} mode: fires in pane order, each call on that pane's own SVG`, () => {
+      const seen: Array<{ facet: string | undefined; svg: SVGSVGElement }> = [];
+      const fig = renderFigure(
+        { ...FACETED_SPEC, small_multiples: { columns: 2, mode } } as ChartSpec,
+        FACETED_ROWS,
+        { width: 720, height: 240, document, hooks: { afterRender: (svg, ctx) => { seen.push({ facet: ctx.facet, svg }); } } },
+      );
+      expect(fig.mode).toBe(mode);
+      expect(seen.map((s) => s.facet)).toEqual(["P1", "P2"]);
+      expect(seen[0]!.svg).toBe(fig.panes[0]!.svg);
+      expect(seen[1]!.svg).toBe(fig.panes[1]!.svg);
+    });
+  }
+
   it("fires once per pane on the export figure render too, with the same two facet values", () => {
     const seenFacets: (string | undefined)[] = [];
     const root = buildExportSvg(FACETED_SPEC, FACETED_ROWS, {

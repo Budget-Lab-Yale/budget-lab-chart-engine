@@ -313,7 +313,7 @@ function parseMath(s: string, out: RichRun[], onUnsupported?: (cmd: string) => v
 
     if (c === "_" || c === "^") {
       // Scripts with no preceding atom (rare): attach to an empty base.
-      attachScript(s, i, c, out, onUnsupported, flatten);
+      applyScripts(s, i, out, onUnsupported, flatten);
       i = skipScripts(s, i);
       continue;
     }
@@ -382,11 +382,6 @@ function applyScripts(s: string, i: number, out: RichRun[], onUnsupported?: (cmd
     out.push({ kind: "super", text: sup.text, italic: sup.italic });
   }
   return i;
-}
-
-/** Variant of applyScripts for scripts with no base atom (attach to an implicit empty base). */
-function attachScript(s: string, i: number, _first: string, out: RichRun[], onUnsupported?: (cmd: string) => void, flatten = false): void {
-  applyScripts(s, i, out, onUnsupported, flatten);
 }
 
 /** Advance past a run of `_`/`^` script groups (used when scripts had no base). */
@@ -532,7 +527,8 @@ export function renderRichSvgText(doc: Document, s: string, opts: RichSvgOpts): 
   if (opts.cls) t.setAttribute("class", opts.cls);
 
   // Position every tspan with ABSOLUTE x and y. Script rise/drop are explicit pixel offsets
-  // (not `baseline-shift`, which Chromium's SVG rasterizer ignores), so super/sub land at the
+  // (not `baseline-shift`, whose amount Chromium takes from the font's metrics, and which it adds
+  // to any explicit offset when rasterising), so super/sub land at the
   // right height and a stacked cluster's two halves sit one above the other at the same x. Each
   // hard-break line drops the baseline by lineHeight and re-anchors from that line's own start.
   const supRise = opts.fontSize * 0.42;

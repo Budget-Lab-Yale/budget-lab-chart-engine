@@ -61,6 +61,10 @@ tbl-chart serve    [dir] [--port 5173]      # local review gallery of every char
 tbl-chart snapshot <chart.yaml> [--update]  # headless-Chromium PNG vs baseline (visual lock)
 ```
 
+`serve` listens on `127.0.0.1` only. Its pages carry the full data of every spec under `dir`,
+unpublished figures included, so opening it to other machines is opt-in: `--host 0.0.0.0` (or a
+specific interface address).
+
 ### Shared assets vs self-contained pages
 
 `render` inlines the runtime, CSS, and font, making each page a single ~1.65 MB file that works

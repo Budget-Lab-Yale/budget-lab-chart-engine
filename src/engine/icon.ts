@@ -404,13 +404,17 @@ function attrsOf(s: IconPrimitive): Array<[string, string]> {
   }
 }
 
-/** An icon as SVG markup, for the tooltips (which build HTML strings). Empty for `none`. */
+/** An icon as SVG markup, for the tooltips (which build HTML strings). Empty for `none`.
+ *  Attribute values are escaped HERE, not in `attrsOf`: the DOM twin writes through `setAttribute`,
+ *  which needs the raw value. A colour like `url("#p")` passes isColorRef, and unescaped its quotes
+ *  closed the `style` attribute early. No house-palette value contains `& < > " '`, so escaping
+ *  leaves every existing icon's bytes unchanged. */
 export function iconSvgMarkup(icon: IconSpec): string {
   const shapes = iconShapes(icon);
   if (!shapes.length) return "";
   const w = iconWidth(icon);
   const body = shapes
-    .map((s) => `<${s.kind} ${attrsOf(s).map(([k, v]) => `${k}="${v}"`).join(" ")}/>`)
+    .map((s) => `<${s.kind} ${attrsOf(s).map(([k, v]) => `${k}="${escapeHtml(v)}"`).join(" ")}/>`)
     .join("");
   return (
     `<svg width="${w}" height="${ICON_BOX}" viewBox="0 0 ${w} ${ICON_BOX}" aria-hidden="true">` +
@@ -438,8 +442,12 @@ export function legendRowMarkup(icon: IconSpec, label: string): string {
  *  `XMLSerializer` -> `Image` -> `canvas.drawImage`, export-png.ts's `rasterize()` — never
  *  paints: correct on screen, invisible in the download. This draws the same row from the same
  *  `iconSvgMarkup`/`iconShapes(icon)` description, but in the SVG vocabulary a hook can safely
- *  return into that `<g>`. Position matches `drawLegend`'s own default layout (icon at the
- *  origin, label GAP=6 to its right, vertically centred in the ICON_BOX). */
+ *  return into that `<g>`. It is one line: icon at the origin, label GAP=6 to its right, baseline
+ *  near the foot of the ICON_BOX. That matches the export's default row only for a label the
+ *  export would not wrap; the default row is drawn separately (`g.tbl-icon`, label wrapped in a
+ *  right-hand column, a framed export or a portrait timeline). So a hook that returns this string
+ *  unchanged is drawn as the DEFAULT row (`exportLegendKey` in export-png.ts), and only changed
+ *  markup is placed as returned, unwrapped. */
 export function legendRowMarkupSvg(icon: IconSpec, label: string): string {
   const GAP = 6;
   const labelX = iconWidth(icon) + GAP;
@@ -487,7 +495,7 @@ export function iconSvgGroup(doc: Document, icon: IconSpec): SVGElement | null {
  *  legend does instead of re-deriving from raw colour maps. Typed structurally rather than importing
  *  LegendItem, which would be a cycle (engine/index imports this module).
  *
- *  A chart that DRAWS no legend row still has one to translate: `buildSeriesKeyRows` (index.ts)
+ *  A chart that DRAWS no legend row still has one to translate: `buildSeriesKeyRows` (legend-items.ts)
  *  resolves a row per series with no legend-presence rule applied, so a lone histogram or waterfall
  *  keys from this same function rather than from a hand-built IconSpec that could drift from it. */
 export function iconFromLegendItem(item: {
@@ -551,9 +559,9 @@ export function iconFromLegendItem(item: {
  *  BOTH sources are legend rows, which is the whole trick. `legendItems` wins where it exists,
  *  because a drawn row is already resolved — symbol, ring, texture and the colour actually painted.
  *  `keyRows` covers the series a legend SUPPRESSES — most often a single unstyled series, though
- *  `legendShowsSeriesRows` (index.ts) is the exact rule and `legend: false` suppresses at any count.
+ *  `legendShowsSeriesRows` (legend-items.ts) is the exact rule and `legend: false` suppresses at any count.
  *  Those charts still tooltip, and they used to key from a separate set of loose channels that
- *  drifted from the legend's rules (see index.ts buildSeriesKeyRows). Filling the gap from the row
+ *  drifted from the legend's rules (see legend-items.ts buildSeriesKeyRows). Filling the gap from the row
  *  the legend would have drawn is what lets those channels be deleted rather than merely bypassed.
  *
  *  It does NOT re-colour. A fill the legend cannot know (`bar_color`, `category_colors`, the

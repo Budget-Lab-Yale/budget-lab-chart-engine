@@ -8,23 +8,28 @@
 // Fully deterministic: no Date/random, attributes set in a fixed order. Takes the target
 // `document` via opts so it works under jsdom (tests) and in the browser (export).
 import type { TableModel } from "./model";
-import type { TableLayout, CellRect } from "./layout";
+import type { TableLayout, CellRect, FootnoteLine } from "./layout";
 import { columnAlignOf } from "./layout";
 import type { ColumnAlign } from "../spec/table-types";
 import {
   INDENT_STEP,
   FOOTNOTE_TOP_GAP,
   FOOTNOTE_LINE_HEIGHT,
+  FOOTNOTE_MARKER_SIZE,
+  FOOTNOTE_MARKER_RISE,
+  FOOTNOTE_LIST_WEIGHT,
   HEADER_LINE_HEIGHT,
   SUBLABEL_LINE,
   GROUP_NOTE_GAP,
   GROUP_NOTE_LINE_HEIGHT,
   STUB_LINE_HEIGHT,
+  breakLineCount,
+  footnoteListLines,
 } from "./layout";
 import type { TableSpec } from "../spec/table-types";
 import { TBL } from "../engine/theme";
 import { tokens } from "../theme/tokens";
-import { hasMath, hasBreak, renderRichSvgText, richToPlain } from "./richtext";
+import { hasMath, hasBreak, renderRichSvgText, richToPlain, richWidth, splitBreaks } from "./richtext";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -34,38 +39,21 @@ const BODY_FONT = 13; // matches layout bodyFontPx + HTML td/th
 const SUBLABEL_FONT = TBL.size.annotation; // 11
 const NOTE_FONT = TBL.size.annotation; // 11
 const PAD_X = 8; // half of layout.padX — inset from a cell edge
-const FOOTNOTE_DY = -4; // superscript rise
 const LEAF_BOTTOM_PAD = 7; // gap from the leaf label's last line down to the sublabel / header rule
 const SUBLABEL_BOTTOM_PAD = 6; // gap from the sublabel baseline to the header→body rule
+const RICH_BODY_LINE = BODY_FONT + 3; // renderRichSvgText's line height at the body size
 
-// Sign coloring (no dedicated structural token; use brand green/red categorical bases).
-const SIGN_POS = tokens.categorical[3]!.base; // green
-const SIGN_NEG = tokens.categorical[4]!.base; // red
+type Measure = (s: string, fontPx: number, weight: number) => number;
+type TextOpts = { anchor: "start" | "middle" | "end"; weight: number; fill: string; size: number; cls?: string; italic?: boolean };
 
-export function renderTableSvg(
-  model: TableModel,
-  layout: TableLayout,
-  opts: { document: Document; spec?: TableSpec; measure?: (s: string, fontPx: number, weight: number) => number },
-): SVGSVGElement {
-  const doc = opts.document;
-  const spec = opts.spec;
-  // Text measurer for placing rich (math) runs. Only used on strings that contain math markup;
-  // plain text never reaches it. Falls back to the SSR char-estimate when not supplied (tests).
-  const measure = opts.measure ?? ((s: string, fontPx: number) => s.length * fontPx * 0.6);
-  const headerTierRules = spec?.header_tier_rules === true; // default: no inter-tier rules
-  const spannerRules = spec?.spanner_rules !== false; // default: draw flanking rules
-
+/** The SVG element and text emitters shared by the table body and the footnote list. */
+function svgTextKit(doc: Document, measure: Measure) {
   const el = (name: string, attrs: Record<string, string | number> = {}): SVGElement => {
     const node = doc.createElementNS(SVG_NS, name);
     for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
     return node;
   };
-  const text = (
-    x: number,
-    y: number,
-    str: string,
-    o: { anchor: string; weight: number; fill: string; size: number; cls?: string; italic?: boolean },
-  ): SVGElement => {
+  const text = (x: number, y: number, str: string, o: TextOpts): SVGElement => {
     const attrs: Record<string, string | number> = {
       x,
       y,
@@ -84,15 +72,10 @@ export function renderTableSvg(
   // Rich-aware single-line text: routes strings with math markup through the rich emitter
   // (tspans + stacked sub/super), otherwise the plain `text()` above — so non-math output is
   // byte-identical to before. `italic` sets the root font-style (used for group notes).
-  const drawText = (
-    x: number,
-    y: number,
-    str: string,
-    o: { anchor: "start" | "middle" | "end"; weight: number; fill: string; size: number; cls?: string; italic?: boolean },
-  ): SVGElement => {
+  const drawText = (x: number, y: number, str: string, o: TextOpts): SVGElement => {
     // A hard break routes through the rich emitter too (it lays the segments on separate lines),
     // so a `\\` in a context without a pre-wrapped line array (banner, group label, corner) renders
-    // as a break instead of a literal backslash pair.
+    // as a break instead of a literal backslash pair. The layout reserves the height of those lines.
     if (!hasMath(str) && !hasBreak(str)) return text(x, y, str, o);
     const rich = renderRichSvgText(doc, str, {
       x, baselineY: y, anchor: o.anchor, fontFamily: TBL.font, fontSize: o.size, weight: o.weight, fill: o.fill, measure,
@@ -101,6 +84,86 @@ export function renderTableSvg(
     if (o.italic) rich.setAttribute("font-style", "italic");
     return rich;
   };
+  return { el, drawText };
+}
+
+/** How a footnote marker is drawn: `size` px, its baseline `rise` px above the line's. The rise is
+ *  explicit only: no `baseline-shift`, which Chromium applies on top of it when rasterising. */
+type MarkerGeometry = { size: number; rise: number };
+// A cell's marker, as the live `.tbl-table sup` (0.7em, vertical-align: super) under the 13 px body:
+// Blink raises `super` by a third of the parent's size plus 1 px.
+const CELL_MARKER: MarkerGeometry = { size: BODY_FONT * 0.7, rise: BODY_FONT / 3 + 1 };
+// The footnote list's marker, as the live list's <sup> (see layout.ts).
+const LIST_MARKER: MarkerGeometry = { size: FOOTNOTE_MARKER_SIZE, rise: FOOTNOTE_MARKER_RISE };
+
+/** A footnote marker as a superscript <tspan>, shared by the cells and the footnote list. With `at`
+ *  it is placed on that line (x optional, so it can continue the text): its y is the line's
+ *  baseline less the rise. Without it, it continues the text and rises by dy, so nothing may follow
+ *  it in that <text>. */
+function markerTspan(doc: Document, marker: string, g: MarkerGeometry, at?: { x?: number; y: number }): SVGElement {
+  const ts = doc.createElementNS(SVG_NS, "tspan");
+  ts.setAttribute("class", "tbl-table-fn-marker");
+  if (at?.x != null) ts.setAttribute("x", String(at.x));
+  if (at) ts.setAttribute("y", String(at.y - g.rise));
+  ts.setAttribute("font-size", String(g.size));
+  if (!at) ts.setAttribute("dy", String(-g.rise));
+  ts.textContent = marker;
+  return ts;
+}
+
+/** The footnote list as SVG: one <text> per line of `lines` (footnoteListLines), the first
+ *  baseline at `firstBaselineY`, `lineHeight` apart, math rendered. A footnote's first line leads
+ *  with its marker as a superscript and the text follows on the line's baseline, as the live list
+ *  draws `<sup>marker</sup> text`. Shared by the single-pane table body and the multi-pane export,
+ *  so both draw a footnote the same way. */
+export function renderFootnoteLinesSvg(
+  doc: Document,
+  lines: FootnoteLine[],
+  opts: { x: number; firstBaselineY: number; lineHeight: number; measure: Measure },
+): SVGElement[] {
+  const { el, drawText } = svgTextKit(doc, opts.measure);
+  const o: TextOpts = { anchor: "start", weight: FOOTNOTE_LIST_WEIGHT, fill: TBL.color.muted, size: NOTE_FONT };
+  return lines.map((ln, i) => {
+    const y = opts.firstBaselineY + i * opts.lineHeight;
+    if (ln.marker == null) return drawText(opts.x, y, ln.text, o);
+    const marker = markerTspan(doc, ln.marker, LIST_MARKER, { y });
+    if (hasMath(ln.text)) {
+      // The rich text places every tspan absolutely: start it where the marker ends.
+      const markerW = opts.measure(ln.marker, LIST_MARKER.size, o.weight);
+      const t = drawText(opts.x + markerW, y, ln.text, o);
+      t.setAttribute("x", String(opts.x));
+      t.insertBefore(marker, t.firstChild);
+      return t;
+    }
+    const t = drawText(opts.x, y, "", o);
+    t.appendChild(marker);
+    if (ln.text) {
+      const rest = el("tspan", { y });
+      rest.textContent = ln.text;
+      t.appendChild(rest);
+    }
+    return t;
+  });
+}
+
+// Sign coloring (no dedicated structural token; use brand green/red categorical bases).
+const SIGN_POS = tokens.categorical[3]!.base; // green
+const SIGN_NEG = tokens.categorical[4]!.base; // red
+
+export function renderTableSvg(
+  model: TableModel,
+  layout: TableLayout,
+  opts: { document: Document; spec?: TableSpec; measure?: (s: string, fontPx: number, weight: number) => number },
+): SVGSVGElement {
+  const doc = opts.document;
+  const spec = opts.spec;
+  // Text measurer for placing rich (math) runs. Only used on strings that contain math markup;
+  // plain text never reaches it. Falls back to the SSR char-estimate when not supplied (tests).
+  const measure = opts.measure ?? ((s: string, fontPx: number) => s.length * fontPx * 0.6);
+  const headerTierRules = spec?.header_tier_rules === true; // default: no inter-tier rules
+  const spannerRules = spec?.spanner_rules !== false; // default: draw flanking rules
+
+  const { el, drawText } = svgTextKit(doc, measure);
   // Multi-line text. With no math on any line it emits the original single <text> + per-line
   // <tspan> (byte-identical to before); if any line has math, each line becomes its own rich
   // <text> at the same baseline so the math renders correctly.
@@ -136,6 +199,25 @@ export function renderTableSvg(
     rule(x1, y1, x2, y2, TBL.color.border);
   const ruleRow = (x1: number, y1: number, x2: number, y2: number) =>
     rule(x1, y1, x2, y2, TBL.color.gridline);
+  // A cell's footnote marker: a superscript tspan on the cell's last line. `drawn` is the string the
+  // target <text> was drawn from and `baseline` that text's first baseline. After plain text the
+  // marker continues the text, rising by dy, as it always has. After rich text (math or a `\\`) the
+  // last tspan may be a script with its own y, and a stacked script is as wide as its wider half,
+  // so the marker is placed explicitly: right of the last line's measured width, risen from its
+  // baseline.
+  const appendFootnoteMarker = (
+    target: SVGElement, marker: string,
+    at: { drawn: string; x: number; anchor: "start" | "middle" | "end"; baseline: number; weight: number },
+  ): void => {
+    let place: { x: number; y: number } | undefined;
+    if (hasMath(at.drawn) || hasBreak(at.drawn)) {
+      const segs = splitBreaks(at.drawn);
+      const w = richWidth(segs[segs.length - 1]!, BODY_FONT, at.weight, measure);
+      const start = at.anchor === "middle" ? at.x - w / 2 : at.anchor === "end" ? at.x - w : at.x;
+      place = { x: start + w, y: at.baseline + (segs.length - 1) * RICH_BODY_LINE };
+    }
+    target.appendChild(markerTspan(doc, marker, CELL_MARKER, place));
+  };
   // Hairline rule in the lighter border tone, used for the inline flanking rules on banner cells.
   const spannerLine = (x1: number, y1: number, x2: number, y2: number): SVGElement =>
     rule(x1, y1, x2, y2, TBL.color.border);
@@ -163,9 +245,11 @@ export function renderTableSvg(
   const headerG = el("g", { class: "tbl-table-header" });
   const hasSublabel = model.leaves.some((l) => l.sublabel != null);
   // All leaf labels share one bottom baseline (HTML vertical-align:bottom), so multi-line labels
-  // grow upward into the taller leaf tier without disturbing the row of column labels.
-  const leafLabelBottom = layout.headerHeight - (hasSublabel ? SUBLABEL_LINE : 0) - LEAF_BOTTOM_PAD;
-  const sublabelBaseline = layout.headerHeight - SUBLABEL_BOTTOM_PAD;
+  // grow upward into the taller leaf tier without disturbing the row of column labels. A sublabel
+  // with a `\\` break makes every sublabel block that many lines deep (layout.sublabelLines).
+  const sublabelLines = layout.sublabelLines ?? 1;
+  const leafLabelBottom = layout.headerHeight - (hasSublabel ? SUBLABEL_LINE * sublabelLines : 0) - LEAF_BOTTOM_PAD;
+  const sublabelBaseline = layout.headerHeight - SUBLABEL_BOTTOM_PAD - (sublabelLines - 1) * SUBLABEL_LINE;
 
   for (const tier of layout.header) {
     for (const entry of tier) {
@@ -221,8 +305,10 @@ export function renderTableSvg(
           );
         }
       } else {
-        // Banner / upper-tier cell: vertically centered in its rect.
-        const by = rect.y + rect.h / 2 + HEADER_FONT / 3;
+        // Banner / upper-tier cell: vertically centered in its rect. A `\\` label centres its
+        // block of lines (the layout gave the tier a header line per extra line).
+        const bannerLines = breakLineCount(cell.text);
+        const by = rect.y + rect.h / 2 + HEADER_FONT / 3 - ((bannerLines - 1) * HEADER_LINE_HEIGHT) / 2;
         headerG.appendChild(
           drawText(cx, by, cell.text, {
             anchor: "middle",
@@ -235,17 +321,22 @@ export function renderTableSvg(
         // to the cell's edges, to show the columns they govern. Disabled when spanner_rules:false.
         if (cell.colSpan > 1 && spannerRules) {
           const ruleY = rect.y + rect.h / 2;
-          const halfText = measureish(richToPlain(cell.text)) / 2 + PAD_X;
-          headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
-          headerG.appendChild(spannerLine(cx + halfText, ruleY, rect.x + rect.w - PAD_X, ruleY));
+          const { half: halfText, minRule } = bannerRuleHalf(cell.text, rect, measure);
+          // Never inverted: with no room beside the label (the banner fit can size a cell to exactly
+          // label + gaps) there is no rule; a live flex rule with no room shrinks to nothing too.
+          if (rect.w / 2 - halfText - PAD_X >= minRule) {
+            headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
+            headerG.appendChild(spannerLine(cx + halfText, ruleY, rect.x + rect.w - PAD_X, ruleY));
+          }
         }
       }
     }
   }
   // Stub corner label (stub_header), left-aligned and bottom-aligned with the leaf headers.
   if (model.stubHeader) {
+    const cornerLines = breakLineCount(model.stubHeader);
     headerG.appendChild(
-      drawText(PAD_X, leafLabelBottom, model.stubHeader, {
+      drawText(PAD_X, leafLabelBottom - (cornerLines - 1) * HEADER_LINE_HEIGHT, model.stubHeader, {
         anchor: "start",
         weight: 700,
         fill: TBL.color.heading,
@@ -271,6 +362,7 @@ export function renderTableSvg(
   layout.rows.forEach((entry, idx) => {
     if ("group" in entry) {
       const { group, rect, noteLines, topGap, isFirst } = entry;
+      const labelExtra = ((entry.labelLines ?? 1) - 1) * STUB_LINE_HEIGHT; // `\\` lines in the label
       const g = el("g", { class: "tbl-table-group" });
       // Divider above the group (medium border tone); the first group has no rule (HTML).
       if (!isFirst) g.appendChild(ruleGroup(0, rect.y, layout.totalWidth, rect.y));
@@ -301,7 +393,7 @@ export function renderTableSvg(
       // Group note: italic + muted, wrapped onto its own line(s) below the label.
       noteLines.forEach((ln, li) => {
         g.appendChild(
-          drawText(x, labelBaseline + GROUP_NOTE_GAP + NOTE_FONT + li * GROUP_NOTE_LINE_HEIGHT, ln, {
+          drawText(x, labelBaseline + labelExtra + GROUP_NOTE_GAP + NOTE_FONT + li * GROUP_NOTE_LINE_HEIGHT, ln, {
             anchor: "start",
             weight: 400,
             fill: TBL.color.muted,
@@ -383,15 +475,25 @@ export function renderTableSvg(
       const align = columnAlignOf(spec, model.leaves[i]!.lastValue);
       if (cell.isText) {
         const { x: tx, anchor } = align ? alignedX(cr, align) : { x: cr.x + PAD_X, anchor: "start" as const };
+        const drawn: SVGElement[] = [];
         if (cellLines && cellLines.length > 1) {
           const blockH = (cellLines.length - 1) * STUB_LINE_HEIGHT;
           const firstBaseline = cr.y + cr.h / 2 - blockH / 2 + BODY_FONT / 3;
-          for (const el2 of drawLines(cellLines, tx, firstBaseline, STUB_LINE_HEIGHT, {
+          drawn.push(...drawLines(cellLines, tx, firstBaseline, STUB_LINE_HEIGHT, {
             anchor, weight, fill: TBL.color.text, size: BODY_FONT,
-          })) cg.appendChild(el2);
+          }));
         } else {
-          cg.appendChild(drawText(tx, baseY, cell.text, { anchor, weight, fill: TBL.color.text, size: BODY_FONT }));
+          drawn.push(drawText(tx, baseY, cell.text, { anchor, weight, fill: TBL.color.text, size: BODY_FONT }));
         }
+        // The marker follows the cell's last drawn line, as the live <sup> follows its text.
+        if (cell.footnote != null) {
+          const multi = cellLines != null && cellLines.length > 1;
+          const blockH = multi ? (cellLines.length - 1) * STUB_LINE_HEIGHT : 0;
+          appendFootnoteMarker(drawn[drawn.length - 1]!, cell.footnote, multi
+            ? { drawn: cellLines[cellLines.length - 1]!, x: tx, anchor, weight, baseline: cr.y + cr.h / 2 + blockH / 2 + BODY_FONT / 3 }
+            : { drawn: cell.text, x: tx, anchor, weight, baseline: baseY });
+        }
+        for (const d of drawn) cg.appendChild(d);
         rg.appendChild(cg);
         return;
       }
@@ -403,9 +505,7 @@ export function renderTableSvg(
         size: BODY_FONT,
       });
       if (cell.footnote != null) {
-        const sup = el("tspan", { "baseline-shift": "super", "font-size": SUBLABEL_FONT, dy: FOOTNOTE_DY });
-        sup.textContent = cell.footnote;
-        t.appendChild(sup);
+        appendFootnoteMarker(t, cell.footnote, { drawn: cell.text, x: num.x, anchor: num.anchor, weight, baseline: baseY });
       }
       cg.appendChild(t);
       rg.appendChild(cg);
@@ -426,16 +526,10 @@ export function renderTableSvg(
   if (model.footnotes.length > 0) {
     const bodyBottom = layout.totalHeight - layout.footnotesHeight;
     const fg = el("g", { class: "tbl-table-footnotes" });
-    model.footnotes.forEach((fn, i) => {
-      const y = bodyBottom + FOOTNOTE_TOP_GAP + i * FOOTNOTE_LINE_HEIGHT + NOTE_FONT;
-      const t = drawText(PAD_X, y, `${fn.marker} ${fn.text}`, {
-        anchor: "start",
-        weight: 400,
-        fill: TBL.color.muted,
-        size: NOTE_FONT,
-      });
-      fg.appendChild(t);
-    });
+    const lines = layout.footnoteLines ?? footnoteListLines(model.footnotes);
+    for (const t of renderFootnoteLinesSvg(doc, lines, {
+      x: PAD_X, firstBaselineY: bodyBottom + FOOTNOTE_TOP_GAP + NOTE_FONT, lineHeight: FOOTNOTE_LINE_HEIGHT, measure,
+    })) fg.appendChild(t);
     svg.appendChild(fg);
   }
 
@@ -449,8 +543,21 @@ function alignedX(r: CellRect, align: ColumnAlign): { x: number; anchor: "start"
   return { x: r.x + r.w / 2, anchor: "middle" };
 }
 
-// Deterministic rough text width for placing the flanking rules on a banner cell (no canvas
-// needed; matches the test's measureText heuristic of ~7px/char).
-function measureish(s: string): number {
-  return s.length * 7;
+// Shortest flanking rule worth drawing (px); anything shorter is dropped rather than drawn as a dot.
+const MIN_RULE = 1;
+
+/** Half the width the flanking rules leave clear around a banner label (label half-width + gap).
+ *
+ *  The rules were placed by a 7 px/char estimate over the raw string. That estimate is kept where it
+ *  draws a sound rule, so those banners are unchanged; the label's measured width is used instead
+ *  when the label has a `\\` break (the estimate counted every line, and the break token), or
+ *  when the estimate is wrong enough to break the rule: it leaves the rule no room (the rule would
+ *  run backwards, x1 > x2) or it puts the rule's inner end inside the label (it would cross the text). */
+function bannerRuleHalf(label: string, rect: CellRect, measure: Measure): { half: number; minRule: number } {
+  const measured = richWidth(label, HEADER_FONT, 700, measure);
+  const estimatedHalf = (richToPlain(label).length * 7) / 2 + PAD_X;
+  const room = rect.w / 2 - PAD_X; // from the cell centre to the rule's outer end
+  const estimateSound = !hasBreak(label) && estimatedHalf <= room && estimatedHalf >= measured / 2;
+  // A sound estimate draws exactly the rule it always drew; a measured one drops a sub-pixel rule.
+  return estimateSound ? { half: estimatedHalf, minRule: 0 } : { half: measured / 2 + PAD_X, minRule: MIN_RULE };
 }

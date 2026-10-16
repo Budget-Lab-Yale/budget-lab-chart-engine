@@ -2,14 +2,17 @@
 // every level so a typo is caught loudly instead of silently ignored.
 //
 // This must stay in lockstep with spec/table-types.ts (the TS contract). Both describe
-// the same shape; the type is for authoring, the schema for runtime validation.
+// the same shape; the type is for authoring, the schema for runtime validation. Gated by
+// test/types-schema-sync.test.ts (types) and test/schema-doc-coverage.test.ts (CONFIG-SPEC.md).
 
 const FORMAT_RULE = {
   type: "object",
   additionalProperties: false,
   properties: {
     type: { type: "string", enum: ["number", "percent", "currency"] },
-    decimals: { type: "number" },
+    // Integer 0–10, the chart `decimals` bound: table/format.ts hands it to Number#toFixed, which
+    // throws a RangeError outside 0–100 and silently truncates a fraction.
+    decimals: { type: "integer", minimum: 0, maximum: 10 },
     thousands: { type: "boolean" },
     signColor: { type: "boolean" },
     prefix: { type: "string" },

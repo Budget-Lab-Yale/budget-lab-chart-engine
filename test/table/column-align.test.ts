@@ -28,12 +28,12 @@ const ROWS = [
 
 function html(spec: TableSpec): HTMLTableElement {
   const m = buildTableModel(spec, ROWS);
-  const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+  const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
   return renderTableHtml(m, l, document, spec);
 }
 function svg(spec: TableSpec): SVGSVGElement {
   const m = buildTableModel(spec, ROWS);
-  const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+  const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
   return renderTableSvg(m, l, { document, spec, measure: measureText });
 }
 const colOf = (t: HTMLTableElement, key: string) =>
@@ -66,13 +66,18 @@ describe("column_align — live HTML", () => {
     const th = Array.from(t.querySelectorAll("thead th")).find((e) => e.textContent === "Value")!;
     expect(th.classList.contains("is-align-center")).toBe(true);
     // The unnamed column is untouched.
+    expect(colOf(t, "Source").length).toBeGreaterThan(0);
     for (const td of colOf(t, "Source")) expect(td.className).not.toContain("is-align-");
   });
 
   it("a single value applies to every data column but never the stub", () => {
     const t = html({ ...SPEC, column_align: "right" });
-    for (const td of t.querySelectorAll("tbody td")) expect(td.classList.contains("is-align-right")).toBe(true);
-    for (const th of t.querySelectorAll("th.tbl-table-stub, th.tbl-table-stub-header")) {
+    const cells = t.querySelectorAll("tbody td");
+    const stubs = t.querySelectorAll("th.tbl-table-stub, th.tbl-table-stub-header");
+    expect(cells.length).toBeGreaterThan(0);
+    expect(stubs.length).toBeGreaterThan(0);
+    for (const td of cells) expect(td.classList.contains("is-align-right")).toBe(true);
+    for (const th of stubs) {
       expect(th.className).not.toContain("is-align-");
     }
   });
@@ -92,7 +97,7 @@ describe("column_align — PNG export (SVG)", () => {
   it("right-aligns a text cell at the cell's right inset", () => {
     const spec: TableSpec = { ...SPEC, column_align: { Value: "right" } };
     const m = buildTableModel(spec, ROWS);
-    const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+    const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
     const vi = m.leaves.findIndex((x) => x.lastValue === "Value");
     const s = renderTableSvg(m, l, { document, spec, measure: measureText });
     const t = cellTexts(s).find((e) => e.textContent === "100% / 50%")!;
@@ -103,7 +108,7 @@ describe("column_align — PNG export (SVG)", () => {
   it("left-aligns a numeric cell and its header at the left inset", () => {
     const spec: TableSpec = { ...SPEC, column_align: { Value: "left" } };
     const m = buildTableModel(spec, ROWS);
-    const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+    const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
     const vi = m.leaves.findIndex((x) => x.lastValue === "Value");
     const s = renderTableSvg(m, l, { document, spec, measure: measureText });
     const numText = (m.body.find((b) => b.kind === "row") as any).row.cells[vi].text as string;
@@ -118,7 +123,7 @@ describe("column_align — PNG export (SVG)", () => {
   it("centers a text cell on the column", () => {
     const spec: TableSpec = { ...SPEC, column_align: { Value: "center" } };
     const m = buildTableModel(spec, ROWS);
-    const l = layoutTable(m, { width: 800, measureText, ...layoutOptionsFromSpec(spec) });
+    const l = layoutTable(m, { measureText, ...layoutOptionsFromSpec(spec) });
     const vi = m.leaves.findIndex((x) => x.lastValue === "Value");
     const t = cellTexts(renderTableSvg(m, l, { document, spec, measure: measureText }))
       .find((e) => e.textContent === "100% / 50%")!;

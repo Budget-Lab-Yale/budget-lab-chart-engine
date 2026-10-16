@@ -6,7 +6,9 @@
 // silently ignored.
 //
 // This must stay in lockstep with spec/types.ts (the TS contract). Both describe the same
-// shape; the type is for authoring, the schema for runtime validation.
+// shape; the type is for authoring, the schema for runtime validation. test/types-schema-sync.test.ts
+// gates the two agreeing, and test/schema-doc-coverage.test.ts gates every field being in CONFIG-SPEC.md.
+import { Y_BOUND_LIMIT } from "./defaults";
 
 // Shared annotation fragments — reused by the legacy axis policies AND the unified `annotations`
 // block, so both accept the same shapes.
@@ -134,10 +136,9 @@ const X_AXIS_POLICY = {
   },
 } as const;
 
-/** The largest |yAxisPolicy.min| / |max| accepted (Ruling 74). A lone bound's open end is placed past
- *  it, clamped to ±Number.MAX_VALUE; this keeps that end strictly past the bound, so the axis ascends.
- *  validate.ts formats the error. */
-export const Y_BOUND_LIMIT = 1e300;
+/** The largest |yAxisPolicy.min| / |max| accepted — see spec/defaults.ts. Re-exported here, where
+ *  it has always been exported from. */
+export { Y_BOUND_LIMIT };
 
 const Y_AXIS_POLICY = {
   type: "object",
@@ -541,7 +542,10 @@ export const CHART_SPEC_SCHEMA = {
       type: "object",
       additionalProperties: false,
       properties: {
-        bins: { type: "number" },
+        // A positive integer: the binner reads bins <= 0 as "auto" and draws a fractional count's
+        // width, so either would publish a differently binned chart without a word. binWidth's
+        // value rules depend on xAxisType and live in validate.ts (histogramSpecError).
+        bins: { type: "integer", minimum: 1 },
         binWidth: { anyOf: [{ type: "number" }, { type: "string" }] },
         domain: { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 },
         normalize: { type: "string", enum: ["none", "proportion", "density"] },

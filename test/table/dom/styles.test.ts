@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // No DOM needed — just asserts that key class/property strings appear in the CSS string.
 import { describe, it, expect } from "vitest";
 import { CHART_CSS } from "../../../src/embed/styles";

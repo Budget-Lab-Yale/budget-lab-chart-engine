@@ -239,6 +239,7 @@ describe("other coordinated-cursor elements found in the audit (issue #30)", () 
       xField: "time",
       yField: "value",
       seriesField: "series",
+      xParse: (v) => +new Date(String(v)),
       colors: new Map([["A", "#f00"]]),
     });
     drive(+new Date("2021-01-01"));

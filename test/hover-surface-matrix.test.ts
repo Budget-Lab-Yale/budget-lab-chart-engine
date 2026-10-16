@@ -166,8 +166,8 @@ function observe(svg: SVGSVGElement): Cell {
 //     dials: they decide where the rows are drawn (fy facets with header spacers), which is the
 //     thing those rows measure the hover against;
 //   - `orientation: vertical` on the second dumbbell fixture, also layout: a horizontal chart (the
-//     sectioned stacks, and a dumbbell, which is horizontal by default) draws its facets as groups in
-//     one chart (spec/facet-groups.ts), so it has no 2-pane cell, and the vertical dumbbell is the one
+//     sectioned stacks, and a dumbbell, which is horizontal by default) rejects columns.facet
+//     (spec/facet-groups.ts), so it has no 2-pane cell, and the vertical dumbbell is the one
 //     that measures a dumbbell's panes.
 // Adding anything outside that inventory breaks the file's premise.
 //
@@ -307,7 +307,7 @@ const sectionedStack = (f: boolean, series: Array<[string, number, number, numbe
 
 type Mount = { spec: ChartSpec; rows: TidyRow[]; hover: (svg: SVGSVGElement) => void };
 
-/** `panes: false`: a horizontal chart, which draws its facets as groups, so it has no 2-pane cell. */
+/** `panes: false`: a horizontal chart, which rejects columns.facet, so it has no 2-pane cell. */
 const TYPES: Array<{ name: string; mount: (f: boolean) => Mount; panes?: false }> = [
   {
     name: "bar (plain)",

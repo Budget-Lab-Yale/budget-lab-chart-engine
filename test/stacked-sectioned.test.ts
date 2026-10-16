@@ -22,6 +22,7 @@ import { mockRect1to1, cardShown, cardText, coordTexts } from "./helpers/hover-h
 import type { BandHoverCtx } from "../src/engine/crosshair";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => {
@@ -76,18 +77,6 @@ const tallRows = (neg: boolean): TidyRow[] =>
   ) as unknown as TidyRow[];
 
 // --- geometry readers (jsdom has no layout: attributes + ancestor translates) ---
-function translateOf(el: Element, svg: Element): [number, number] {
-  let x = 0;
-  let y = 0;
-  for (let n: Element | null = el; n && n !== svg; n = n.parentElement) {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) {
-      x += Number(m[1]);
-      y += Number(m[2]);
-    }
-  }
-  return [x, y];
-}
 type Box = { x: number; y: number; w: number; h: number };
 const rectBox = (r: Element, svg: Element): Box => {
   const [tx, ty] = translateOf(r.parentElement!, svg);
@@ -177,7 +166,9 @@ describe("sectioned horizontal stack: layout", () => {
   it("tags every segment with the series it is painted as (legend pin/dim)", () => {
     const svg = render(SPEC, POS);
     const fillOf = new Map<string, string>();
-    for (const r of Array.from(svg.querySelectorAll('g[aria-label="bar"] rect'))) {
+    const segs = Array.from(svg.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(segs.length).toBeGreaterThan(0);
+    for (const r of segs) {
       const s = r.getAttribute("data-series")!;
       expect(SERIES).toContain(s);
       if (!fillOf.has(s)) fillOf.set(s, r.getAttribute("fill")!);

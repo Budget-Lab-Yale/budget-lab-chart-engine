@@ -13,21 +13,14 @@
 // through the same real-browser path; the explicit opt-in case guards against a future change that
 // makes the opt-out the only route to this markup.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
-import { chromium, type Browser, type Page } from "playwright";
+import { readFileSync } from "node:fs";
+import type { Browser, Page } from "playwright";
 import { PNG } from "pngjs";
 import { BUNDLE_PATH } from "./setup/global-build";
 import { CHART_CSS } from "../src/embed/styles";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
-
-const HAS_BROWSER = (() => {
-  try {
-    return existsSync(chromium.executablePath());
-  } catch {
-    return false;
-  }
-})();
+import { HAS_BROWSER, launchBrowser, closeBrowser, CLOSE_HOOK_TIMEOUT_MS } from "./helpers/browser";
 
 // This file launches a real Chromium via Playwright, which flakes under parallel test-file load
 // (contending for CPU with the rest of the suite's worker threads) — the suite's 5s/10s defaults
@@ -90,11 +83,9 @@ function stripLuminance(png: PNG, yDevice: number, rowsTall = 1): number {
 
 let browser: Browser;
 beforeAll(async () => {
-  browser = await chromium.launch();
+  browser = await launchBrowser();
 }, 60000);
-afterAll(async () => {
-  await browser?.close();
-});
+afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
 /** Mount `spec` in a real page, hover the (single, dark) bar, and return the live `.tbl-tooltip`
  *  locator plus the DPR-scaled screenshot PNG, once the tooltip is showing. */

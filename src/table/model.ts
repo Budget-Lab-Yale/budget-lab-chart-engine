@@ -1,10 +1,16 @@
 import type { TableSpec } from "../spec/table-types";
 import type { TidyRow } from "../data/index";
 import { ownValue } from "../spec/own-key";
-import { resolveFormat, formatCell } from "./format";
+import { resolveFormat, formatCell, formattedSign } from "./format";
 
 export interface LeafColumn { key: string; path: string[]; lastValue: string; label: string; sublabel?: string; isText?: boolean; }
-export interface HeaderCell { text: string; colSpan: number; rowSpan: number; leafKey?: string; }
+export interface HeaderCell {
+  text: string; colSpan: number; rowSpan: number; leafKey?: string;
+  /** Index of the first leaf column the cell spans. A tier skips the leaves whose blank tier is
+   *  absorbed from below, so the cells of a tier are NOT contiguous and a running colSpan sum
+   *  cannot place them; this is the cell's column. */
+  start: number;
+}
 export interface Cell { value: number | null; text: string; isText?: boolean; emphasis?: boolean; footnote?: string; signClass?: "pos" | "neg" }
 export interface BodyRow {
   stubPath: string[]; label: string; level: number; groupKeys: string[]; cells: Cell[]; emphasis?: boolean;
@@ -234,7 +240,7 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       const text = isLeafBottom
         ? leaf.label
         : (ownValue(spec.header_labels, rawValue) ?? rawValue);
-      const cell: HeaderCell = { text, colSpan, rowSpan };
+      const cell: HeaderCell = { text, colSpan, rowSpan, start: i };
       if (isLeafBottom) cell.leafKey = leaf.key;
       headerRows[t]!.push(cell);
 
@@ -382,9 +388,9 @@ export function buildTableModel(spec: TableSpec, rows: TidyRow[]): TableModel {
       // Sign coloring. `rule.signColor` already folds in the global default (resolveFormat), so a
       // per-column `signColor:false` correctly wins over global `sign_color:true`. Test the resolved
       // rule ONLY — ORing the global flag back in here would defeat that per-column override.
-      if (rule.signColor && value != null && value !== 0) {
-        cell.signClass = value > 0 ? "pos" : "neg";
-      }
+      // The sign is the DISPLAYED one (after rounding), so a cell printing "0.0" stays uncoloured.
+      const sign = rule.signColor ? formattedSign(value, rule) : 0;
+      if (sign !== 0) cell.signClass = sign > 0 ? "pos" : "neg";
       return cell;
     });
 

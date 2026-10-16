@@ -7,7 +7,7 @@
 // and on unmount (the old tile's pointerleave never fires once its svg is gone).
 import { tokens } from "../theme/tokens";
 import { escapeHtml } from "./util";
-import { getSharedTooltip, LABEL_VALUE_GAP } from "./crosshair";
+import { getSharedTooltip, tooltipOwnership, listen, LABEL_VALUE_GAP, type HoverDetach } from "./crosshair";
 import { formatTreemapShare, formatTreemapValue, resolveTreemapConfig } from "../spec/treemap";
 import type { TreemapTileInfo } from "./marks/treemap";
 import type { ChartSpec } from "../spec/types";
@@ -56,17 +56,19 @@ function cardHtml(t: TreemapTileInfo, spec: ChartSpec): string {
 
 /** Wire hover on every `rect.tbl-treemap-tile`, paired by index with `tiles` (renderTreemap's
  *  `treemapTiles`, same DOM order). Listeners sit on the tile's `<g>`, so moving onto its label
- *  does not count as leaving the tile. Returns `hide`: clears this chart's hover state and hides the
- *  card if this chart is the one showing it (the card is shared, so another chart's is left alone). */
+ *  does not count as leaving the tile. Returns its HoverDetach (crosshair.ts): removes the tile
+ *  listeners, clears this chart's hover state and hides the card if this chart is the one showing it
+ *  (the card is shared, so another chart's is left alone). */
 export function attachTreemapHover(
   svg: SVGSVGElement,
   opts: { tiles: TreemapTileInfo[]; spec: ChartSpec; showTooltip: boolean; tooltipContainer?: HTMLElement },
-): () => void {
+): HoverDetach {
   const doc = svg.ownerDocument;
   const rects = Array.from(svg.querySelectorAll<SVGRectElement>("rect.tbl-treemap-tile"));
   if (!rects.length) return () => {};
   const tip = opts.showTooltip ? getSharedTooltip(doc, opts.tooltipContainer) : null;
-  let showing = false;
+  const card = tooltipOwnership(tip);
+  const unlisteners: Array<() => void> = [];
   const targets = rects.map((r) => (r.parentElement ?? r) as unknown as SVGElement);
   const baseOpacity = targets.map((g) => g.getAttribute("opacity"));
   let outline: SVGRectElement | null = null;
@@ -83,8 +85,7 @@ export function attachTreemapHover(
 
   const hide = (): void => {
     clear();
-    if (tip && showing) tip.style.opacity = "0";
-    showing = false;
+    card.release();
   };
 
   const place = (evt: PointerEvent): void => {
@@ -124,13 +125,17 @@ export function attachTreemapHover(
       outline = o;
       if (!tip) return;
       tip.innerHTML = cardHtml(t, opts.spec);
-      tip.style.opacity = "1";
-      showing = true;
+      card.show();
       place(evt);
     };
-    target.addEventListener("pointerenter", show as EventListener);
-    target.addEventListener("pointermove", place as EventListener);
-    target.addEventListener("pointerleave", hide);
+    unlisteners.push(listen(target, {
+      pointerenter: show as EventListener,
+      pointermove: place as EventListener,
+      pointerleave: hide,
+    }));
   });
-  return hide;
+  return () => {
+    for (const off of unlisteners) off();
+    hide();
+  };
 }

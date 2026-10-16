@@ -8,7 +8,7 @@
 // It is also the only check that exercises the BUILT dist/ end to end: the vitest
 // suite imports from src/, so it would pass even if the build emitted a broken
 // bundle — and dist/ is what consumers get, since they install by git tag and
-// rebuild via `prepare`. CI runs browser-free, so this stays a local gate.
+// rebuild via `prepare`. CI runs it after `npm test`, inside the Playwright container image.
 //
 // Run AFTER `npm run build`:
 //   npm run build && npm run snapshot:selftest

@@ -1,6 +1,6 @@
 // The one walk that answers "what colour is this element ACTUALLY painted?". Kept in its own
 // module (no engine deps) so the two layers that need the answer — the hatch grounding in
-// `assemble-plot.ts` and the tooltip swatches in `crosshair.ts` — share a single boundary rule
+// `assemble-plot.ts` and the tooltip swatches in `crosshair/*.ts` — share a single boundary rule
 // instead of hand-copied loops that drifted. Three copies drifted before this module existed
 // (`render-live.ts` carried the third, feeding a colour-only tooltip recolour that has since been
 // deleted along with it): two inspected the root `<svg>` and one did not, which is exactly the

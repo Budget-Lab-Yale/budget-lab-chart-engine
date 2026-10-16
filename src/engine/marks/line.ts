@@ -6,12 +6,14 @@ import { Plot } from "../vendor";
 import { TBL, markerSymbolForSeries, MARK_LINE_POINT_R, MARK_LINE_POINT_PANE_R } from "../theme";
 import { resolveColorOr } from "../palette";
 import { buildShadeRuns } from "../shade";
+import { SHADE_FILL_OPACITY } from "../annotation-paint";
 import { labelMovedToLegend, annotationKey } from "../annotation-legend";
 import type { ShadeXField } from "../shade";
 import { domainBounds } from "../scales";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { splitProjectedRuns } from "./projected";
+import { groupEmissionOrder } from "./emission-order";
 
 /** Stamped on every `shading` fill group so tagging (and any future styling) can address the fills
  *  without catching confidence bands, which render as `g[aria-label="area"]` too. Plot puts `class`
@@ -19,22 +21,13 @@ import { splitProjectedRuns } from "./projected";
  *  selectors. */
 export const SHADE_CLASS = "tbl-shade";
 
-/** Shading is the subject of the chart, not chrome behind it, so it reads at half opacity rather than
- *  the confidence-band tint (0.18) it originally borrowed. Override per region with `fillOpacity`.
- *  Note two overlapping regions compound — 0.5 over 0.5 renders as 0.75. */
-const SHADE_FILL_OPACITY = 0.5;
 
 export function buildLineMarks(
   data: PreparedRow[],
   spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const { xField, colors, fxField, fyField } = ctx;
-
-  // Shared-mode small multiples: when the orchestrator supplies facet field names, every mark
-  // binds `fx`/`fy` so it faces into the grid. Absent → no facet channels → single frame.
-  const facetChannels =
-    fxField && fyField ? { fx: fxField, fy: fyField } : {};
+  const { xField, colors } = ctx;
 
   // Lines render at the full weight in panes too (matches single charts) for legibility.
   const solidStroke = TBL.strokeWidth.solid;
@@ -95,7 +88,6 @@ export function buildLineMarks(
             fill,
             fillOpacity: region.fillOpacity ?? SHADE_FILL_OPACITY,
             className: SHADE_CLASS,
-            ...facetChannels,
             ...clipOpt,
           }),
         );
@@ -122,7 +114,6 @@ export function buildLineMarks(
           y2: "_hi",
           fill: bandColor,
           fillOpacity: 0.18,
-          ...facetChannels,
           ...clipOpt,
         },
       ),
@@ -137,6 +128,11 @@ export function buildLineMarks(
   }
   const dashedData = data.filter((r) => dashedNames.has(r.series));
   const solidData = data.filter((r) => !dashedNames.has(r.series));
+  // Mirrors Plot's own y-channel definedness test: Plot draws no path for a z group with no finite
+  // scaled y, and the path tagging below counts groups by this predicate. The marks' `defined`
+  // option is inert in Plot 0.6.16 (it decides from the scaled x/y values alone). Unguarded: a group
+  // with finite y but no valid x draws no path yet is still counted here.
+  const definedY = (r: PreparedRow): boolean => Number.isFinite(r._y);
 
   const overlay: unknown[] = [];
   if (dashedData.length) {
@@ -148,8 +144,7 @@ export function buildLineMarks(
         stroke: "series",
         strokeWidth: dashedStroke,
         strokeDasharray: TBL.dashArray,
-        defined: (r: PreparedRow) => Number.isFinite(r._y),
-        ...facetChannels,
+        defined: definedY,
         ...clipOpt,
       }),
     );
@@ -188,8 +183,7 @@ export function buildLineMarks(
           stroke: "series",
           strokeWidth: solidStroke,
           ...(projDashed ? { strokeDasharray: TBL.dashArray } : {}),
-          defined: (r: PreparedRow) => Number.isFinite(r._y),
-          ...facetChannels,
+          defined: definedY,
           ...clipOpt,
         }),
       );
@@ -202,8 +196,7 @@ export function buildLineMarks(
           z: "_seg",
           stroke: "series",
           strokeWidth: solidStroke,
-          defined: (r: PreparedRow) => Number.isFinite(r._y),
-          ...facetChannels,
+          defined: definedY,
           ...clipOpt,
         }),
       );
@@ -216,8 +209,7 @@ export function buildLineMarks(
         z: "series",
         stroke: "series",
         strokeWidth: solidStroke,
-        defined: (r: PreparedRow) => Number.isFinite(r._y),
-        ...facetChannels,
+        defined: definedY,
         ...clipOpt,
       }),
     );
@@ -242,7 +234,6 @@ export function buildLineMarks(
         r: ctx.pane ? MARK_LINE_POINT_PANE_R : MARK_LINE_POINT_R,
         stroke: "#ffffff",
         strokeWidth: 1,
-        ...facetChannels,
         ...clipOpt,
       }),
     );
@@ -251,22 +242,17 @@ export function buildLineMarks(
   // Path encounter order within each line group, so post-render path tagging maps each
   // <path data-series> correctly even when several groups share a color. `g[aria-label="line"]
   // path` returns all line paths in document order, matching the overlay's paint order above.
-  // Plot emits one <path> per unique z-group value (in the z-group's first-appearance order in
-  // its call's data), so the tagging key must be the z FIELD actually used by that call: plain
-  // "series" for the unsplit dashed/solid groups, "_seg" (falling back to "series") once
-  // projected_field splits solidData into multiple per-run paths per series — each unique _seg
-  // is its own path and must get its own (repeated) series tag.
+  // Plot emits one <path> per z group with at least one defined point, in the group's
+  // first-appearance order in its call's data (marks/emission-order.ts), so the tagging key must be
+  // the z FIELD actually used by that call: plain "series" for the unsplit dashed/solid groups,
+  // "_seg" (falling back to "series") once projected_field splits solidData into multiple per-run
+  // paths per series — each unique _seg is its own path and must get its own (repeated) series tag.
+  // A series with no finite value draws no path, so it takes no tag; counting it shifted every later
+  // path's tag by one.
   const encounterOrder = (rs: PreparedRow[], keyField: "series" | "_seg" = "series"): string[] => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const r of rs) {
-      const key = keyField === "_seg" ? ((r as PreparedRow & { _seg?: string })._seg ?? r.series) : r.series;
-      if (!seen.has(key)) {
-        seen.add(key);
-        out.push(r.series);
-      }
-    }
-    return out;
+    const zOf = (r: PreparedRow): string =>
+      keyField === "_seg" ? ((r as PreparedRow & { _seg?: string })._seg ?? r.series) : r.series;
+    return groupEmissionOrder(rs, zOf, definedY).map((r) => r.series);
   };
   const seriesOrder: string[] = [];
   if (dashedData.length) seriesOrder.push(...encounterOrder(dashedData));

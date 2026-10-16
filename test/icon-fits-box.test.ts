@@ -12,7 +12,7 @@
 // to corner, are defined by spanning it and are trimmed at the frame deliberately — that trimming is
 // what makes the `/` glyph read as three bands.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 import { PNG } from "pngjs";
 import {
   ICON_BOX,
@@ -26,14 +26,13 @@ import {
 import { symbolPathD } from "../src/engine/symbols";
 import { MARKER_SYMBOLS } from "../src/engine/theme";
 import { resolveHatch } from "../src/engine/hatch";
+import { launchBrowser, closeBrowser, CLOSE_HOOK_TIMEOUT_MS } from "./helpers/browser";
 
 let browser: Browser;
 beforeAll(async () => {
-  browser = await chromium.launch();
+  browser = await launchBrowser();
 }, 60000);
-afterAll(async () => {
-  await browser?.close();
-});
+afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
 const svgFor = (prims: string) =>
   `<svg width="${ICON_BOX}" height="${ICON_BOX}" viewBox="0 0 ${ICON_BOX} ${ICON_BOX}">${prims}</svg>`;

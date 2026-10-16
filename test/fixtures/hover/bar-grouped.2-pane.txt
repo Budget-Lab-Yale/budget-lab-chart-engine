@@ -1,0 +1,47 @@
+# card
+(no card)
+# pane 0 (hovered)
+<rect class="tbl-band-crosshair-hit" x="0" y="0" width="432" height="320" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
+<g class="tbl-hl-pills" opacity="0" style="pointer-events: none;"/>
+<g class="tbl-coord" opacity="1" style="pointer-events: none;">
+  <rect class="tbl-coord-region" x="61.5" y="18" width="169" height="280" fill="#BBBBBB" opacity="0.12"/>
+  <rect class="tbl-coord-axis-label" x="138.745" y="303.25" width="14.51" height="14.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-axis-label-text" x="146" y="310.5" dy="0.32em" text-anchor="middle" fill="#1A1A2E" font-size="10.5" font-weight="700">
+    "A"
+  </text>
+  <rect class="tbl-coord-pill" x="95.48" y="41.250000000000014" width="34.04" height="15.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-pill-text" x="112.5" y="49.000000000000014" dy="0.32em" text-anchor="middle" fill="#0072B2" font-size="10.5" font-weight="700">
+    "6.00"
+  </text>
+  <rect class="tbl-coord-pill" x="162.48" y="121.25" width="34.04" height="15.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-pill-text" x="179.5" y="129" dy="0.32em" text-anchor="middle" fill="#E69F00" font-size="10.5" font-weight="700">
+    "4.00"
+  </text>
+</g>
+# pane 1
+<rect class="tbl-band-crosshair-hit" x="0" y="0" width="390" height="320" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
+<g class="tbl-hl-pills" opacity="0" style="pointer-events: none;"/>
+<g class="tbl-coord" opacity="1" style="pointer-events: none;">
+  <rect class="tbl-coord-region" x="19.5" y="18" width="169" height="280" fill="#BBBBBB" opacity="0.12"/>
+  <rect class="tbl-coord-pill" x="53.480000000000004" y="161.25" width="34.04" height="15.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-pill-text" x="70.5" y="169" dy="0.32em" text-anchor="middle" fill="#0072B2" font-size="10.5" font-weight="600">
+    "3.00"
+  </text>
+  <rect class="tbl-coord-pill" x="120.48" y="201.25" width="34.04" height="15.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-pill-text" x="137.5" y="209" dy="0.32em" text-anchor="middle" fill="#E69F00" font-size="10.5" font-weight="600">
+    "2.00"
+  </text>
+</g>
+# onHover (last payload)
+{
+  "category": "A",
+  "series": [
+    "Up",
+    "Down"
+  ],
+  "values": {
+    "Up": 6,
+    "Down": 4
+  },
+  "facet": "P1"
+}

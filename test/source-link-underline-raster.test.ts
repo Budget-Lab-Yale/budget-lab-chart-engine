@@ -2,30 +2,23 @@
 //
 // The export draws a link as an SVG <tspan text-decoration="underline">, and the download pipeline
 // is XMLSerializer → SVG Blob → <img> → canvas. A DOM assertion that the attribute is present says
-// nothing about whether that pipeline paints it: this codebase already documents the same rasterizer
-// silently ignoring `baseline-shift`. So the attribute test in source-links-render.test.ts is
+// nothing about whether that pipeline paints it, or paints it as the attribute suggests: the
+// table's footnote markers once rose twice as far in the PNG as live, because the rasterizer applies
+// `baseline-shift` on top of an explicit offset. So the attribute test in source-links-render.test.ts is
 // necessary and NOT sufficient, and this file is the sufficient half.
 //
 // If this ever fails, the fix is not to delete the assertion — it is to draw the underline as an
 // explicit <line> under each link run, which the rasterizer cannot ignore.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { existsSync } from "node:fs";
-import { chromium, type Browser } from "playwright";
+import type { Browser } from "playwright";
 import { PNG } from "pngjs";
-
-const HAS_BROWSER = (() => {
-  try {
-    return existsSync(chromium.executablePath());
-  } catch {
-    return false;
-  }
-})();
+import { HAS_BROWSER, launchBrowser, closeBrowser, CLOSE_HOOK_TIMEOUT_MS } from "./helpers/browser";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let browser: Browser | undefined;
-beforeAll(async () => { if (HAS_BROWSER) browser = await chromium.launch(); });
-afterAll(async () => { await browser?.close(); });
+beforeAll(async () => { if (HAS_BROWSER) browser = await launchBrowser(); });
+afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
 /** Rasterize an SVG string through the SAME path the download uses, and count dark pixels. */
 async function darkPixels(svg: string): Promise<number> {

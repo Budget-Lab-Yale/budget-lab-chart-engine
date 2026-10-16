@@ -126,7 +126,7 @@ describe("x_labels", () => {
     expect(cardText()).toContain("Verbose label for A");
   });
 
-  // Vertical: a horizontal dumbbell draws its facets as groups in one chart, not panes.
+  // Vertical: a horizontal dumbbell has no panes (columns.facet is rejected there).
   it("dumbbell, 2-pane: the label reaches a FACETED card — a dumbbell keeps its card by design", () => {
     const m = mountHover(
       spec({ chartType: "dumbbell", orientation: "vertical", xAxisType: "categorical", series_order: ["A", "B"], data: "d.csv", ...facetCols, ...sm, ...LABELS }),
@@ -956,6 +956,12 @@ describe("tooltip_decimals and a waterfall's hover: the pill ignores it, a card 
 
   it("waterfall: valueLabels.decimals sets it", () => {
     expect(pill(wf({ tooltip_decimals: 3, valueLabels: { decimals: 1 } }))).toEqual(["+5.0"]);
+  });
+
+  it("waterfall: the data's precision ignores float noise in the running total (A9)", () => {
+    // The running total 1.1 + 2.2 is 3.3000000000000003; its noise made the pill read "+1.10".
+    const noisy = [["One", "1.1"], ["Two", "2.2"], ["Three", "0.5"]].map(([step, value]) => ({ step, value })) as unknown as TidyRow[];
+    expect(pill(wf({}), noisy)).toEqual(["+1.1"]);
   });
 
   // Small multiples: a coordinated pane hovers with the same pill (data precision); a pane that

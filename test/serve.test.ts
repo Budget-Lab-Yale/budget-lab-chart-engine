@@ -502,6 +502,18 @@ describe("GET /chart/<relpath> — validation failure", () => {
     expect(body).toContain("Validation error");
     expect(body).toContain("xAxisType");
   });
+
+  it("reports a chart spec with no data property as a schema error, like the CLI", async () => {
+    const dir = makeTempDir();
+    writeFileSync(join(dir, "chart.yaml"), "chartType: line\ntitle: No Data\nxAxisType: temporal\n");
+
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { status, body } = await fakeRequest(handler, "/chart/chart.yaml");
+    expect(status).toBe(422);
+    expect(body).toContain("missing required property");
+    expect(body).toContain("data");
+    expect(body).not.toContain("Cannot use");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -529,5 +541,67 @@ describe("Unknown route", () => {
 
     const { status } = await fakeRequest(handler, "/chart/nonexistent/chart.yaml");
     expect(status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /chart/ hardening (B8): a malformed escape and a non-spec file
+// ---------------------------------------------------------------------------
+
+describe("GET /chart/<relpath> — hardening", () => {
+  const VALID_CHART = "chartType: line\ntitle: Renamed Chart\nxAxisType: temporal\ndata: data.csv\n";
+  const VALID_CSV = "time,series,value\n2024-01-01,A,1.0\n2024-02-01,A,2.0\n";
+
+  it("answers 400 to a malformed percent-escape instead of throwing", async () => {
+    const handler = createRequestHandler({ rootDir: REPO_ROOT, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { status, body } = await fakeRequest(handler, "/chart/%E0%A4%A");
+    expect(status).toBe(400);
+    expect(body).toContain("400");
+  });
+
+  it("serves only chart.yaml and table.yaml: a valid spec under another name is 404", async () => {
+    const dir = makeTempDir();
+    writeFileSync(join(dir, "data.csv"), VALID_CSV);
+    writeFileSync(join(dir, "figure.yaml"), VALID_CHART);
+    writeFileSync(join(dir, "chart.yaml"), VALID_CHART);
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+
+    // The control: the same YAML under the spec name is served.
+    const ok = await fakeRequest(handler, "/chart/chart.yaml");
+    expect(ok.status).toBe(200);
+    expect(ok.body).toContain("Renamed Chart");
+
+    const other = await fakeRequest(handler, "/chart/figure.yaml");
+    expect(other.status).toBe(404);
+    expect(other.body).not.toContain("Renamed Chart");
+  });
+
+  it("will not serve a spec outside the root, by `..` or by `%2e%2e`", async () => {
+    const parent = makeTempDir();
+    const root = join(parent, "root");
+    const sibling = join(parent, "sibling");
+    mkdirSync(root);
+    mkdirSync(sibling);
+    // A spec that WOULD render: right name, valid YAML, data beside it. Only its location is wrong.
+    writeFileSync(join(sibling, "data.csv"), VALID_CSV);
+    writeFileSync(join(sibling, "chart.yaml"), VALID_CHART);
+    const handler = createRequestHandler({ rootDir: root, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+
+    const urls = ["/chart/../sibling/chart.yaml", "/chart/%2e%2e/sibling/chart.yaml", "/chart/%2E%2E%2Fsibling%2Fchart.yaml"];
+    const got = await Promise.all(urls.map((u) => fakeRequest(handler, u)));
+    expect(Object.fromEntries(got.map((g, i) => [urls[i], g.status]))).toEqual(Object.fromEntries(urls.map((u) => [u, 404])));
+    for (const { body } of got) {
+      expect(body).not.toContain("Renamed Chart");
+      expect(body).not.toContain("2024-01-01");
+    }
+  });
+
+  it("does not YAML-parse a non-spec file (no parse or validation error page for data.csv)", async () => {
+    const dir = makeTempDir();
+    writeFileSync(join(dir, "data.csv"), VALID_CSV);
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { status, body } = await fakeRequest(handler, "/chart/data.csv");
+    expect(status).toBe(404);
+    expect(body).not.toContain("2024-01-01");
   });
 });

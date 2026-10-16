@@ -3,18 +3,19 @@
 
 import type { ChartSpec } from "../spec/types.js";
 import type { RenderHooks } from "../spec/hooks.js";
-import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
+import { resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import { normalizeSpec } from "../engine/util.js";
 import type { FigureRenderResult, LegendItem } from "../engine/index.js";
-import { sharedColumnWidths, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "../engine/figure.js";
+import { horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "../engine/figure.js";
 import { timelineHeight, timelineExportFrame } from "../engine/marks/timeline.js";
 import { treemapHeight } from "../engine/marks/treemap.js";
-import { resolveColor } from "../engine/palette.js";
+import { resolveAccentColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
 import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWidth } from "../engine/icon.js";
+import type { IconSpec } from "../engine/icon.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
@@ -22,6 +23,7 @@ import {
   legendInRightColumn,
   orderForRightLegend,
 } from "../engine/legend-layout.js";
+import { timelineTextWidth } from "../engine/timeline-text.js";
 import {
   W,
   H,
@@ -73,7 +75,33 @@ function drawLines(
 
 // Small-multiples figure layout tokens. Per-pane chart height comes from figurePaneHeight
 // (engine/figure.ts) — the single source of truth shared with the live figure mount.
-const PANE_TITLE_H = 18; // per-pane title band height
+const PANE_TITLE_H = 18; // per-pane title band height, for a title on one line
+const PANE_TITLE_LINE_H = 16; // a wrapped pane title's line pitch (live: 11px at line-height 1.5)
+/** Width in px of a pane title (Figtree 700 at 11px, as live and export draw it), from the committed
+ *  Figtree advance table rather than canvas `measureText`: whether a title wraps decides the grid's
+ *  geometry, so it must not depend on the measuring backend (without a canvas, `measureText` guesses
+ *  8px a character and wrapped titles the browser fits on one line). */
+const paneTitleWidth = (text: string): number => timelineTextWidth(text, 11, 700);
+
+/** `title` broken at word boundaries into lines no wider than `maxWidth` by paneTitleWidth (a single
+ *  word wider than that keeps its own line, as the live title does); a title that fits is returned
+ *  whole, exactly as written. */
+function wrapPaneTitle(title: string, maxWidth: number): string[] {
+  if (paneTitleWidth(title) <= maxWidth) return [title];
+  const lines: string[] = [];
+  let line = "";
+  for (const word of title.split(/\s+/).filter(Boolean)) {
+    const trial = line ? `${line} ${word}` : word;
+    if (line && paneTitleWidth(trial) > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = trial;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [title];
+}
 const WRAP_LINE_H = 16; // a wrapped legend label's line pitch (the right-hand column's)
 const COL_GAP = 20; // horizontal gap between per-pane grid cells
 const ROW_GAP = 18; // vertical gap between per-pane grid rows
@@ -85,6 +113,32 @@ const MIN_CHART_H = 160;
 // ---------------------------------------------------------------------------
 // Legend
 // ---------------------------------------------------------------------------
+
+/**
+ * The export's `legendKey` call: the hook's markup for a row, or `null` to draw the default row.
+ *
+ * A hook that returns `ctx.rendered` unchanged counts as no hook. CONFIG-SPEC promises such a hook
+ * changes nothing, and on screen it does — the live row's HTML wraps under CSS. Drawn as custom
+ * markup here, the SVG twin is one unwrapped `<text>`: it skipped the export's own label wrapping,
+ * reserved a single row in the right-hand column, and ran a long label off the frame in the
+ * download only. Falling through to the default drawing is what makes the promise true.
+ */
+function exportLegendKey(
+  item: { label: string; color: string | undefined; series?: string },
+  icon: IconSpec,
+  hooks: RenderHooks | undefined,
+): string | null {
+  if (item.series == null || !hooks?.legendKey) return null;
+  const rendered = legendRowMarkupSvg(icon, item.label);
+  const custom = hooks.legendKey({
+    series: item.series,
+    label: item.label,
+    color: item.color,
+    medium: "svg",
+    rendered,
+  });
+  return custom === rendered ? null : custom;
+}
 
 function drawLegend(
   root: SVGElement,
@@ -144,16 +198,9 @@ function drawLegend(
     // innerHTML to an HTML string like legend.ts's `<span>`s creates XHTML-namespaced nodes that
     // the canvas rasterizer below (rasterize()) never paints -- correct on screen, invisible in
     // the download. `medium: "svg"` tells the hook which vocabulary is safe to return here.
-    // `null`/no hook falls through to the untouched default drawing.
-    const custom = item.series != null && hooks?.legendKey
-      ? hooks.legendKey({
-          series: item.series,
-          label: item.label,
-          color: item.color,
-          medium: "svg",
-          rendered: legendRowMarkupSvg(icon, item.label),
-        })
-      : null;
+    // `null`/no hook falls through to the untouched default drawing, and so does `ctx.rendered`
+    // returned unchanged (see `exportLegendKey`).
+    const custom = exportLegendKey(item, icon, hooks);
     // The wrap check below and the cursor advance at the end of this iteration both key off
     // `itemW` -- it must reflect what the hook ACTUALLY draws, not the untouched default, or a
     // hook that returns `ctx.rendered` plus a suffix (or otherwise-longer text) lays out fine in
@@ -283,15 +330,7 @@ function drawLegendColumn(
     if (customCache?.has(item)) {
       custom = customCache.get(item) ?? null;
     } else {
-      custom = item.series != null && hooks?.legendKey
-        ? hooks.legendKey({
-            series: item.series,
-            label: item.label,
-            color: item.color,
-            medium: "svg",
-            rendered: legendRowMarkupSvg(icon, item.label),
-          })
-        : null;
+      custom = exportLegendKey(item, icon, hooks);
       customCache?.set(item, custom);
     }
     if (custom != null) {
@@ -377,6 +416,103 @@ export interface ExportFrame {
 }
 
 /**
+ * What the two render passes of `buildExportSvg` take from the caller, resolved in two stages,
+ * each at the point the export has always read it. Both passes derive their options from these
+ * (`metaPassOpts`, `finalPassOpts`) rather than assembling them independently at each call, which
+ * is how the metadata pass came to miss the accent (A1, fixed: both now take it).
+ *
+ * The stages are separate because hooks run during the metadata pass. A formatter that changes the
+ * caller's `opts.selections` or replaces `opts.hooks` there is seen by everything read after the
+ * pass and by nothing read before it (test/export-read-points.test.ts). Resolving the final pass's
+ * inputs early would change what is drawn. So the accent is resolved once for each pass, from the
+ * selections as they stand at that pass's read point: the same colour, unless a hook changes the
+ * selections during the metadata pass.
+ *
+ * Geometry that depends on the metadata pass's result (the chart width beside a right-hand legend,
+ * a timeline's budget width, a framed treemap's cap, a figure's pane sizes) is in neither: it is
+ * computed from that result and added to the final pass at its call.
+ */
+interface ExportMetaInput {
+  /** The frame's inner width: the width the metadata pass renders at. */
+  width: number;
+  /** The caller's hooks without `afterRender` — see `resolveExportMetaInput`. */
+  metaHooks: RenderHooks | undefined;
+  /** The accent for the selections as they stand before the pass (`resolveAccent`). The legend
+   *  rows are read from this pass, so without it they key a single series in its palette colour
+   *  while the final pass draws it in the accent (A1). */
+  accentColor: string | undefined;
+}
+
+/** Read BEFORE the metadata pass. */
+function resolveExportMetaInput(
+  spec: ChartSpec,
+  opts: { selections?: Record<string, string>; hooks?: RenderHooks },
+  width: number,
+): ExportMetaInput {
+  // `afterRender` is stripped for the metadata pass only: its SVG(s) are discarded (only the
+  // legend/title metadata is read), so calling a mutating, potentially side-effecting hook against
+  // them would double-fire it per export — once on throwaway output, once more on the SVG that's
+  // actually returned. Every other hook is a pure formatter (idempotent), so passing them through
+  // unchanged there is harmless.
+  const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
+  return { width, metaHooks, accentColor: resolveAccent(spec, opts.selections) };
+}
+
+/** The accent for the caller's `selections` (`undefined` = spec defaults): the one the live mount
+ *  shows for them, so a downloaded PNG matches what the user sees on screen. `renderFigure` (small
+ *  multiples) takes it too, so a faceted chart's per-pane marks adopt it in the export just as they
+ *  do live (see mountFigure in render-live.ts). */
+function resolveAccent(spec: ChartSpec, selections: Record<string, string> | undefined): string | undefined {
+  return resolveAccentColor(spec, selections ?? resolveSelections(spec));
+}
+
+/**
+ * Read AFTER the metadata pass. The final hooks are not here: the export reads `opts.hooks` afresh
+ * at each later use (each legend draw, the final render), and a `legendKey` run by an earlier draw
+ * can replace it before a later one. They are passed to `finalPassOpts` at its call.
+ */
+interface ExportFinalInput {
+  /** The caller's title-selector selections, as given (`undefined` = spec defaults). */
+  selections: Record<string, string> | undefined;
+  /** The active (or default) title-selector option's colour, palette-resolved; the live mount
+   *  shows the same accent for these selections. */
+  accentColor: string | undefined;
+}
+
+function resolveExportFinalInput(
+  spec: ChartSpec,
+  opts: { selections?: Record<string, string> },
+): ExportFinalInput {
+  const selections = opts.selections;
+  return { selections, accentColor: resolveAccent(spec, selections) };
+}
+
+/** The metadata pass's options: legend items and axis titles are read from its result; its SVG is
+ *  discarded. */
+function metaPassOpts(
+  input: ExportMetaInput,
+): { width: number; hooks: RenderHooks | undefined; accentColor?: string } {
+  return {
+    width: input.width,
+    hooks: input.metaHooks,
+    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
+  };
+}
+
+/** The options every final-pass render shares; the caller adds its geometry. `hooks` is the
+ *  caller's `opts.hooks`, read at the call (see `ExportFinalInput`). */
+function finalPassOpts(
+  input: ExportFinalInput,
+  hooks: RenderHooks | undefined,
+): { hooks: RenderHooks | undefined; phase: "export"; accentColor?: string } {
+  return {
+    hooks,
+    phase: "export",
+    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
+  };
+}
+
+/**
  * Build a self-contained export SVG for the given chart spec and data rows.
  * Pure — no canvas, no async, no external resources. The default frame is 1000×750 (4:3); `opts.frame`
  * (ExportFrame) sets another width/height, logo padding and pane fill. The chart
@@ -422,16 +558,10 @@ export function buildExportSvg(
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
   // figure-level legend), not from a single chart.
-  //
-  // `afterRender` is stripped from the hooks object for THIS call only: its SVG(s) are discarded
-  // (only the legend/title metadata is read below), so calling a mutating, potentially side-
-  // effecting hook against them would double-fire it per export — once here on throwaway output,
-  // once more below on the SVG that's actually returned. Every other hook is a pure formatter
-  // (idempotent), so passing them through unchanged here is harmless.
-  const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
+  const metaInput = resolveExportMetaInput(spec, opts, FIW);
   const meta = isFigure
-    ? renderFigure(spec, rows, { width: FIW, hooks: metaHooks })
-    : renderChart(spec, rows, { width: FIW, hooks: metaHooks });
+    ? renderFigure(spec, rows, metaPassOpts(metaInput))
+    : renderChart(spec, rows, metaPassOpts(metaInput));
   const legendItems = meta.legendItems ?? [];
   const shapeLegendItems = meta.shapeLegendItems ?? [];
   const hasShapeLegend = shapeLegendItems.length > 0;
@@ -440,21 +570,13 @@ export function buildExportSvg(
   let xAxisTitle = meta.xAxisTitle ?? "";
   const yAxisTitle = spec.y_axis_title ?? "";
 
+  // Read after the metadata pass — see ExportFinalInput.
+  const finalInput = resolveExportFinalInput(spec, opts);
   // Title-selector tokens → the active (or default) option labels, as plain SVG text.
-  const title = spec.title ? resolveTitleText(spec, opts.selections) : "";
+  const title = spec.title ? resolveTitleText(spec, finalInput.selections) : "";
   const subtitle = spec.subtitle ?? "";
   const note = spec.note ?? "";
   const source = spec.source ?? "";
-
-  // Color accent feed: resolve the same accent color the live single-chart mount
-  // would show for these `selections`, so a downloaded PNG matches what the user sees on screen.
-  // `renderFigure` (small multiples) also receives it, so a faceted chart's per-pane bars adopt the
-  // active option's accent in the export just as they do live (see mountFigure in render-live.ts).
-  const effectiveSelections = opts.selections ?? resolveSelections(spec);
-  const rawAccent = spec.title_selectors
-    ? resolveActiveOptionColor(spec.title_selectors, effectiveSelections, spec.series_colors)
-    : undefined;
-  const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
 
   // A timeline's frame (width, chart width, legend side) is decided the SAME way `tbl-chart
   // validate` decides it — timelineExportFrame, no DOM render needed — so the two can never drift
@@ -625,9 +747,7 @@ export function buildExportSvg(
       height: plotHeight,
       // The download takes no host height: a row-sized chart's is horizontalBarChartHeight's.
       ...(rowSized ? { heightFromModel: true } : {}),
-      hooks: opts.hooks,
-      phase: "export",
-      ...(accentColor ? { accentColor } : {}),
+      ...finalPassOpts(finalInput, opts.hooks),
       ...(tlFrame?.budgetWidth !== undefined ? { timelineBudgetWidth: tlFrame.budgetWidth } : {}),
       ...(treemapCap !== undefined ? { treemapMaxHeight: treemapCap } : {}),
     });
@@ -681,41 +801,66 @@ export function buildExportSvg(
     const figMeta = meta as FigureRenderResult;
     const cols = figMeta.columns;
     const gridRows = figMeta.rows;
-    // A horizontal bar, stack or dumbbell is never a figure (its facets draw as groups,
+    // A horizontal bar, stack or dumbbell is never a figure (`columns.facet` is rejected on it,
     // spec/facet-groups.ts), so every pane takes figurePaneHeight's fixed height.
     // Every pane of a figure takes this one height (row-sized chart types are never figures), so
     // fillPanes sizes all grid rows equally to fill the frame, growing or shrinking them, but never
     // below MIN_CHART_H: there the panes stop and the output comes out taller than the frame. Without
     // a frame it is a no-op.
     const paneChartH0 = figurePaneHeight(spec);
-    const fillAvail = FH - chartTop - bottomH - gridRows * PANE_TITLE_H - (gridRows - 1) * ROW_GAP;
-    const fillH = Math.floor(fillAvail / gridRows);
     const fillPanes = frame?.fillPanes === true;
-    const fills = fillPanes && fillH >= MIN_CHART_H;
-    const paneChartH = fills ? fillH : fillPanes ? MIN_CHART_H : paneChartH0;
+    const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
+    // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
+    // one inner data width — renderFigure computes them with the live grid's helper
+    // (sharedColumnWidths) and reports them as fig.columnWidths, so the export matches the live look.
+    // PER-PANE mode: equal columns, unless `pane_widths` splits the row (see colWidth below).
+    const equalPaneW = Math.floor((FIW - COL_GAP * (cols - 1)) / cols);
+    const renderAt = (paneChartH: number, hooks: RenderHooks | undefined): FigureRenderResult =>
+      isShared
+        ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, ...finalPassOpts(finalInput, hooks) })
+        : // `width` is each equal pane's width; `gridWidth`/`gridGap` are the row a per-pane
+          // `pane_widths` is split across (perPaneColumnWidths). Without pane_widths renderFigure
+          // reads only `width`, so equal per-pane figures are unchanged.
+          renderFigure(spec, rows, { width: equalPaneW, gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, ...finalPassOpts(finalInput, hooks) });
+    // Pane titles wrap at word boundaries to their column, as the live grid's title block does; a
+    // title that fits is drawn exactly as written. A grid row's title band is as tall as its
+    // tallest title, so the panes of a row stay level. The column widths are the rendered figure's,
+    // which do not depend on the pane height or on the hooks.
+    const titleLinesOf = (f: FigureRenderResult): string[][] =>
+      f.panes.map((pane, i) => wrapPaneTitle(pane.title, f.columnWidths?.[i % cols] ?? equalPaneW));
+    const fillFor = (bands: number[]): { fillAvail: number; fillH: number; fills: boolean; paneChartH: number } => {
+      const fillAvail = FH - chartTop - bottomH - bands.reduce((s, h) => s + h, 0) - (gridRows - 1) * ROW_GAP;
+      const fillH = Math.floor(fillAvail / gridRows);
+      const fills = fillPanes && fillH >= MIN_CHART_H;
+      return { fillAvail, fillH, fills, paneChartH: fills ? fillH : fillPanes ? MIN_CHART_H : paneChartH0 };
+    };
+    // fillPanes sizes the panes to the room the title bands leave, and the bands are known only once
+    // the figure reports its column widths. So with fillPanes the first render is a layout probe at
+    // the one-line bands' height, rendered with no hooks (every hook must run once, on the panes
+    // returned), and the figure is rendered again only when a wrapped title changes that height or
+    // there are hooks to run. Without fillPanes it renders once, with its hooks, as before.
+    const hasHooks = opts.hooks != null && Object.values(opts.hooks).some((h) => h != null);
+    const layoutHooks = fillPanes && hasHooks ? undefined : opts.hooks;
+    const oneLineFill = fillFor(Array.from({ length: gridRows }, () => PANE_TITLE_H));
+    let fig = renderAt(oneLineFill.paneChartH, layoutHooks);
+    const titleLines = titleLinesOf(fig);
+    const titleBands = Array.from({ length: gridRows }, (_, r) => {
+      let n = 1;
+      for (let c = 0; c < cols; c++) n = Math.max(n, titleLines[r * cols + c]?.length ?? 1);
+      return PANE_TITLE_H + (n - 1) * PANE_TITLE_LINE_H;
+    });
+    const { fillAvail, fillH, fills, paneChartH } = fillFor(titleBands);
+    if (paneChartH !== oneLineFill.paneChartH || layoutHooks !== opts.hooks) fig = renderAt(paneChartH, opts.hooks);
     // Flooring per row leaves up to gridRows − 1 whole pixels unfilled; renderFigure draws every pane
     // at one height, so they go to the gaps between rows, one each (at most one per gap). Only the
     // sub-pixel remainder is left, as on a one-row figure.
     const extraGapPx = fills ? Math.min(gridRows - 1, Math.max(0, Math.floor(fillAvail - gridRows * fillH))) : 0;
     const rowGapAfter = (r: number): number => ROW_GAP + (r < extraGapPx ? 1 : 0);
-    const isShared = (spec.small_multiples?.mode ?? "shared") === "shared";
-    // SHARED mode: unequal column widths (labeled col 0 wider, label-less cols narrower) sharing
-    // one inner data width — same helper as the live grid, so the export matches the live look.
-    // PER-PANE mode: equal columns, unless `pane_widths` splits the row (see colWidth below).
-    const shared = isShared ? sharedColumnWidths(FIW, cols, COL_GAP) : null;
-    const equalPaneW = Math.floor((FIW - COL_GAP * (cols - 1)) / cols);
-    const fig = isShared
-      ? renderFigure(spec, rows, { gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) })
-      : // `width` is each equal pane's width; `gridWidth`/`gridGap` are the row a per-pane
-        // `pane_widths` is split across (perPaneColumnWidths). Without pane_widths renderFigure
-        // reads only `width`, so equal per-pane figures are unchanged.
-        renderFigure(spec, rows, { width: equalPaneW, gridWidth: FIW, gridGap: COL_GAP, height: paneChartH, columns: cols, hooks: opts.hooks, phase: "export", ...(accentColor ? { accentColor } : {}) });
     // Cell width per column: the width each pane was RENDERED at. A pane's viewBox is its rendered
     // width, so a cell of any other width rescales the whole pane: with `pane_widths` the bars came
     // out a different width in every pane. renderFigure reports the widths whenever they are not
-    // equal columns (shared mode always; per-pane with pane_widths); without pane_widths they equal
-    // the shared helper's widths, so those figures place exactly as before.
-    const colWidth = (col: number): number => fig.columnWidths?.[col] ?? shared?.colWidths[col] ?? equalPaneW;
+    // equal columns (shared mode always; per-pane with pane_widths).
+    const colWidth = (col: number): number => fig.columnWidths?.[col] ?? equalPaneW;
     // Cumulative left x per column (panes tile the row exactly, leaving COL_GAP between them).
     const colX: number[] = [];
     let acc = MARGIN;
@@ -742,7 +887,7 @@ export function buildExportSvg(
       let acc = chartTop;
       for (let r = 0; r < gridRows; r++) {
         rowY.push(acc);
-        acc += PANE_TITLE_H + rowHeights[r]! + rowGapAfter(r);
+        acc += titleBands[r]! + rowHeights[r]! + rowGapAfter(r);
       }
     }
     fig.panes.forEach((pane, i) => {
@@ -752,17 +897,17 @@ export function buildExportSvg(
       const w = colWidth(col);
       const y = rowY[row]!;
       const h = paneH(i);
-      root.appendChild(textEl(x, y + 12, pane.title, { size: 11, weight: W_SEMI, fill: HEADING }));
+      drawLines(root, titleLines[i]!, x, y + 12, PANE_TITLE_LINE_H, { size: 11, weight: W_SEMI, fill: HEADING });
       if (pane.svg) {
         const ps = pane.svg;
         ps.setAttribute("x", String(x));
-        ps.setAttribute("y", String(y + PANE_TITLE_H));
+        ps.setAttribute("y", String(y + titleBands[row]!));
         ps.setAttribute("width", String(w));
         ps.setAttribute("height", String(h));
         root.appendChild(ps);
       }
     });
-    contentHeight = rowHeights.reduce((s, h) => s + PANE_TITLE_H + h, 0) + (gridRows - 1) * ROW_GAP + extraGapPx;
+    contentHeight = rowHeights.reduce((s, h, r) => s + titleBands[r]! + h, 0) + (gridRows - 1) * ROW_GAP + extraGapPx;
   }
 
   // Figures size to their CONTENT height (chrome + the pane grid), so a short figure (e.g. a

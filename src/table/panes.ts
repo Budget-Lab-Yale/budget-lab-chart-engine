@@ -68,7 +68,9 @@ export interface LaidPane { value: string; title: string; model: TableModel; lay
  * the shared stub. Pane corner labels (stub_header) are resolved per pane. Footnotes are stripped
  * from pane models when `fill` (the PNG lists them once at figure level). `collapsedKeys`
  * (PNG export of a collapsible table) filters each pane model through applyCollapse BEFORE
- * layout, so the laid-out geometry matches the visible (collapsed-aware) rows.
+ * layout, so the laid-out geometry matches the visible (collapsed-aware) rows. `minWidth` (with
+ * `fill`) raises the shared total to at least that width: the PNG fills its frame's content width,
+ * as the live panes fill the card (stub pinned, data columns absorbing the rest).
  */
 export function layoutPanes(
   spec: TableSpec,
@@ -76,6 +78,7 @@ export function layoutPanes(
   measureText: (s: string, fontPx: number, weight: number) => number,
   fill: boolean,
   collapsedKeys?: Set<string>,
+  minWidth = 0,
 ): LaidPane[] {
   const opts = layoutOptionsFromSpec(spec);
   const panes = splitPanes(spec, rows);
@@ -85,16 +88,15 @@ export function layoutPanes(
     let model = buildTableModel(spec, p.rows);
     if (collapsedKeys) model = applyCollapse(model, collapsedKeys);
     model.stubHeader = resolveStubHeader(spec, p.value);
-    return { p, model, layout: layoutTable(model, { width: 720, measureText, ...opts }) };
+    return { p, model, layout: layoutTable(model, { measureText, ...opts }) };
   });
   const sharedStub = Math.max(...natural.map((n) => n.layout.stubWidth));
-  const sharedTotal = Math.max(...natural.map((n) => sharedStub + (n.layout.totalWidth - n.layout.stubWidth)));
+  const sharedTotal = Math.max(minWidth, ...natural.map((n) => sharedStub + (n.layout.totalWidth - n.layout.stubWidth)));
 
   // Pass 2: re-lay each pane with the shared stub (and shared total when filling).
   return natural.map(({ p, model }) => {
     const m = fill ? { ...model, footnotes: [] } : model;
     const layout = layoutTable(m, {
-      width: 720,
       measureText,
       ...opts,
       stubWidth: sharedStub,

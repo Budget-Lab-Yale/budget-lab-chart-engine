@@ -12,6 +12,9 @@ export interface CompareResult {
   match: boolean;
   diffPixels: number;
   totalPixels: number;
+  /** Whether a diff image was written to `diffOutPath`. False on a dimension mismatch, which
+   *  returns before any diff is drawn, so a caller must not report a diff file then. */
+  diffWritten: boolean;
 }
 
 /**
@@ -41,7 +44,7 @@ export async function comparePng(
 
   // Dimension mismatch: treat every pixel as different.
   if (actualPng.width !== baselinePng.width || actualPng.height !== baselinePng.height) {
-    return { match: false, diffPixels: totalPixels, totalPixels };
+    return { match: false, diffPixels: totalPixels, totalPixels, diffWritten: false };
   }
 
   const diffPng = new PNG({ width: actualPng.width, height: actualPng.height });
@@ -55,9 +58,8 @@ export async function comparePng(
     { threshold },
   );
 
-  if (diffPixels > 0 && opts?.diffOutPath) {
-    writeFileSync(opts.diffOutPath, PNG.sync.write(diffPng));
-  }
+  const diffOutPath = diffPixels > 0 ? opts?.diffOutPath : undefined;
+  if (diffOutPath) writeFileSync(diffOutPath, PNG.sync.write(diffPng));
 
-  return { match: diffPixels === 0, diffPixels, totalPixels };
+  return { match: diffPixels === 0, diffPixels, totalPixels, diffWritten: !!diffOutPath };
 }

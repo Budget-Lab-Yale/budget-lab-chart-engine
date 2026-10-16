@@ -127,7 +127,9 @@ describe("hatchSvgPattern", () => {
   it("rotates the TILE, not the bands, so the tiling stays seamless", () => {
     const p = hatchSvgPattern(document, "/", GROUND, STROKE);
     expect(p.getAttribute("patternTransform")).toBe("rotate(45)");
-    for (const r of p.querySelectorAll("rect")) expect(r.hasAttribute("transform")).toBe(false);
+    const rects = p.querySelectorAll("rect");
+    expect(rects.length).toBeGreaterThan(0);
+    for (const r of rects) expect(r.hasAttribute("transform")).toBe(false);
   });
 
   it("draws the band as a RECT, never a centred stroke", () => {

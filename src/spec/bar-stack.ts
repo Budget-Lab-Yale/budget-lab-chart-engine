@@ -106,7 +106,7 @@ export function resolveTotalRow(
  * Are there net-dot markers in the DOM?
  *
  * Read by `attachHighlightPills`: selecting the Total pseudo-series has no rect to pill, so it draws
- * a net-value pill at each net dot instead (crosshair.ts, `readNetDotMarkers`). This tracks the
+ * a net-value pill at each net dot instead (crosshair/dom-geometry.ts, `readNetDotMarkers`). This tracks the
  * MARKER, which is why it is not the same question as `resolveTotalRow` — `netDisplay: none` with
  * `hover: tooltip` yields a "text" Total row and no dots whatsoever.
  *
@@ -153,9 +153,9 @@ export function stackedSegmentLabelsShown(
  * on exactly the charts an author would set it on, which trades one uncoordinated behaviour for a
  * switch that ignores what it was set to.
  *
- * Called at BOTH render-live.ts pill sites (the standalone `mountChart` one and `wireFigureSvg`'s
- * per-pane one) with that site's own `pane` value. Same rule, different context — a pane really does
- * paint no segment labels, so it really does keep its pills.
+ * Called once per hover plan (engine/live/hover-options.ts buildHoverPlan, which both the standalone
+ * `mountChart` and each `wireFigureSvg` pane build) with that mount's own `pane` value. Same rule,
+ * different context — a pane really does paint no segment labels, so it really does keep its pills.
  *
  * INVARIANT: a reader must never be left with no number for a segment.
  *

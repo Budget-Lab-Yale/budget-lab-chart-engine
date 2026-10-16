@@ -8,12 +8,13 @@
 // PURE — spec + resolved series colors in, LegendItem rows out. No DOM, no data: everything keyed
 // here is declared in the spec, so renderChart and renderFigure both get the same rows.
 import { TBL } from "./theme";
-import { resolveColor, resolveColorOr } from "./palette";
+import { resolveColor, resolveColorOr, parseCssColor } from "./palette";
 import { resolveAnnotations, xMarkerLabel, yMarkerLabel } from "../spec/annotations";
 import { resolveRugTracks } from "../spec/rug";
 import { valueAxisIsX } from "../spec/dumbbell-orientation";
 import { overlayDashed, overlayKind, overlayPerSeries } from "../spec/overlays";
 import { overlayLineColor } from "./overlays";
+import { BAND_FILL_OPACITY, SHADE_FILL_OPACITY, rugBlockColor } from "./annotation-paint";
 import type { LegendItem } from "./index";
 import type { ChartSpec, ColorRef, Overlay, ShadeRegion, XAxisBand } from "../spec/types";
 
@@ -30,11 +31,6 @@ export function annotationKey(label: string): string {
   return `__annotation:${label}`;
 }
 
-/** Default fill opacity of an `annotations.bands` rect (assemble-plot.ts) — mirrored here so the
- *  swatch tint matches what the band actually paints. */
-const BAND_FILL_OPACITY = 0.1;
-/** Default `shading` fill opacity (marks/line.ts SHADE_FILL_OPACITY). */
-const SHADE_FILL_OPACITY = 0.5;
 
 /** Does this entry want a legend row? `rug: true` implies one (a solid block with no key is
  *  unreadable); `legend: false` always suppresses; a row needs something to say. */
@@ -54,30 +50,36 @@ export function labelMovedToLegend(
 }
 
 /** Flatten `color` at `opacity` over white, so a swatch shows the tint the reader will actually
- *  see on the chart rather than the fill's full-strength hue. Non-hex colors pass through. */
+ *  see on the chart rather than the fill's full-strength hue. Any colour `parseCssColor` reads is
+ *  flattened (the forms CONFIG-SPEC's swatch row lists: hex of every length, named colours, and
+ *  rgb()/hsl() with plain channels in either syntax), and its own alpha multiplies `opacity`, as it
+ *  does where the fill is painted. Anything else (`var()`, `oklch()`, `120deg` …) passes through at
+ *  full strength. */
 export function flattenOverWhite(color: string, opacity: number): string {
   // A fully opaque fill IS its own color — return it untouched rather than a recomputed (and
   // case-normalized) rebuild of the same value, so a swatch and its mark compare equal as strings.
   if (opacity >= 1) return color;
-  const m = /^#([0-9a-f]{6})$/i.exec(color);
-  if (!m) return color;
-  const hex = m[1] as string;
-  const t = Math.max(opacity, 0);
-  const channel = (i: number): number => {
-    const v = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    return Math.round(255 + (v - 255) * t);
-  };
-  const out = [0, 1, 2].map((i) => channel(i).toString(16).padStart(2, "0")).join("");
+  const c = parseCssColor(color);
+  if (!c) return color;
+  const alpha = Number.isFinite(c.opacity) ? Math.min(1, Math.max(0, c.opacity)) : 1;
+  const t = Math.max(opacity, 0) * alpha;
+  // Nothing painted: the white card itself (`transparent` parses with NaN channels at alpha 0).
+  if (t === 0) return "#ffffff";
+  const channel = (v: number): number => Math.round(255 + (Math.min(255, Math.max(0, v)) - 255) * t);
+  const out = [c.r, c.g, c.b].map((v) => channel(v).toString(16).padStart(2, "0")).join("");
   return `#${out}`;
 }
 
 /**
- * The swatch tints for a `shading` region — one per fill it will actually paint, in series order.
+ * The swatch tints for a `shading` region, in series order: one per series the region COVERS, which
+ * is not always one per fill it paints.
  *
  * A region with an explicit `color` paints that one color. Otherwise it takes its SERIES' color, and
- * a region naming no series paints one fill per in-scope series, each in that series' color — so on
- * a three-series chart this returns three tints, and the row is keyed by all three rather than by
- * whichever happened to be first.
+ * a region naming no series covers every in-scope series, each in that series' color — so on a
+ * three-series chart this returns three tints, and the row is keyed by all three rather than by
+ * whichever happened to be first. The tints come from the chart's series, not from which fills are
+ * painted: a series whose line never reaches the region's side gets no fill (marks/line.ts skips it)
+ * but still has its tint here.
  *
  * `solid` (a rug-flagged region) keys by the block's full-strength hue; everything else keys by the
  * tint the fill paints — its hue composited over white at `fillOpacity`.
@@ -89,16 +91,10 @@ function shadeSwatchColors(
 ): string[] {
   const explicit = resolveColor(region.color);
   // A rug-flagged region is keyed by its BLOCK, and the strip can only draw ONE color — so the chip
-  // is a single solid swatch resolved exactly as `drawRug` resolves the block (spec/rug.ts
-  // `rugTrackColor`). Without this the chip showed the series tints while the block drew the
+  // is a single solid swatch resolved exactly as `drawRug` resolves the block (annotation-paint.ts
+  // `rugBlockColor`). Without this the chip showed the series tints while the block drew the
   // neutral: a key pointing at a color that is nowhere on the strip.
-  if (region.rug === true) {
-    return [
-      explicit ||
-        (region.series != null ? colors.get(region.series) : undefined) ||
-        TBL.color.annotationDim,
-    ];
-  }
+  if (region.rug === true) return [rugBlockColor(region, colors)];
   const opacity = region.fillOpacity ?? SHADE_FILL_OPACITY;
   const tint = (c: string): string => flattenOverWhite(c, opacity);
   if (explicit) return [tint(explicit)];
@@ -147,9 +143,12 @@ function fillRow(label: string, swatchColors: string[]): LegendItem {
 
 /**
  * The annotation-derived legend rows, in order: bands → shading → xAxis rules → yAxis rules →
- * explicit `rug.tracks`. Rows dedupe by (label, swatch shape, color, dashed) — first occurrence
- * wins — so the three recession bands of a michez-rule chart collapse to one "US recessions" row,
- * while two same-label entries drawn differently still get a row each.
+ * explicit `rug.tracks` (overlays sit between shading and xAxis). Rows merge by (label, swatch shape,
+ * dashed) — NOT by color — so the three recession bands of a michez-rule chart collapse to one
+ * "US recessions" row. Merged FILL rows keep every distinct tint (a banded chip); a merged LINE row
+ * keeps the first entry's color and the later one's is dropped. A fill and a line, or a dashed and a
+ * solid line, under one label stay separate rows. See the merge loop at the end, and CONFIG-SPEC
+ * "one row per label" (gated by test/config-spec-claims.test.ts).
  *
  * Rows are interactive in their OWN selection dimension (`annotation: true`, matched through
  * `data-annotation` rather than `data-series`): hovering or pinning one lights up every chart
@@ -239,7 +238,7 @@ export function buildAnnotationLegendItems(
   resolveRugTracks(spec).forEach((t) => {
     if (t.origin !== "tracks" || !t.legend) return;
     // An explicit track has no fill of its own — its block IS the thing, so it keys solid.
-    rows.push(fillRow(t.label, [resolveColorOr(t.color, TBL.color.annotationDim)]));
+    rows.push(fillRow(t.label, [rugBlockColor(t, colors)]));
   });
 
   // Merge by (label, swatch shape, dashed) — NOT by color, so several same-label entries with

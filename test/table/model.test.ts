@@ -77,6 +77,23 @@ it("column_order reorders leaves", () => {
   expect(m.leaves.map((l) => l.key)).toEqual(["2027", "2026"]);
 });
 
+it("sign colour is decided after rounding: values that print 0.0 are uncoloured (A10)", () => {
+  const spec: TableSpec = {
+    title: "T", data: "d", value: "value", stub: [{ label: "row" }], header: ["metric"], sign_color: true,
+    format: { default: { type: "number", decimals: 1 } },
+  };
+  const rows = [
+    { row: "r1", metric: "neg-small", value: "-0.04" },
+    { row: "r1", metric: "pos-small", value: "0.04" },
+    { row: "r1", metric: "neg", value: "-0.05" },
+    { row: "r1", metric: "pos", value: "0.05" },
+  ] as any;
+  const r1 = buildTableModel(spec, rows).body.find((b) => b.kind === "row") as any;
+  expect(r1.row.cells.map((c: any) => [c.text, c.signClass ?? null])).toEqual([
+    ["0.0", null], ["0.0", null], ["-0.1", "neg"], ["0.1", "pos"],
+  ]);
+});
+
 it("per-column signColor:false overrides global sign_color:true", () => {
   // Global sign_color is on, but column "B" opts out via format.columns.B.signColor=false.
   // Cells in column B must carry NO signClass; cells in column A still do.

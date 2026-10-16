@@ -35,7 +35,6 @@ describe("buildTableExportSvg", () => {
     // Recompute the table content size to compare against the export frame.
     const model = buildTableModel(SPEC, ROWS);
     const layout = layoutTable(model, {
-      width: 920,
       measureText: (s, fontPx) => s.length * fontPx * 0.6,
     });
 

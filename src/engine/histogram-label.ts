@@ -1,7 +1,8 @@
 // Pure, deterministic, human-friendly histogram bin LABELS for the hover tooltip header.
 // No DOM, no locale-dependent date parsing, no Date.now/random. Temporal edges are epoch-ms and
-// are formatted from their UTC calendar parts (getUTC*) with explicit month-name arrays so output
-// is stable regardless of the host timezone/locale.
+// are formatted from their LOCAL calendar parts, the basis `parseDate` and `calendarEdges` use (a
+// UTC read labelled Tokyo's 2020 bin "2019"), with explicit month-name arrays so the wording does
+// not depend on the host locale.
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -41,9 +42,9 @@ function formatNumericEdge(v: number, decimals: number | undefined): string {
 /** Single-period temporal label from a period-start epoch-ms, per calendar interval. */
 function formatSinglePeriod(startMs: number, interval: CalendarInterval): string {
   const d = new Date(startMs);
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth();
-  const day = d.getUTCDate();
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const day = d.getDate();
   switch (interval) {
     case "year": return String(y);
     case "quarter": return `Q${Math.floor(m / 3) + 1} ${y}`;
@@ -72,8 +73,8 @@ export function formatBinLabel(x0: number, x1: number, opts: BinLabelOpts): stri
     // Non-calendar bin: inclusive end = the period containing x1 − ε (x1 is exclusive).
     const start = new Date(x0);
     const end = new Date(x1 - 1);
-    const sY = start.getUTCFullYear(), sM = start.getUTCMonth();
-    const eY = end.getUTCFullYear(), eM = end.getUTCMonth();
+    const sY = start.getFullYear(), sM = start.getMonth();
+    const eY = end.getFullYear(), eM = end.getMonth();
     if (sY === eY && sM === eM) return `${MONTHS[sM]} ${sY}`;
     if (sY === eY) return `${MONTHS[sM]} – ${MONTHS[eM]} ${sY}`;
     return `${MONTHS[sM]} ${sY} – ${MONTHS[eM]} ${eY}`;

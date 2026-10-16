@@ -209,7 +209,9 @@ describe("a tooltip key is the same drawing as its legend key", () => {
       const parent = document.createElement("div");
       renderLegend(parent, r.legendItems!);
 
-      for (const item of r.legendItems!.filter((i) => !i.annotation)) {
+      const seriesItems = r.legendItems!.filter((i) => !i.annotation);
+      expect(seriesItems.length, `${name}: no series legend item to compare`).toBeGreaterThan(0);
+      for (const item of seriesItems) {
         const icon = icons.get(item.series);
         expect(icon, `${name}: no icon resolved for "${item.series}"`).toBeTruthy();
 

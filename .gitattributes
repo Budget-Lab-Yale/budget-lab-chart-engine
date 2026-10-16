@@ -10,3 +10,4 @@ src/engine/vendor/** -text
 # Golden fixtures + data: pin LF so the snapshot comparison is byte-stable cross-platform
 *.svg text eol=lf
 *.csv text eol=lf
+test/fixtures/hover/*.txt text eol=lf

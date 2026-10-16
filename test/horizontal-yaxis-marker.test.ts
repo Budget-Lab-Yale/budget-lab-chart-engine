@@ -112,20 +112,19 @@ describe("renderChart (unvalidated) does not fold an undrawn yAxis marker into t
     });
   }
 
-  it("facets drawn as groups: a facet-scoped yAxis marker does not widen the axis", () => {
+  it("sectioned: a yAxis marker does not widen the axis", () => {
     const chart = (extra: Record<string, unknown>) =>
       renderChart(
         specOf("bar", {
-          columns: { x: "c", value: "v", facet: "f" },
+          columns: { x: "c", value: "v", section: "f" },
           yAxisPolicy: { max: 20 },
-          small_multiples: { mode: "shared" },
           ...extra,
         }),
         [r({ f: "A", c: "a", v: 10 }), r({ f: "A", c: "b", v: 15 }), r({ f: "B", c: "a", v: 12 }), r({ f: "B", c: "b", v: 14 })],
         OPTS,
       );
     const bare = chart({});
-    const marked = chart({ annotations: { yAxis: [{ y: 40, label: "m", facet: "B" }] } });
+    const marked = chart({ annotations: { yAxis: [{ y: 40, label: "m" }] } });
     expect(xTickEnds(marked.svg)).toEqual(xTickEnds(bare.svg));
   });
 

@@ -23,6 +23,7 @@ import { Plot } from "../vendor";
 import { markerInk } from "../marker-ink";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { isReversedDomain } from "../scales";
+import { valueLabelDecimals } from "../value-decimals";
 import {
   tblBandYAxis,
   horizontalValueAxisMargins,
@@ -36,13 +37,15 @@ import type { ChartSpec } from "../../spec/types";
 import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
-import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
+import { categoryBand, encounterCategories, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
+import { rowEmissionOrder } from "./emission-order";
+import { stackRank as stackRankOf } from "./stack-order";
 
 // The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
 const SINGLE_SLOT = "_v";
 
-// Plot classNames on the net-dot and net-label mark groups, so a post-render `tagging`
-// pass can find their <circle>/<text> elements and stamp them with TOTAL_SERIES_KEY.
+// Plot className on the net-dot mark group, so a post-render `tagging` pass can find its
+// <circle> elements and stamp them with TOTAL_SERIES_KEY.
 export const NET_DOT_CLASS = "tbl-net-marker";
 
 // Net-dot radius: standalone chart, and a smaller radius for (narrow) small-multiples panes.
@@ -60,7 +63,7 @@ function hasNegativeValues(data: PreparedRow[]): boolean {
 
 /** Whether a stack over `data` (its in-scope rows, as the builder receives them) draws net dots, given
  *  the chart's drawn series count. The builder decides with this, and so does the height model (via
- *  index.ts singleChartDrawsNetDots), so a fitted row pitch is floored for exactly the dots drawn. */
+ *  pane.ts singleChartDrawsNetDots), so a fitted row pitch is floored for exactly the dots drawn. */
 export function netDotsDrawn(spec: ChartSpec, data: PreparedRow[], seriesCount: number): boolean {
   return drawsNetDots(resolveNetMode(spec, hasNegativeValues(data)), seriesCount);
 }
@@ -92,27 +95,15 @@ function splitBySign(names: string[], rows: readonly PreparedRow[]): { negs: str
  *  decimal precision across the rendered values. `keepMinus` writes a negative value's "-" as
  *  formatValue (the hover card) and the waterfall labels do, outside any prefix ("-$15"); without
  *  it every value prints as its magnitude, which suits a segment label, whose side of zero already
- *  carries the sign. */
-function makeValueFormatter(
+ *  carries the sign. Exported for test/value-decimals.test.ts. */
+export function makeValueFormatter(
   values: number[],
   affixes: ValueAffixes,
   keepMinus: boolean,
   decimals?: number,
 ): (d: number) => string {
-  // Fixed precision when set; else the minimum the data needs, CAPPED at 2 so raw floats don't
-  // print 15 digits (matches bar.ts).
-  const maxFrac =
-    decimals != null
-      ? decimals
-      : Math.min(
-          2,
-          values.reduce((max, v) => {
-            if (!Number.isFinite(v)) return max;
-            const s = String(v);
-            const i = s.indexOf(".");
-            return Math.max(max, i < 0 ? 0 : s.length - i - 1);
-          }, 0),
-        );
+  // Fixed precision when set; else the minimum the data needs, capped (value-decimals.ts).
+  const maxFrac = valueLabelDecimals(values, decimals);
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     return applyValueAffixes((keepMinus ? d : Math.abs(d)).toFixed(maxFrac), affixes);
@@ -134,30 +125,21 @@ export function buildStackedMarks(
   const normalize = spec.barStack?.normalize === true;
 
   // Category domain in data-encounter order (declaration order is authoritative).
-  const categories: string[] = [];
-  {
-    const seen = new Set<string>();
-    for (const r of data) {
-      const cat = (r as unknown as Record<string, unknown>)[catField] as string | undefined;
-      if (typeof cat === "string" && cat !== "" && !seen.has(cat)) {
-        seen.add(cat);
-        categories.push(cat);
-      }
-    }
-  }
+  const categories = encounterCategories(data, catField);
 
   // Visual stack order override (barStack.stackOrder): Plot stacks positives upward from zero in
   // DATA order, so reordering the rows sets the bottom→top order. Stable-sort by the configured
   // rank (listed series first, the rest after in series_order); this drives ONLY the visual stack
   // + rect tagging (both read this `data`), leaving series_order to fix the legend order + colors.
-  // Done after `categories` is built so the category encounter order is unaffected.
+  // Done after `categories` is built so the category encounter order is unaffected. The segment
+  // labels walk the stack in this same rank; walked in series_order, they sat in segments they do
+  // not name (A7).
   const stackOrderCfg = spec.barStack?.stackOrder;
+  const stackRank = stackRankOf(seriesNames, stackOrderCfg);
   if (stackOrderCfg && stackOrderCfg.length) {
-    const sRank = new Map<string, number>(seriesNames.map((s, i) => [s, stackOrderCfg.length + i]));
-    stackOrderCfg.forEach((s, i) => sRank.set(s, i));
     data = data
       .map((r, i) => ({ r, i }))
-      .sort((a, b) => ((sRank.get(a.r.series) ?? 0) - (sRank.get(b.r.series) ?? 0)) || (a.i - b.i))
+      .sort((a, b) => ((stackRank.get(a.r.series) ?? 0) - (stackRank.get(b.r.series) ?? 0)) || (a.i - b.i))
       .map((x) => x.r);
   }
 
@@ -173,7 +155,6 @@ export function buildStackedMarks(
 
   // --- Per-category aggregates (computed INDEPENDENTLY of the stack) ---
   // net (Σ _y), positive sum (visual top of positive stack), negative sum.
-  const rank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));
   const netByCat = new Map<string, number>();
   const posSumByCat = new Map<string, number>();
   for (const r of data) {
@@ -295,9 +276,12 @@ export function buildStackedMarks(
       return { ...r, _y: total ? ((y as number) / total) * 100 : 0 };
     });
   }
+  // Clip only the segments, as bar.ts does: the net dot and labels stay unclipped so a label is
+  // never cut in half. Gated on ctx.clipMarks, so a stack that fits its domain is byte-identical.
+  const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
   const stackMark = horizontal
-    ? Plot.barX(stackData, { ...rowChannels(catField), x: "_y", fill: fillChannel })
-    : Plot.barY(stackData, { x: catField, y: "_y", fill: fillChannel });
+    ? Plot.barX(stackData, { ...rowChannels(catField), x: "_y", fill: fillChannel, ...clipOpt })
+    : Plot.barY(stackData, { x: catField, y: "_y", fill: fillChannel, ...clipOpt });
 
   const overlay: unknown[] = [stackMark];
 
@@ -390,7 +374,7 @@ export function buildStackedMarks(
     }
     const segLabels = buildSegmentLabels(data, categories, {
       catField,
-      rank,
+      rank: stackRank,
       posSumByCat,
       normalize,
       horizontal,
@@ -414,14 +398,11 @@ export function buildStackedMarks(
   // "Labor" rows then all "Capital"). Using a category-major order misaligns whenever the data
   // isn't grouped that way — the cause of the legend→segment highlight mismatch.
   // Sectioned (fy rows): Plot emits the rects facet by facet, in drawn (section-grouped) order, and in
-  // data order within a facet — so the tags follow that, not the plain data order.
+  // data order within a facet — so the tags follow that, not the plain data order
+  // (marks/emission-order.ts).
   const seriesSet = new Set(seriesNames);
   const catOf = (r: PreparedRow): string => (r as unknown as Record<string, unknown>)[catField] as string;
-  const rectSeriesOrder: string[] = (
-    sectioned
-      ? band.drawnOrder.flatMap((cat) => data.filter((r) => catOf(r) === cat))
-      : data.filter((r) => categories.includes(catOf(r)))
-  )
+  const rectSeriesOrder: string[] = rowEmissionOrder(data, catOf, band.drawnOrder, sectioned)
     .filter((r) => seriesSet.has(r.series))
     .map((r) => r.series);
 
@@ -580,7 +561,8 @@ function buildSegmentLabels(
         Number.isFinite(r._y as number) &&
         r._y != null,
     );
-    // Order within the category by declaration rank, split by sign.
+    // Order within the category by stack rank (the order the rows were sorted into for Plot), split
+    // by sign.
     const ordered = catRows
       .slice()
       .sort((a, b) => (rank.get(a.series) ?? 0) - (rank.get(b.series) ?? 0));

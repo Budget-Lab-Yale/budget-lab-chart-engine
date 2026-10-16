@@ -22,10 +22,7 @@ export function buildPointMarks(
   _spec: ChartSpec,
   ctx: MarkContext,
 ): MarkLayers {
-  const { xField, fxField, fyField, shapeField, shapeNames, shapeIsSeries } = ctx;
-
-  // Shared-mode small multiples: bind fx/fy so each mark faces into the grid. Absent → single frame.
-  const facetChannels = fxField && fyField ? { fx: fxField, fy: fyField } : {};
+  const { xField, shapeField, shapeNames, shapeIsSeries } = ctx;
 
   // A shape channel is active when columns.shape resolved to a field. Without it, every point is
   // a single shape (Plot's default circle) and no symbol scale / shape legend is emitted.
@@ -81,7 +78,6 @@ export function buildPointMarks(
     stroke: "#ffffff",
     strokeWidth: 1,
     defined: (d: PreparedRow) => Number.isFinite(d._y),
-    ...facetChannels,
     // Truncated value axis (see assemblePaneResult's clip gate): an out-of-range point would
     // otherwise land outside the frame, or off the canvas entirely.
     ...(ctx.clipMarks ? { clip: true as const } : {}),

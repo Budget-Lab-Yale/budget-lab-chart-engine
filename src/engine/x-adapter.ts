@@ -7,7 +7,6 @@ import {
   tblXAxis, tblTemporalXAxis, temporalXTicks, thinTemporalTicks, everyKthThatFits, labelsClear, maxClearLabels, measuredLabelWidth,
   tblBandXAxis, bandLabelMarginBottom, type BandLabelMode,
 } from "./axes";
-import { X_AXIS_LABEL_CLASS } from "./facet-chrome";
 import { parseXValue, parseDate, parseQuarter, formatQuarter } from "../spec/parse-time";
 import { formatNumericX, formatNumericTick, isAnnualSeries } from "./util";
 import type { XAxisType, XAxisPolicy } from "../spec/types";
@@ -23,23 +22,21 @@ export interface XOpts {
   markerToX: (m: { x: string }) => number | Date | string | null;
   /** Plot `x` scale options (numeric supplies an explicit domain). */
   xPlotOpts?: Record<string, unknown>;
-  /** Crosshair x parse/format overrides; undefined = crosshair auto-detects. */
+  /** Crosshair x parse/format. Every continuous adapter (numeric, temporal, quarterly) sets both;
+   *  only the categorical adapter leaves them undefined, and a categorical chart never reaches
+   *  attachCrosshair (it is dispatched to the catline or band crosshair first). */
   tooltipXParse?: (v: string) => number;
   tooltipXFormat?: (v: number) => string;
 }
 
-/** Per-chart options for `buildXOpts`. Named rather than positional: the axis has accumulated four
- *  independent switches, and the positional form left three of the four adapters declaring
- *  placeholder params they never read just to reach the last one. */
+/** Per-chart options for `buildXOpts`. Named rather than positional: the axis has accumulated
+ *  several independent switches, and the positional form left adapters declaring placeholder
+ *  params they never read just to reach the last one. */
 export interface BuildXOptsOptions {
-  /** Shared-mode small multiples: tag the x-axis label marks with `X_AXIS_LABEL_CLASS` so the grid
-   *  chrome collapse can keep the bottom-row copies and drop the duplicate rows. Default false →
-   *  no class → output byte-identical. */
-  faceted?: boolean;
   /** Categorical axis: horizontal / wrapped / rotated category labels. */
   labelMode?: BandLabelMode;
   /** Categorical axis: stamp the hover-accent hook class on the category labels — passed true for
-   *  bar/stacked charts only (see index.ts), so other categorical chart types (categorical-x line,
+   *  bar/stacked charts only (see pane.ts), so other categorical chart types (categorical-x line,
    *  dot plot) stay byte-identical. */
   tagCategoryLabels?: boolean;
   /** Reserved px between the plot frame's bottom edge and the tick labels — the x-axis rug's strip
@@ -54,8 +51,9 @@ export interface BuildXOptsOptions {
    *  ticks to, so unequal `pane_widths` still give every pane the same ticks and bottom margin.
    *  Absent → `dataWidth`. */
   tickWidth?: number;
-  /** Small multiples on a continuous axis: the range every pane shares (see `SharedXDomain`).
-   *  Absent → the axis fits this pane's own rows. Ignored on the categorical axis. */
+  /** Small multiples on a continuous axis: the range every pane shares (see `SharedXDomain`); a
+   *  single date-axis chart: its own drawn range (`drawnDateDomain`). Absent → the axis fits this
+   *  pane's own rows. Ignored on the categorical axis. */
   sharedX?: SharedXDomain;
   /** `x_ticks`: the candidate tick positions in the axis' units (epoch ms on a date axis) — the
    *  data's x values or the listed ones. Values outside the drawn range are dropped and the rest
@@ -63,14 +61,16 @@ export interface BuildXOptsOptions {
   tickValues?: number[];
 }
 
-/** One x range for every pane of a small-multiples figure, in the axis' own units (epoch ms on a
- *  date axis). Two spans because a temporal axis takes them from different places: its ticks come
- *  from the DATA, while Plot fits its scale over every mark, so a marker or band past the data
- *  widens the scale but not the ticks. A numeric axis has one span and both fields hold it. */
+/** One x range for every pane of a small-multiples figure, or a single date-axis chart's own
+ *  (`drawnDateDomain`), in the axis' own units (epoch ms on a date axis). Two spans because a
+ *  temporal axis takes them from different places: its ticks come from the DATA, while Plot fits
+ *  its scale over every mark, so a marker or band past the data widens the scale but not the
+ *  ticks. A numeric axis has one span and both fields hold it. */
 export interface SharedXDomain {
-  /** Union of every pane's data extent. */
+  /** The data extent: in a figure, the union of every pane's; on a single chart, its own. */
   data: [number, number];
-  /** Union of every pane's drawn x-scale domain. */
+  /** The drawn x-scale domain: in a figure, the union of every pane's; on a single chart, its data
+   *  widened to its annotations and connectors (`drawnDateDomain`). */
   scale: [number, number];
 }
 
@@ -106,6 +106,53 @@ function sortedInRange(values: number[], lo: number, hi: number): number[] {
   return [...new Set(values)].filter((v) => v >= lo && v <= hi).sort((a, b) => a - b);
 }
 
+/** A point-callout connector whose label end sits `dxPx` px along x from its point at `x` (epoch ms):
+ *  assemblePlot draws that end at `x + dxPx * span / plotWidth`, a data coordinate. */
+export interface SidewaysLeader {
+  x: number;
+  dxPx: number;
+}
+
+/** The range a single (non-small-multiples) date-axis chart is DRAWN over: its data extent widened
+ *  to every x its annotations draw at (`annotationXs`, epoch ms), then to the label end of every
+ *  sideways connector (`leaders`), so that everything that maps px <-> data before the render
+ *  (overlay `domain: "axis"`, label stagger, callout geometry) reads the scale actually drawn. The
+ *  axis is handed this span explicitly, as a figure pane's `sharedX` is.
+ *
+ *  A connector's end depends on the span it widens (its px offset is converted at span / plotWidth
+ *  data units per px), so the span is the least one that holds every end: for the binding right end
+ *  `x_r + b_r*s` and left end `x_l + b_l*s` (b = dxPx / plotWidth), s = (x_r - x_l) / (1 - b_r + b_l),
+ *  maximised over the candidate pairs (the annotation-widened edges count, with b = 0). Exact, so
+ *  the binding end lands ON the frame edge rather than past it. A connector reaching a full plot
+ *  width or more (1 - b_r + b_l <= 0) has no such span and is left to overhang. */
+export function drawnDateDomain(
+  dataExtent: [number, number],
+  annotationXs: number[],
+  leaders: SidewaysLeader[] = [],
+  plotWidth?: number,
+): SharedXDomain {
+  let [lo, hi] = dataExtent;
+  for (const x of annotationXs) {
+    if (x < lo) lo = x;
+    if (x > hi) hi = x;
+  }
+  if (leaders.length && plotWidth! > 0) {
+    const w = plotWidth!;
+    const right: Array<[number, number]> = [[hi, 0], ...leaders.filter((l) => l.dxPx > 0).map((l): [number, number] => [l.x, l.dxPx / w])];
+    const left: Array<[number, number]> = [[lo, 0], ...leaders.filter((l) => l.dxPx < 0).map((l): [number, number] => [l.x, l.dxPx / w])];
+    let span = hi - lo;
+    for (const [xr, br] of right) {
+      for (const [xl, bl] of left) {
+        const den = 1 - br + bl;
+        if (den > 0) span = Math.max(span, (xr - xl) / den);
+      }
+    }
+    for (const [x, b] of right) hi = Math.max(hi, x + b * span);
+    for (const [x, b] of left) lo = Math.min(lo, x + b * span);
+  }
+  return { data: dataExtent, scale: [lo, hi] };
+}
+
 /** Reads an `XOpts.xPlotOpts.domain` as a numeric span, for callers that map px <-> data against
  *  the DRAWN axis. Numbers pass through; Dates (a temporal histogram's bin-edge span) become epoch
  *  ms; anything else is not a span — notably the categorical adapter's `domain`, which is the list
@@ -116,6 +163,56 @@ export function numericAxisDomain(domain: unknown): [number, number] | undefined
   const hi = domain[1] instanceof Date ? domain[1].getTime() : domain[1];
   // Number.isFinite does NOT coerce, so a category string fails here rather than becoming NaN.
   return Number.isFinite(lo) && Number.isFinite(hi) ? [lo as number, hi as number] : undefined;
+}
+
+/** The two date axes, temporal and quarterly: one domain / ticks / margin / scale build, differing
+ *  only in how an x string parses (`parse`, for markers and the crosshair) and formats in the card,
+ *  and in a temporal histogram's bin-edge span (`histogramDomain`). */
+function dateAdapter(cfg: {
+  xType: "temporal" | "quarterly";
+  parse: (v: string) => Date;
+  histogramDomain: [number, number] | undefined;
+  /** The card's x format, which may read the pane's rows. */
+  tooltipXFormat: (data: Array<Record<string, any>>) => (v: number) => string;
+}): XAdapter {
+  const { xType, parse, histogramDomain } = cfg;
+  return {
+    parseX: (v) => parseXValue(xType, v),
+    xField: "_xd",
+    validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
+    buildXOpts(data, { bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
+      const tooltipXFormat = cfg.tooltipXFormat(data);
+      let xDomain: [Date, Date];
+      if (histogramDomain) {
+        xDomain = [new Date(histogramDomain[0]), new Date(histogramDomain[1])];
+      } else if (sharedX) {
+        xDomain = [new Date(sharedX.data[0]), new Date(sharedX.data[1])];
+      } else {
+        const xs = data.map((r) => +r._xd);
+        xDomain = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
+      }
+      const ticks = dateAxisTicks(xDomain, tickWidth, sharedX?.scale, tickValues);
+      // axis:null/label:null so Plot draws NO native axis — the engine's tblTemporalXAxis marks are
+      // the axis. Without this, xPlotOpts replaces the whole x-scale (assemble-plot merges by
+      // assignment, not over the default) and Plot's native ticks render on top → doubled labels.
+      const xPlotOpts = histogramDomain
+        ? { type: "utc", domain: xDomain, axis: null, label: null }
+        : sharedX
+          ? { domain: sharedX.scale.map((v) => new Date(v)), axis: null, label: null }
+          : undefined;
+      return {
+        marginBottom: temporalMarginBottom(ticks) + bottomGutter,
+        ...(xPlotOpts ? { xPlotOpts } : {}),
+        axisMarks: tblTemporalXAxis(xDomain, tickWidth, bottomGutter, sharedX?.scale, ticks),
+        // The SAME local-midnight parse as the chart's own points (parseDate / parseQuarter), not
+        // `new Date(string)` — that parses YYYY-MM-DD as UTC and then formats in local time,
+        // shifting "2022-01-01" to "Dec 2021" in negative-offset zones (and mis-snapping the guide).
+        markerToX: (m) => parse(m.x),
+        tooltipXParse: (v) => +parse(v),
+        tooltipXFormat,
+      };
+    },
+  };
 }
 
 export function makeXAdapter(
@@ -129,7 +226,7 @@ export function makeXAdapter(
       parseX: (v) => parseXValue("numeric", v),
       xField: "_xn",
       validate: (r) => Number.isFinite(r._xn),
-      buildXOpts(data, { faceted = false, bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
+      buildXOpts(data, { bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
         // Histogram: the domain is the caller-supplied bin-edge span, not the data range (the
         // "data" here is already-binned counts, which must NOT drive the x domain).
         if (histogramDomain) {
@@ -138,7 +235,6 @@ export function makeXAdapter(
             xPlotOpts: { type: "linear", label: null, axis: null, domain: histogramDomain },
             axisMarks: tblXAxis(
               { xTickFormat: (d: unknown) => formatNumericTick(+(d as number)) },
-              faceted ? X_AXIS_LABEL_CLASS : undefined,
               bottomGutter,
             ),
             markerToX: (m) => +m.x,
@@ -146,10 +242,12 @@ export function makeXAdapter(
             tooltipXFormat: (v) => formatNumericX(+v),
           };
         }
-        const xMax = sharedX ? sharedX.scale[1] : (d3.max(data, (d: any) => d._xn) as number);
         // Default OFF: a numeric axis fits its data range. Anchoring at zero is surprising for a
-        // year axis (it squishes all history to the right); opt in with anchorAtZero: true.
+        // year axis (it squishes all history to the right); opt in with anchorAtZero: true. It moves
+        // whichever end is short of 0: the maximum too when every x is negative.
         const anchorAtZero = xAxisPolicy?.anchorAtZero === true;
+        const dataMax = d3.max(data, (d: any) => d._xn) as number;
+        const xMax = sharedX ? sharedX.scale[1] : anchorAtZero && dataMax != null ? Math.max(0, dataMax) : dataMax;
         const xMin = sharedX
           ? sharedX.scale[0]
           : anchorAtZero
@@ -183,7 +281,6 @@ export function makeXAdapter(
           // TEMPORAL axis, which parses and labels it correctly (see `parseDate`).
           axisMarks: tblXAxis(
             { xTickFormat: (d: unknown) => formatNumericTick(+(d as number)), ...(ticks ? { ticks } : {}) },
-            faceted ? X_AXIS_LABEL_CLASS : undefined,
             bottomGutter,
           ),
           markerToX: (m) => +m.x,
@@ -196,11 +293,12 @@ export function makeXAdapter(
     };
   }
   if (xType === "temporal") {
-    return {
-      parseX: (v) => parseXValue("temporal", v),
-      xField: "_xd",
-      validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
-      buildXOpts(data, { faceted = false, bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
+    return dateAdapter({
+      xType,
+      parse: parseDate,
+      // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
+      histogramDomain,
+      tooltipXFormat(data) {
         // An ANNUAL series — every point on 1 January — is identified by its year alone, so the
         // month in the card is noise: `Jan 1950` under an axis reading `1950`. The axis already
         // collapses a year-cadence span to a bare `%Y` (`tblTemporalXAxis`), and this stops the
@@ -210,64 +308,24 @@ export function makeXAdapter(
         const annualData =
           data.every((d: any) => (d._xd as unknown) instanceof Date) &&
           isAnnualSeries(data.map((d: any) => d._xd as Date));
-        // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
-        let xDomain: [Date, Date];
-        if (histogramDomain) {
-          xDomain = [new Date(histogramDomain[0]), new Date(histogramDomain[1])];
-        } else if (sharedX) {
-          xDomain = [new Date(sharedX.data[0]), new Date(sharedX.data[1])];
-        } else {
-          const xs = data.map((r) => +r._xd);
-          xDomain = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
-        }
-        const ticks = dateAxisTicks(xDomain, tickWidth, sharedX?.scale, tickValues);
-        return {
-          marginBottom: temporalMarginBottom(ticks) + bottomGutter,
-          // axis:null/label:null so Plot draws NO native axis — the engine's tblTemporalXAxis marks
-          // are the axis. Without this, xPlotOpts replaces the whole x-scale (assemble-plot merges by
-          // assignment, not over the default) and Plot's native ticks render on top → doubled labels.
-          xPlotOpts: histogramDomain
-            ? { type: "utc", domain: xDomain, axis: null, label: null }
-            : sharedX
-              ? { domain: sharedX.scale.map((v) => new Date(v)), axis: null, label: null }
-              : undefined,
-          axisMarks: tblTemporalXAxis(xDomain, tickWidth, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter, sharedX?.scale, ticks),
-          markerToX: (m) => parseDate(m.x),
-          // Use the SAME local-midnight parse as the chart's line points (parseDate), not the
-          // crosshair's `new Date(string)` auto-detect — that parses YYYY-MM-DD as UTC and then
-          // formats in local time, shifting "2022-01-01" to "Dec 2021" in negative-offset zones
-          // (and mis-snapping the guide). Default to a single-line "%b %Y" to match the axis —
-          // which is wrong only when the data is finer than the ticks (a daily series has every
-          // point in a month sharing one label), hence spec.tooltip_x_format.
-          tooltipXParse: (v) => +parseDate(v),
-          tooltipXFormat: (v) => d3.timeFormat(tooltipXFormatPattern ?? (annualData ? "%Y" : "%b %Y"))(new Date(v)),
-        };
+        // Default to a single-line "%b %Y" to match the axis — which is wrong only when the data is
+        // finer than the ticks (a daily series has every point in a month sharing one label), hence
+        // spec.tooltip_x_format.
+        return (v) => d3.timeFormat(tooltipXFormatPattern ?? (annualData ? "%Y" : "%b %Y"))(new Date(v));
       },
-    };
+    });
   }
   if (xType === "quarterly") {
-    return {
-      parseX: (v) => parseXValue("quarterly", v),
-      xField: "_xd",
-      validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
-      buildXOpts(data, { faceted = false, bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
-        const xs = data.map((r) => +r._xd);
-        const xDomain: [Date, Date] = sharedX
-          ? [new Date(sharedX.data[0]), new Date(sharedX.data[1])]
-          : [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
-        const ticks = dateAxisTicks(xDomain, tickWidth, sharedX?.scale, tickValues);
-        return {
-          marginBottom: temporalMarginBottom(ticks) + bottomGutter,
-          ...(sharedX ? { xPlotOpts: { domain: sharedX.scale.map((v) => new Date(v)), axis: null, label: null } } : {}),
-          axisMarks: tblTemporalXAxis(xDomain, tickWidth, faceted ? X_AXIS_LABEL_CLASS : undefined, bottomGutter, sharedX?.scale, ticks),
-          markerToX: (m) => parseQuarter(m.x),
-          tooltipXParse: (v) => +parseQuarter(v),
-          tooltipXFormat: tooltipXFormatPattern
-            ? (v) => d3.timeFormat(tooltipXFormatPattern)(new Date(v))
-            : (v) => formatQuarter(new Date(v)),
-        };
-      },
-    };
+    return dateAdapter({
+      xType,
+      parse: parseQuarter,
+      // A quarterly axis takes no histogram span: a histogram's x is numeric or temporal.
+      histogramDomain: undefined,
+      tooltipXFormat: () =>
+        tooltipXFormatPattern
+          ? (v) => d3.timeFormat(tooltipXFormatPattern)(new Date(v))
+          : (v) => formatQuarter(new Date(v)),
+    });
   }
   if (xType === "categorical") {
     return {
@@ -275,7 +333,7 @@ export function makeXAdapter(
       parseX: (v) => parseXValue("categorical", v),
       xField: "_xc",
       validate: (r) => typeof r._xc === "string" && r._xc !== "",
-      buildXOpts(data, { faceted = false, labelMode = "single", tagCategoryLabels = false }: BuildXOptsOptions = {}) {
+      buildXOpts(data, { labelMode = "single", tagCategoryLabels = false }: BuildXOptsOptions = {}) {
         // Category domain in data-encounter order (Style-Guide: declaration order is
         // authoritative; never auto-sort by magnitude).
         const seen = new Set<string>();
@@ -300,7 +358,6 @@ export function makeXAdapter(
           axisMarks: tblBandXAxis(
             categories,
             "x",
-            faceted ? X_AXIS_LABEL_CLASS : undefined,
             labelMode,
             tagCategoryLabels,
           ),

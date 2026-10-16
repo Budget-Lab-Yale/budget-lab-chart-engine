@@ -7,22 +7,15 @@
 // Both layouts are built in ONE real page (Chromium), so the live column and the export's measured
 // column wrap their labels with the same fonts and the same text measurement.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
-import { chromium, type Browser } from "playwright";
+import { readFileSync } from "node:fs";
+import type { Browser } from "playwright";
 import { EXPORT_BUNDLE_PATH } from "./setup/global-build";
 import { CHART_CSS } from "../src/embed/styles";
 import { INNER_W } from "../src/embed/figure-chrome";
 import { LEGEND_COLUMN_WIDTH, LEGEND_GAP } from "../src/engine/legend-layout";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
-
-const HAS_BROWSER = (() => {
-  try {
-    return existsSync(chromium.executablePath());
-  } catch {
-    return false;
-  }
-})();
+import { HAS_BROWSER, launchBrowser, closeBrowser, CLOSE_HOOK_TIMEOUT_MS } from "./helpers/browser";
 
 // Real Chromium under parallel suite load: see test/tooltip-divider-visibility.test.ts.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
@@ -90,11 +83,9 @@ interface Geometry {
 
 let browser: Browser;
 beforeAll(async () => {
-  if (HAS_BROWSER) browser = await chromium.launch();
+  if (HAS_BROWSER) browser = await launchBrowser();
 });
-afterAll(async () => {
-  await browser?.close();
-});
+afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
 /** Live and export geometry for one spec, measured in the same page. */
 async function measure(spec: ChartSpec, rows: TidyRow[]): Promise<{ live: Geometry; png: Geometry }> {

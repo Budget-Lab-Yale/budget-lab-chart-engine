@@ -4,8 +4,6 @@
 // usual legendItems, render-live places them top or right and wires the data-series highlight, and
 // the PNG export draws them through its ordinary legend paths. Flat data has no legend.
 import { describe, it, expect, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { renderChart } from "../src/engine/index";
 import { mountChart } from "../src/engine/render-live";
 import { buildExportSvg } from "../src/embed/export-png";
@@ -17,18 +15,9 @@ import { locateOnRamp } from "../src/engine/palette";
 import { treemapShades } from "../src/engine/treemap-labels";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { csvFixtureReader } from "./helpers/csv";
 
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 const BLS = parseCsv("./fixtures/treemap-bls.csv");
 const GROUPED = parseCsv("./fixtures/treemap-grouped.csv");
 const FLAT_SPEC = {
@@ -95,6 +84,7 @@ describe("renderTreemap legendItems", () => {
       const spec = { ...SPEC, series_order: [], ...(series_colors ? { series_colors } : {}) } as ChartSpec;
       const res = renderChart(spec, rows, { width: [375, 599, 920][c % 3]! });
       const chip = new Map(res.legendItems!.map((i) => [i.series, i.color!]));
+      expect(q(res.svg, "g[data-series]").length).toBeGreaterThan(0);
       for (const g of q(res.svg, "g[data-series]")) {
         const color = chip.get(g.getAttribute("data-series")!)!;
         const fill = g.querySelector("rect")!.getAttribute("fill")!;

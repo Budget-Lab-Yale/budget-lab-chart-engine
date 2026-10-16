@@ -46,7 +46,9 @@ describe("series_patterns on a stacked bar", () => {
     for (const rect of hatched) {
       expect(rect.style.fill).toMatch(patternRef("fwd"));
     }
-    for (const rect of segmentsFor(svg, "collectedNew")) {
+    const flat = segmentsFor(svg, "collectedNew");
+    expect(flat.length).toBeGreaterThan(0);
+    for (const rect of flat) {
       expect(rect.style.fill).toBe("");
     }
   });
@@ -99,6 +101,7 @@ describe("series_patterns on a stacked bar", () => {
   it("emits no <pattern> at all when the spec declares none", () => {
     const { svg } = renderChart(STACKED, ROWS, OPTS);
     expect(svg.querySelector("pattern")).toBeNull();
+    expect(segments(svg).length).toBeGreaterThan(0);
     for (const rect of segments(svg)) expect(rect.style.fill).toBe("");
   });
 
@@ -225,7 +228,9 @@ describe("series_patterns across chart types", () => {
     );
     // navy total, blue increase, red decrease — three distinct grounds, three distinct patterns.
     expect(new Set(grounds).size).toBe(3);
-    for (const bar of svg.querySelectorAll<SVGElement>('g[aria-label="bar"] rect[data-series]')) {
+    const bars = svg.querySelectorAll<SVGElement>('g[aria-label="bar"] rect[data-series]');
+    expect(bars.length).toBeGreaterThan(0);
+    for (const bar of bars) {
       expect(bar.style.fill).toMatch(patternRef("cross"));
     }
   });

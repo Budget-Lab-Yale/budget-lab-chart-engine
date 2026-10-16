@@ -6,27 +6,18 @@
 //   1. fx/fy facets INSIDE one plot — grouped vertical bars (fx per category) and horizontal bars
 //      (fy per category). Plot emits ONE cell-sized clipPath and lets each facet group's translate
 //      move it, so the clip must be verified per cell, not per SVG.
-//   2. small_multiples — both modes are per-pane compositions (each pane its own single-frame SVG,
-//      see FacetInfo's DORMANT note), so each pane hits the single-frame clip path independently and
-//      only the panes whose data exceeds the domain are clipped.
+//   2. small_multiples — both modes are per-pane compositions (each pane its own single-frame SVG),
+//      so each pane hits the single-frame clip path independently and only the panes whose data
+//      exceeds the domain are clipped.
 //
 // The jsdom assertions can only prove the clip-path attributes are wired. Whether the geometry is
 // actually clipped — and clipped to the right CELL rather than to the whole frame — needs a real
 // renderer, so the last block rasterizes through headless Chromium and counts bar-colored pixels.
 import { describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
 import { renderChart, renderFigure } from "../src/engine/index";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
-
-const HAS_BROWSER = (() => {
-  try {
-    return existsSync(chromium.executablePath());
-  } catch {
-    return false;
-  }
-})();
+import { HAS_BROWSER, launchBrowser, closeBrowser } from "./helpers/browser";
 
 const CATS = ["Alpha", "Beta", "Gamma"];
 const SERIES = ["2019", "2022"];
@@ -109,7 +100,9 @@ describe("fx facets (grouped vertical bars) — truncated value axis", () => {
     const { svg } = renderChart(spec, groupedRows(), { width: 720, height: 400, document });
     // One cell-sized rect shared by every cell only lands correctly because each facet group's
     // own transform moves it — so the clip must sit on (or under) the translated group.
-    for (const g of Array.from(svg.querySelectorAll('g[aria-label="bar"] [clip-path]'))) {
+    const clipped = Array.from(svg.querySelectorAll('g[aria-label="bar"] [clip-path]'));
+    expect(clipped.length, "no clipped bar group: the loop below would assert nothing").toBeGreaterThan(0);
+    for (const g of clipped) {
       const ownT = g.getAttribute("transform");
       const parentT = (g.parentElement as Element | null)?.getAttribute("transform");
       expect(ownT ?? parentT).toMatch(/translate\(/);
@@ -311,7 +304,7 @@ describe.skipIf(!HAS_BROWSER)("rasterized — faceted clip confines marks to the
   async function raster(svg: SVGSVGElement) {
     const { PNG } = await import("pngjs");
     const markup = new XMLSerializer().serializeToString(svg);
-    const browser = await chromium.launch({ headless: true });
+    const browser = await launchBrowser({ headless: true });
     try {
       const page = await browser.newPage({
         viewport: { width: 900, height: 600 },
@@ -324,7 +317,7 @@ describe.skipIf(!HAS_BROWSER)("rasterized — faceted clip confines marks to the
       const shot = (await page.locator("svg").first().screenshot({ type: "png" })) as Buffer;
       return PNG.sync.read(shot);
     } finally {
-      await browser.close();
+      await closeBrowser(browser);
     }
   }
 

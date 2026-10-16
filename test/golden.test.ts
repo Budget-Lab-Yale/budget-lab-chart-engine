@@ -8,9 +8,8 @@
 // This is the headless engine path (engine/index.ts → assemblePlot) running under jsdom,
 // so it also proves the render is deterministic and DOM-document-injectable for SSR.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { renderChart, renderFigure, render, TOTAL_SERIES_KEY } from "../src/engine/index";
+import { renderChart, renderFigure, TOTAL_SERIES_KEY } from "../src/engine/index";
+import { mountChart } from "../src/engine/render-live";
 import type { FigureRenderResult, FigurePane } from "../src/engine/index";
 import { buildStackedMarks } from "../src/engine/marks/stacked";
 import type { PreparedRow, MarkLayers } from "../src/engine/marks/index";
@@ -24,45 +23,24 @@ import {
   TBL_MARGIN_LEFT,
   TBL_MARGIN_RIGHT,
 } from "../src/engine/theme";
-import { paneTitleMark, temporalXTicks } from "../src/engine/axes";
+import { temporalXTicks } from "../src/engine/axes";
 
 import { makeXAdapter } from "../src/engine/x-adapter";
 import { resolveColor } from "../src/engine/palette";
-import { computeYAxis } from "../src/engine/scales";
 import { makeTickFormatter } from "../src/engine/scales";
-import { X_AXIS_LABEL_CLASS } from "../src/engine/facet-chrome";
-import { parseDate } from "../src/spec/parse-time";
 import { horizontalBarChartHeight } from "../src/engine/figure";
+import { csvFixtureReader } from "./helpers/csv";
+import { translateOf } from "./helpers/geometry";
 
 // Minimal CSV → TidyRow[]. The real data layer (engine step 5) handles quoting/remote
 // sources; these fixtures are deliberately comma-free so a plain split suffices.
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 
 // Absolute x of an SVG element, accumulating every `transform="translate(x,y)"` up the
 // ancestor chain to the root <svg>. jsdom has no layout engine, so we read the transforms
 // Plot emits (per-element + per-group) directly. Used to assert label-vs-bar alignment.
 function absX(el: Element | null): number {
-  let x = 0;
-  let n: Element | null = el;
-  while (n && n.tagName.toLowerCase() !== "svg") {
-    const tf = n.getAttribute("transform");
-    if (tf) {
-      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
-      if (m) x += Number(m[1]);
-    }
-    n = n.parentElement;
-  }
-  return x;
+  return translateOf(el)[0];
 }
 
 // Mirror of absX: absolute y of an SVG element, accumulating every ancestor
@@ -72,17 +50,7 @@ function absX(el: Element | null): number {
 const isSectionSpacer = (t: string): boolean => t.startsWith(" section:");
 
 function absY(el: Element | null): number {
-  let y = 0;
-  let n: Element | null = el;
-  while (n && n.tagName.toLowerCase() !== "svg") {
-    const tf = n.getAttribute("transform");
-    if (tf) {
-      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
-      if (m) y += Number(m[2]);
-    }
-    n = n.parentElement;
-  }
-  return y;
+  return translateOf(el)[1];
 }
 
 const GRADS_SPEC: ChartSpec = {
@@ -662,18 +630,18 @@ describe("golden SVG — bar category_colors / bar_color", () => {
       rows,
       { width: 720, height: 400, document },
     ).svg;
-    Array.from(highlighted.querySelectorAll('g[aria-label="bar"] rect')).forEach((r) =>
-      expect(r.getAttribute("fill")).toBe(resolveColor("amber")),
-    );
+    const highlightedBars = Array.from(highlighted.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(highlightedBars.length).toBeGreaterThan(0);
+    highlightedBars.forEach((r) => expect(r.getAttribute("fill")).toBe(resolveColor("amber")));
     // Not highlighted: dimming wins over bar_color.
     const dimmed = renderChart(
       { ...BAR_SINGLE_SPEC, bar_color: "amber", highlightSeries: ["Other"] },
       rows,
       { width: 720, height: 400, document },
     ).svg;
-    Array.from(dimmed.querySelectorAll('g[aria-label="bar"] rect')).forEach((r) =>
-      expect(r.getAttribute("fill")).toBe(TBL.color.annotationDim),
-    );
+    const dimmedBars = Array.from(dimmed.querySelectorAll('g[aria-label="bar"] rect'));
+    expect(dimmedBars.length).toBeGreaterThan(0);
+    dimmedBars.forEach((r) => expect(r.getAttribute("fill")).toBe(TBL.color.annotationDim));
   });
 });
 
@@ -723,12 +691,13 @@ describe("D6: horizontal xAxis marker label sits in the top margin (fig07b regre
   });
 });
 
-// --- Faceted horizontal bars (Figure 7: scenario groups, grouped Pre/Post bars) ---
+// --- Grouped horizontal bars (Figure 7: scenario groups, grouped Pre/Post bars) ---
 //
-// A horizontal chart draws columns.facet as groups in one chart, as columns.section does (Ruling 80;
-// spec/facet-groups.ts), so this renders through renderChart.
+// The scenarios are sections of one chart (columns.section; columns.facet is rejected on a horizontal
+// chart, spec/facet-groups.ts). The golden was recorded from the facet spelling, which Ruling 80
+// mapped exactly to this one.
 
-const FIG7_FACETED_SPEC: ChartSpec = {
+const FIG7_GROUPED_SPEC: ChartSpec = {
   chartType: "bar",
   title: "Consumer Price Effects by PCE Spending Category",
   subtitle: "Percent change in consumer prices",
@@ -736,15 +705,12 @@ const FIG7_FACETED_SPEC: ChartSpec = {
   xAxisType: "categorical",
   orientation: "horizontal",
   series_order: ["Pre-Substitution", "Post-Substitution"],
-  columns: { x: "category", value: "value", series: "series", facet: "facet" },
-  small_multiples: {
-    mode: "shared",
-    pane_order: ["Section 122 Expires", "Section 122 Extended"],
-  },
+  columns: { x: "category", value: "value", series: "series", section: "facet" },
+  section_order: ["Section 122 Expires", "Section 122 Extended"],
   data: "figure7-tariff.csv",
 };
 
-describe("faceted horizontal bars draw as groups (Figure 7)", () => {
+describe("grouped horizontal bars (Figure 7)", () => {
   // At the height the live mount and the PNG export give it (it grows with its rows), not the
   // 353px default, which squeezes 80 bars to 2px.
   const fig7 = (spec: ChartSpec, rows: TidyRow[]) =>
@@ -755,9 +721,9 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
       .sort((a, b) => a.y - b.y)
       .map((h) => h.text);
 
-  it("one chart: a title per facet in pane_order over its own rows, one value axis", () => {
+  it("one chart: a title per section in section_order over its own rows, one value axis", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = fig7(FIG7_FACETED_SPEC, rows);
+    const { svg } = fig7(FIG7_GROUPED_SPEC, rows);
     expect(groupTitles(svg)).toEqual(["Section 122 Expires", "Section 122 Extended"]);
     // Both groups' bars: 2 groups × 20 categories × 2 series.
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(80);
@@ -772,7 +738,7 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
 
   it("wraps long category labels onto multiple lines (no overflow into the plot)", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = fig7(FIG7_FACETED_SPEC, rows);
+    const { svg } = fig7(FIG7_GROUPED_SPEC, rows);
     const wrapped = Array.from(svg.querySelectorAll("text")).find((t) =>
       (t.textContent ?? "").startsWith("Food and beverages"),
     );
@@ -782,15 +748,15 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
 
   it("x_axis_ticks 'both' draws one value-tick row at the top and one at the bottom", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = fig7({ ...FIG7_FACETED_SPEC, x_axis_ticks: "both" }, rows);
+    const { svg } = fig7({ ...FIG7_GROUPED_SPEC, x_axis_ticks: "both" }, rows);
     expect(svg.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
     expect(svg.querySelectorAll("g.tbl-x-tick-label-top").length).toBe(1);
   });
 
   it("is deterministic and matches the golden", async () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const a = fig7(FIG7_FACETED_SPEC, rows).svg.outerHTML;
-    const b = fig7(FIG7_FACETED_SPEC, rows).svg.outerHTML;
+    const a = fig7(FIG7_GROUPED_SPEC, rows).svg.outerHTML;
+    const b = fig7(FIG7_GROUPED_SPEC, rows).svg.outerHTML;
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-grouped.golden.svg");
   });
@@ -1457,143 +1423,11 @@ describe("golden SVG — stacked bars", () => {
   });
 });
 
-// --- Shared-mode small multiples (task B3) ---
-//
-// Builds a 2x2 faceted line plot directly via assemblePlot (the figure orchestrator B4 will
-// drive this the same way). Each region is one pane; the shared y-scale + fx/fy facet grid
-// renders as ONE SVG. The chrome must collapse to: y-tick labels on the LEFT column only,
-// x-axis labels on the BOTTOM row only, a pane title per cell, per-pane gridlines.
-
-// 2x2 layout: Northeast (0,0), Midwest (1,0), South (0,1), West (1,1).
-const FACET_LAYOUT: Record<string, { col: number; row: number }> = {
-  Northeast: { col: 0, row: 0 },
-  Midwest: { col: 1, row: 0 },
-  South: { col: 0, row: 1 },
-  West: { col: 1, row: 1 },
-};
-
-function buildFacetedPlot() {
-  const rows = parseCsv("./fixtures/facet-regions.csv");
-  // Parse into PreparedRows carrying the temporal x + the facet grid-index fields.
-  const data: PreparedRow[] = rows.map((r) => {
-    const facet = r.facet as string;
-    const cell = FACET_LAYOUT[facet] as { col: number; row: number };
-    return {
-      series: r.series as string,
-      time: r.time as string,
-      _y: r.value === "" ? null : +(r.value as string),
-      _xd: parseDate(r.time as string),
-      _facet: facet,
-      _fxCol: String(cell.col),
-      _fyRow: String(cell.row),
-    };
-  });
-
-  // Faceted line overlay: the line mark carries the fx/fy facet channels.
-  const overlay = [
-    Plot.line(data, {
-      x: "_xd",
-      y: "_y",
-      z: "series",
-      fx: "_fxCol",
-      fy: "_fyRow",
-      stroke: TBL.color.blue,
-      strokeWidth: TBL.strokeWidth.solid,
-      defined: (r: PreparedRow) => Number.isFinite(r._y),
-    }),
-  ];
-
-  // Shared y-axis across all panes.
-  const { domain: yDomain, ticks: yTicks } = computeYAxis(
-    data.map((d) => d._y),
-    { includeZero: true, tickCount: 5 },
-  );
-
-  // Shared temporal x-axis built through the REAL adapter with the faceted flag set, so the
-  // adapter (not the test) is what tags the x-axis label marks with X_AXIS_LABEL_CLASS. This
-  // exercises the production path end-to-end: buildXOpts(data, { faceted: true }) →
-  // tblTemporalXAxis with the class → grid collapse keeps the bottom row.
-  const xOpts = makeXAdapter("temporal").buildXOpts(data, { faceted: true });
-
-  const layers: MarkLayers = {
-    underlay: [],
-    overlay,
-    tagging: [],
-    dashedNames: new Set<string>(),
-  };
-
-  const cells = Object.entries(FACET_LAYOUT).map(([title, { col, row }]) => ({
-    col,
-    row,
-    title,
-  }));
-
-  const spec: ChartSpec = {
-    chartType: "line",
-    title: "Trend by region",
-    subtitle: "Index",
-    xAxisType: "temporal",
-    data: "facet-regions.csv",
-    columns: { facet: "facet" },
-    small_multiples: { columns: 2, mode: "shared" },
-  };
-
-  return assemblePlot({
-    layers,
-    yDomain,
-    yTicks,
-    valueAffixes: { prefix: "", suffix: "" },
-    xOpts,
-    seriesNames: ["Series"],
-    colors: new Map([["Series", TBL.color.blue]]),
-    spec,
-    width: 720,
-    height: 460,
-    document,
-    classNameSuffix: "facet",
-    facet: { columns: 2, rows: 2, cells },
-  }).svg;
-}
-
-describe("golden SVG — shared-mode small multiples", () => {
-  it("renders a 2x2 faceted line grid with collapsed chrome", async () => {
-    const svg = buildFacetedPlot();
-    expect(svg.tagName.toLowerCase()).toBe("svg");
-
-    // ONE left-column y-tick-label set: 2 rows x (originally 2 columns) collapse to 2 groups
-    // (one per row, leftmost column only).
-    const yLabelGroups = svg.querySelectorAll("g.tbl-y-tick-label");
-    expect(yLabelGroups.length).toBe(2);
-
-    // X-axis labels: bottom row only. The temporal axis emits 2 text marks (month + year),
-    // each faceted into the grid; after collapse each keeps only its bottom-row copies =
-    // 2 columns. So 2 marks x 2 bottom-row cells = 4 groups.
-    const xLabelGroups = svg.querySelectorAll(`g.${X_AXIS_LABEL_CLASS}`);
-    expect(xLabelGroups.length).toBe(4);
-
-    // A pane title per cell (4 panes → 4 title groups, none collapsed).
-    const titleTexts = Array.from(
-      svg.querySelectorAll("g.tbl-pane-title text"),
-    ).map((t) => t.textContent);
-    expect(titleTexts.sort()).toEqual(["Midwest", "Northeast", "South", "West"]);
-
-    await expect(svg.outerHTML).toMatchFileSnapshot("./fixtures/facet-regions.golden.svg");
-  });
-
-  it("faceted grid render is deterministic (byte-identical)", () => {
-    const a = buildFacetedPlot().outerHTML;
-    const b = buildFacetedPlot().outerHTML;
-    expect(a).toBe(b);
-  });
-});
-
 // --- Figure orchestrator: shared-mode small multiples (task B4) ---
 //
 // Drives the WHOLE figure path through `renderFigure`: the orchestrator partitions the
 // facet-regions fixture by `facet`, lays out a 2x2 grid, computes ONE shared y-domain, and
-// (via renderPane → assemblePlot's `facet` option) renders ONE faceted SVG. The line mark
-// builder binds fx/fy from the MarkContext facet fields. Asserts grid + collapsed chrome +
-// pane titles, then locks the combined SVG to a golden.
+// renders one SVG per pane through renderPane, then locks the panes to a golden.
 
 const FIGURE_SPEC: ChartSpec = {
   chartType: "line",
@@ -1616,7 +1450,6 @@ describe("golden figure — shared-mode small multiples (renderFigure, rewritten
 
     // Shared mode is now a per-pane composition: NO combined SVG, one SVG per pane.
     expect(fig.mode).toBe("shared");
-    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(4);
     expect(fig.columns).toBe(2);
     expect(fig.rows).toBe(2);
@@ -1795,22 +1628,16 @@ describe("golden figure — shared-mode small multiples (renderFigure, rewritten
       .toBe((shared.panes[0]!.svg as SVGSVGElement).querySelectorAll('g[aria-label="bar"] rect').length);
   });
 
-  it("render() dispatches: small_multiples -> figure, else -> single chart", () => {
-    const figRows = parseCsv("./fixtures/facet-regions.csv");
-    const fig = render(FIGURE_SPEC, figRows, { width: 720, height: 460, document }) as FigureRenderResult;
-    expect(fig.mode).toBe("shared");
-    // Shared mode no longer produces a combined SVG; it is a per-pane composition.
-    expect(fig.combinedSvg).toBeUndefined();
-    expect(fig.panes.length).toBe(4);
+  it("mountChart dispatches: small_multiples -> figure grid, else -> single chart", () => {
+    const fig = document.createElement("div");
+    mountChart(fig, { spec: FIGURE_SPEC, rows: parseCsv("./fixtures/facet-regions.csv"), width: 720 });
+    expect(fig.querySelectorAll(".figure-grid .figure-pane").length).toBe(4);
 
-    // No small_multiples → renderChart's RenderResult (a single `svg`, no `combinedSvg`).
-    const single = render(GRADS_SPEC, parseCsv("./fixtures/grads-recent.csv"), {
-      width: 720,
-      height: 400,
-      document,
-    });
-    expect("combinedSvg" in single).toBe(false);
-    expect((single as { svg: SVGSVGElement }).svg.tagName.toLowerCase()).toBe("svg");
+    // No small_multiples → the single-chart mount: one canvas SVG, no pane grid.
+    const single = document.createElement("div");
+    mountChart(single, { spec: GRADS_SPEC, rows: parseCsv("./fixtures/grads-recent.csv"), width: 720 });
+    expect(single.querySelector(".figure-grid")).toBeNull();
+    expect(single.querySelectorAll(".figure-canvas > svg").length).toBe(1);
   });
 });
 
@@ -1856,7 +1683,6 @@ describe("golden figure — per-pane small multiples (renderFigure, task B5)", (
 
     // Per-pane mode: no combined SVG; one SVG per pane.
     expect(fig.mode).toBe("per-pane");
-    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(4);
     // Pane order follows pane_order.
     expect(fig.panes.map((p) => p.value)).toEqual(["Small", "Medium", "Large", "Huge"]);
@@ -1901,12 +1727,10 @@ describe("golden figure — per-pane small multiples (renderFigure, task B5)", (
     expect(a).toBe(b);
   });
 
-  it("render() dispatches a per-pane spec to the figure path", () => {
-    const rows = parseCsv("./fixtures/facet-perpane.csv");
-    const fig = render(PERPANE_SPEC, rows, { width: 720, height: 460, document }) as FigureRenderResult;
-    expect(fig.mode).toBe("per-pane");
-    expect(fig.combinedSvg).toBeUndefined();
-    expect(fig.panes.length).toBe(4);
+  it("mountChart dispatches a per-pane spec to the figure grid", () => {
+    const host = document.createElement("div");
+    mountChart(host, { spec: PERPANE_SPEC, rows: parseCsv("./fixtures/facet-perpane.csv"), width: 720 });
+    expect(host.querySelectorAll(".figure-grid .figure-pane").length).toBe(4);
   });
 });
 
@@ -1955,7 +1779,6 @@ describe("golden figure — per-pane bar small multiples (renderFigure, task B8)
 
     // Per-pane mode: no combined SVG; one SVG per pane, in pane_order.
     expect(fig.mode).toBe("per-pane");
-    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(4);
     expect(fig.panes.map((p) => p.value)).toEqual(["Northeast", "Midwest", "South", "West"]);
     expect(fig.panes.map((p) => p.title)).toEqual(["Northeast", "Midwest", "South", "West"]);
@@ -1990,7 +1813,6 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
     const fig = renderFigure(STACKED_FIGURE_SPEC, rows, { width: 360, height: 240, document });
 
     expect(fig.mode).toBe("per-pane");
-    expect(fig.combinedSvg).toBeUndefined();
     expect(fig.panes.length).toBe(2);
     expect(fig.panes.map((p) => p.value)).toEqual(["Plan A", "Plan B"]);
 
@@ -2027,9 +1849,10 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
   });
 });
 
-// Faceted HORIZONTAL stacked: the facets draw as groups in one chart (Ruling 80), each plan's rows
-// under its title, the diverging net dot on every row. Reuses the diverging fixture.
-const HSTACK_SHARED_SPEC: ChartSpec = {
+// Grouped HORIZONTAL stacked: each plan a section of one chart, its rows under its title, the
+// diverging net dot on every row. Reuses the diverging fixture. The golden was recorded from the
+// facet spelling, which Ruling 80 mapped exactly to this one.
+const HSTACK_GROUPED_SPEC: ChartSpec = {
   chartType: "stacked",
   orientation: "horizontal",
   title: "Contributions to the net effect, by plan",
@@ -2037,18 +1860,15 @@ const HSTACK_SHARED_SPEC: ChartSpec = {
   xAxisType: "categorical",
   series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
   data: "figure-stacked-perpane.csv",
-  columns: { x: "time", facet: "facet" },
-  small_multiples: {
-    mode: "shared",
-    pane_order: ["Plan A", "Plan B"],
-    pane_titles: { "Plan A": "Plan A", "Plan B": "Plan B" },
-  },
+  columns: { x: "time", section: "facet" },
+  section_order: ["Plan A", "Plan B"],
+  section_labels: { "Plan A": "Plan A", "Plan B": "Plan B" },
 };
 
-describe("golden — faceted horizontal stacked draws as groups", () => {
+describe("golden — grouped horizontal stacked", () => {
   it("one chart: each plan's rows under its title; a net dot per row", async () => {
     const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
-    const r = renderChart(HSTACK_SHARED_SPEC, rows, { width: 720, document });
+    const r = renderChart(HSTACK_GROUPED_SPEC, rows, { width: 720, document });
     const svg = r.svg as SVGSVGElement;
     const titles = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent);
     expect(titles).toEqual(expect.arrayContaining(["Plan A", "Plan B"]));
@@ -2062,22 +1882,13 @@ describe("golden — faceted horizontal stacked draws as groups", () => {
 
   it("render is deterministic (byte-identical)", () => {
     const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
-    const a = renderChart(HSTACK_SHARED_SPEC, rows, { width: 720, document }).svg.outerHTML;
-    const b = renderChart(HSTACK_SHARED_SPEC, rows, { width: 720, document }).svg.outerHTML;
+    const a = renderChart(HSTACK_GROUPED_SPEC, rows, { width: 720, document }).svg.outerHTML;
+    const b = renderChart(HSTACK_GROUPED_SPEC, rows, { width: 720, document }).svg.outerHTML;
     expect(a).toBe(b);
   });
 });
 
-describe("axes primitives — pane titles + tick density (task B3)", () => {
-  it("paneTitleMark returns one non-empty text mark per grid", () => {
-    const marks = paneTitleMark([
-      { col: 0, row: 0, title: "A" },
-      { col: 1, row: 0, title: "B" },
-    ]);
-    expect(marks.length).toBe(1);
-    expect(marks[0]).toBeTruthy();
-  });
-
+describe("axes primitives — tick density (task B3)", () => {
   it("a narrower data width yields fewer (or equal) x ticks", () => {
     const xDomain: [Date, Date] = [new Date(2010, 0, 1), new Date(2026, 0, 1)];
     const wide = temporalXTicks(xDomain, 640);

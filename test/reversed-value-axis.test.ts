@@ -644,6 +644,7 @@ describe("reversed value axis — degenerate and boundary data", () => {
       OPTS,
     ).svg;
     const [lo, hi] = frame(svg, false);
+    expect(valueCoords(svg, false).length).toBeGreaterThan(0);
     for (const v of valueCoords(svg, false)) {
       expect(v).toBeGreaterThanOrEqual(lo - 1e-6);
       expect(v).toBeLessThanOrEqual(hi + 1e-6);
@@ -716,6 +717,59 @@ describe("reversed value axis — interactions with other features", () => {
       expect(Number(ticks[0])).toBeGreaterThan(Number(ticks[ticks.length - 1]));
     }
     expect(checked).toBeGreaterThan(0);
+  });
+
+  // A4: the panes' domains DIFFER here (autoWiden takes Q's floor to -5 and leaves P's at -3), and the
+  // figure must take their UNION. Min-of-firsts / max-of-seconds over descending pairs is the
+  // intersection, [0, -3], which ran Q's data off the frame.
+  it("unions differing reversed pane domains in shared mode", () => {
+    const spec = {
+      ...BASE,
+      xAxisType: "temporal",
+      columns: { x: "time", value: "value", series: "series", facet: "facet" },
+      small_multiples: { columns: 2, mode: "shared" },
+      yAxisPolicy: { min: 0, max: -3, autoWiden: { step: 1 } },
+    } as unknown as ChartSpec;
+    const data = [
+      { time: "2020", value: "-1", series: "A", facet: "P" },
+      { time: "2021", value: "-2", series: "A", facet: "P" },
+      { time: "2020", value: "-1", series: "A", facet: "Q" },
+      { time: "2021", value: "-4.5", series: "A", facet: "Q" },
+    ] as unknown as TidyRow[];
+    // Precondition: Q alone widens past P's domain, so the two differ.
+    const alone = (facet: string) =>
+      renderPane({ ...spec, small_multiples: undefined } as unknown as ChartSpec, data.filter((r) => r.facet === facet), OPTS).yDomain;
+    expect(alone("P")).toEqual([0, -3]);
+    expect(alone("Q")).toEqual([0, -5]);
+    const fig = renderFigure(spec, data, OPTS);
+    expect(fig.panes.length).toBe(2);
+    for (const p of fig.panes) expect((p.svg as any).scale("y").domain).toEqual([0, -5]);
+  });
+
+  it("unions a facet-scoped marker folded past one reversed pane's ceiling in shared mode", () => {
+    const spec = {
+      chartType: "bar", title: "t", xAxisType: "categorical",
+      columns: { x: "cat", value: "value", facet: "facet" },
+      small_multiples: { columns: 2, mode: "shared" },
+      yAxisPolicy: { min: 0, max: -3 },
+      annotations: { yAxis: [{ y: 1.5, label: "ceiling", facet: "Q" }] },
+    } as unknown as ChartSpec;
+    const data = [
+      { cat: "a", value: "-1", facet: "P" },
+      { cat: "b", value: "-2", facet: "P" },
+      { cat: "a", value: "-1", facet: "Q" },
+      { cat: "b", value: "-2", facet: "Q" },
+    ] as unknown as TidyRow[];
+    const fig = renderFigure(spec, data, OPTS);
+    expect(fig.panes.length).toBe(2);
+    const domains = fig.panes.map((p) => (p.svg as any).scale("y").domain as [number, number]);
+    // Q's own axis folds its marker past the pinned ceiling (`min`, the numeric upper bound here).
+    const q = renderPane({ ...spec, small_multiples: undefined } as unknown as ChartSpec, data.filter((r) => r.facet === "Q"), OPTS).yDomain;
+    expect(domainBounds(q)[1]).toBeGreaterThanOrEqual(1.5);
+    // Both panes share one descending domain that spans Q's marker and keeps the pinned floor.
+    expect(domains[0]).toEqual(domains[1]);
+    expect(isReversedDomain(domains[0]!)).toBe(true);
+    expect(domainBounds(domains[0]!)).toEqual([-3, domainBounds(q)[1]]);
   });
 
   it("mirrors a confidence band with its line", () => {

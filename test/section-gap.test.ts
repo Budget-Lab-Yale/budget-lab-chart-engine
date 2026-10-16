@@ -13,6 +13,7 @@ import { horizontalBarChartHeight } from "../src/engine/figure";
 import { spreadSections } from "../src/engine/facet-chrome";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { translateOf } from "./helpers/geometry";
 
 const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeAll(() => {
@@ -29,12 +30,7 @@ beforeEach(() => {
 const GAP = 33;
 
 function translateY(el: Element, svg: Element): number {
-  let y = 0;
-  for (let n: Element | null = el; n && n !== svg; n = n.parentElement) {
-    const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(n.getAttribute("transform") ?? "");
-    if (m) y += Number(m[2]);
-  }
-  return y;
+  return translateOf(el, svg)[1];
 }
 
 /** Row centres top to bottom, from the category labels. */
@@ -250,7 +246,10 @@ describe("section gap: an explicit height too small for the full gaps", () => {
       const svg = renderChart(spec, rowsOf(), { width: 720, height: 400, document }).svg;
       expect(Number(svg.getAttribute("height"))).toBe(400);
       expectRowsKeepHalf(svg, name);
-      if (name !== "dumbbell") for (const h of barHeights(svg)) expect(h).toBeGreaterThan(3);
+      if (name !== "dumbbell") {
+        expect(barHeights(svg).length).toBeGreaterThan(0);
+        for (const h of barHeights(svg)) expect(h).toBeGreaterThan(3);
+      }
     });
 
     it(`${name}: the live mount at 400px matches renderChart`, () => {

@@ -6,11 +6,11 @@ import type { TidyRow } from "../data/index.js";
 import type { TableModel } from "./model.js";
 import { buildTableModel } from "./model.js";
 import { layoutTable, layoutOptionsFromSpec } from "./layout.js";
-import { renderTableHtml } from "./render-html.js";
+import { renderTableHtml, bodyRowOf, fillFootnoteListHtml } from "./render-html.js";
 import { splitPanes, layoutPanes } from "./panes.js";
-import { buildFigureHeader } from "../engine/render-live.js";
+import { buildFigureHeader } from "../engine/live/title-select.js";
 import { renderSourceLine } from "../engine/source-line.js";
-import { rowsToCsvBrowser } from "../data/csv-browser.js";
+import { rowsToCsv } from "../data/csv-browser.js";
 import { exportTablePng } from "../embed/export-table-png.js";
 import { makeMeasureText } from "./measure.js";
 import { noteBreakLines } from "./richtext.js";
@@ -25,7 +25,7 @@ const DOWNLOAD_ICON =
 export interface MountTableOptions {
   spec: TableSpec;
   rows: TidyRow[];
-  /** Initial render width (used before the container is measured). */
+  /** Not read: the table sizes to its content, not to a width. Kept so existing callers type-check. */
   width?: number;
   /** Eyebrow line above the title (e.g. "Table 1"). Supplied at mount time, not from the spec. */
   eyebrow?: string;
@@ -60,7 +60,7 @@ function buildTableDownloadActions(
     const original = dataLabel.textContent ?? "Data";
     dataBtn.disabled = true;
     try {
-      const csv = rowsToCsvBrowser(rows);
+      const csv = rowsToCsv(rows);
       const blob = new Blob([csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = doc.createElement("a");
@@ -108,16 +108,21 @@ function buildTableDownloadActions(
   return downloads;
 }
 
+/** A table's active sort column and direction (both null when unsorted). */
+interface SortState { key: string | null; dir: "asc" | "desc" | null }
+
 /**
  * Wire live interactivity onto a freshly rendered table: sortable columns (within row groups),
- * column hover, and sticky classes. Called once per render — the ResizeObserver re-render in
- * mountTable replaces the table DOM, so this re-runs against the new elements each time. All
- * state is per-call and tied to the live elements, so no listeners leak across re-renders.
+ * column hover, and sticky classes. Called once per render — a rebuild in mountTable replaces the
+ * table DOM, so this re-runs against the new elements each time. Listeners are tied to the live
+ * elements, so none leak across re-renders. `sort` is OWNED BY THE CALLER's mount closure (like
+ * the collapse set): it is read back and re-applied here, so the sort survives a rebuild.
  */
 function attachTableInteractivity(
   table: HTMLTableElement,
   model: TableModel,
   spec: TableSpec,
+  sort: SortState,
   onReorder?: () => void,
 ): void {
   // ---- Sticky classes ----
@@ -183,28 +188,15 @@ function attachTableInteractivity(
   // Capture the original tbody child order once so the "none" state can be restored exactly.
   const originalOrder = Array.from(tbody.children) as HTMLElement[];
 
-  // Per-leaf numeric value lookup: rowLabel -> value, built from the model body. Sort reads
-  // the model value (authoritative) rather than parsing rendered cell text.
+  // Sort reads the model value (authoritative) rather than parsing rendered cell text.
   const leafIndex = new Map(model.leaves.map((l, i) => [l.key, i]));
 
-  // sort state per column key: undefined = none, "asc", "desc".
-  let activeKey: string | null = null;
-  let activeDir: "asc" | "desc" | null = null;
-
   function valueFor(rowEl: HTMLElement, leafIdx: number): number | null {
-    const label = rowEl.getAttribute("data-row");
-    if (label == null) return null;
-    // Find the model body row by label (data rows carry their label). Group rows have no data-row.
-    for (const entry of model.body) {
-      if (entry.kind === "row" && entry.row.label === label) {
-        return entry.row.cells[leafIdx]?.value ?? null;
-      }
-    }
-    return null;
+    return bodyRowOf(rowEl)?.cells[leafIdx]?.value ?? null;
   }
 
   function applySort(): void {
-    if (activeKey == null || activeDir == null) {
+    if (sort.key == null || sort.dir == null) {
       // Restore original order.
       tbody.replaceChildren(...originalOrder);
       // Collapsed rows are hidden via a DOM property on the row elements themselves, so it
@@ -213,9 +205,9 @@ function attachTableInteractivity(
       onReorder?.();
       return;
     }
-    const leafIdx = leafIndex.get(activeKey);
+    const leafIdx = leafIndex.get(sort.key);
     if (leafIdx == null) return;
-    const dir = activeDir === "asc" ? 1 : -1;
+    const dir = sort.dir === "asc" ? 1 : -1;
 
     // Partition tbody children into runs of data rows separated by group rows (boundaries).
     // Sort each run stably in place, leaving group rows fixed.
@@ -250,46 +242,58 @@ function attachTableInteractivity(
     onReorder?.();
   }
 
+  /** Reflect the sort state on the headers, for CSS and a11y. */
+  function reflectHeaders(): void {
+    for (const [k, el] of leafHeaderEls) {
+      if (k === sort.key && sort.dir != null) {
+        el.setAttribute("aria-sort", sort.dir === "asc" ? "ascending" : "descending");
+        el.classList.add("is-sorted");
+        el.classList.toggle("is-sorted-asc", sort.dir === "asc");
+        el.classList.toggle("is-sorted-desc", sort.dir === "desc");
+      } else {
+        el.removeAttribute("aria-sort");
+        el.classList.remove("is-sorted", "is-sorted-asc", "is-sorted-desc");
+      }
+    }
+  }
+
   for (const [key, th] of leafHeaderEls) {
     th.classList.add("tbl-table-sortable");
-    th.setAttribute("role", "button");
-    th.tabIndex = 0;
     th.style.cursor = "pointer";
-    const onActivate = (): void => {
+    // The th keeps its columnheader role, which is what aria-sort is valid on (role="button" on
+    // the th would void it). Focus and Enter/Space come from a native button holding the label.
+    const btn = th.ownerDocument.createElement("button");
+    btn.type = "button";
+    btn.className = "tbl-table-sort-btn";
+    btn.append(...Array.from(th.childNodes));
+    th.appendChild(btn);
+    // On the th, so a click anywhere in the cell sorts, as before; the button's click bubbles here.
+    th.addEventListener("click", () => {
       // Cycle this column: none -> asc -> desc -> none. Switching columns starts at asc.
-      if (activeKey !== key) {
-        activeKey = key;
-        activeDir = "asc";
-      } else if (activeDir === "asc") {
-        activeDir = "desc";
-      } else if (activeDir === "desc") {
-        activeKey = null;
-        activeDir = null;
+      if (sort.key !== key) {
+        sort.key = key;
+        sort.dir = "asc";
+      } else if (sort.dir === "asc") {
+        sort.dir = "desc";
+      } else if (sort.dir === "desc") {
+        sort.key = null;
+        sort.dir = null;
       } else {
-        activeDir = "asc";
+        sort.dir = "asc";
       }
-      // Reflect state on headers for CSS + a11y.
-      for (const [k, el] of leafHeaderEls) {
-        if (k === activeKey && activeDir != null) {
-          el.setAttribute("aria-sort", activeDir === "asc" ? "ascending" : "descending");
-          el.classList.add("is-sorted");
-          el.classList.toggle("is-sorted-asc", activeDir === "asc");
-          el.classList.toggle("is-sorted-desc", activeDir === "desc");
-        } else {
-          el.removeAttribute("aria-sort");
-          el.classList.remove("is-sorted", "is-sorted-asc", "is-sorted-desc");
-        }
-      }
+      reflectHeaders();
       applySort();
-    };
-    th.addEventListener("click", onActivate);
-    th.addEventListener("keydown", (ev) => {
-      const e = ev as KeyboardEvent;
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onActivate();
-      }
     });
+  }
+
+  // A rebuilt table starts in model order; re-apply a sort carried over from the previous one.
+  if (sort.key != null && !leafHeaderEls.has(sort.key)) {
+    sort.key = null;
+    sort.dir = null;
+  }
+  if (sort.key != null) {
+    reflectHeaders();
+    applySort();
   }
 }
 
@@ -501,13 +505,26 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
   // user's collapse state survives. Seeded ONCE from the model's resolved defaults on first draw.
   const collapsed = new Set<string>();
   let collapseSeeded = false;
+  // Sort state, carried across re-renders the same way.
+  const sortState: SortState = { key: null, dir: null };
   let applyVis: (() => void) | undefined; // re-applies visibility on the CURRENT table DOM
   let syncCollapseAll: (() => void) | undefined; // re-syncs the chrome button label
+  let drawnLayout: string | undefined;
 
-  /** Render (or re-render) the table at the given width, then re-wire interactivity. */
-  function draw(width: number): void {
+  /** Render (or re-render) the table, then re-wire interactivity. Skips the rebuild when the layout
+   *  is unchanged: layoutTable sizes the table to its content, not to the card, so a resize (e.g.
+   *  the card shrinking when a group collapses) usually lays out identically, and replacing the
+   *  DOM then would only drop focus and live state. */
+  function draw(): void {
     const model = buildTableModel(spec, rows);
-    const layout = layoutTable(model, { width, measureText, ...layoutOptionsFromSpec(spec) });
+    const layout = layoutTable(model, { measureText, ...layoutOptionsFromSpec(spec) });
+    const layoutKey = JSON.stringify(layout);
+    const current = canvasScroll.querySelector("table");
+    if (layoutKey === drawnLayout && current) {
+      markFit(canvasScroll, current, spec);
+      return;
+    }
+    drawnLayout = layoutKey;
     const table = renderTableHtml(model, layout, doc, spec);
     canvasScroll.replaceChildren(table);
     if (spec.collapsible && !collapseSeeded) {
@@ -519,24 +536,16 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     // Footnote definition list (spec §8) — rebuilt each draw into the card-level block, which is
     // attached only when there are footnotes (so an empty block never appears in the DOM). It is
     // inserted right after the scroll wrapper so it sits above the source line.
-    fnBlock.replaceChildren();
+    fillFootnoteListHtml(fnBlock, model.footnotes, doc);
     if (model.footnotes.length > 0) {
-      for (const fn of model.footnotes) {
-        const line = doc.createElement("div");
-        const sup = doc.createElement("sup");
-        sup.textContent = fn.marker;
-        line.appendChild(sup);
-        line.appendChild(doc.createTextNode(` ${fn.text}`));
-        fnBlock.appendChild(line);
-      }
       if (fnBlock.parentNode == null) canvasScroll.insertAdjacentElement("afterend", fnBlock);
     } else if (fnBlock.parentNode != null) {
       fnBlock.remove();
     }
-    // The ResizeObserver re-render replaces the table DOM, so interactivity (which holds
-    // references to the live elements) must be re-attached against the fresh table each time.
-    // The onReorder hook re-applies collapse visibility after the sort's DOM reorder.
-    attachTableInteractivity(table, model, spec, () => applyVis?.());
+    // A rebuild replaces the table DOM, so interactivity (which holds references to the live
+    // elements) must be re-attached against the fresh table each time. Collapse is wired first so
+    // that applyVis is this table's when a carried-over sort is re-applied; the onReorder hook
+    // re-applies collapse visibility after the sort's DOM reorder.
     if (spec.collapsible) {
       applyVis = attachCollapsible(table, collapsed, () => syncCollapseAll?.());
       // Stub-header placement: the corner cell is rebuilt each draw, so re-parent the (stable)
@@ -545,6 +554,7 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
         table.querySelector("thead th.tbl-table-stub-header")?.appendChild(collapseAllEl);
       }
     }
+    attachTableInteractivity(table, model, spec, sortState, () => applyVis?.());
     markFit(canvasScroll, table, spec);
   }
 
@@ -566,10 +576,8 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     );
   }
 
-  // Initial render — use the provided width, the container's current width, or a default.
-  const initialWidth = opts.width ?? (container.clientWidth || 720);
-  draw(initialWidth);
-  if (floorsColumns(spec, rows)) redrawWhenFontsLoad(doc, card, () => draw(card.clientWidth || initialWidth));
+  draw();
+  if (floorsColumns(spec, rows)) redrawWhenFontsLoad(doc, card, draw);
 
   // Source/notes footer with Data download.
   const note = Array.isArray(spec.notes) ? spec.notes.join("\n") : spec.notes;
@@ -590,12 +598,11 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
 
   container.appendChild(card);
 
-  // Re-render on width change via ResizeObserver. Guard for environments without it (jsdom).
+  // Re-render on resize via ResizeObserver. Guard for environments without it (jsdom).
   let ro: ResizeObserver | undefined;
   if (typeof ResizeObserver !== "undefined") {
     ro = new ResizeObserver(() => {
-      const w = card.clientWidth;
-      if (w > 0) draw(w);
+      if (card.clientWidth > 0) draw();
     });
     ro.observe(card);
   }
@@ -653,17 +660,28 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
     applyVis: undefined as (() => void) | undefined,
   }));
   let syncCollapseAll: (() => void) | undefined;
+  const paneSort: SortState[] = panes.map(() => ({ key: null, dir: null }));
+  let drawnLayout: string | undefined;
 
-  function drawAll(_width: number): void {
+  /** Render (or re-render) every pane; skips an unchanged layout, as the single-pane draw() does. */
+  function drawAll(): void {
     const fnMap = new Map<string, string>();
     // Panes share a stub width (planned across panes) so their first columns align; data columns
     // stay flexible to fill the card.
     const laid = layoutPanes(spec, rows, measureText, false);
+    const layoutKey = JSON.stringify(laid.map((lp) => lp.layout));
+    if (layoutKey === drawnLayout) {
+      for (const scroll of paneScrolls) {
+        const table = scroll.querySelector("table");
+        if (table) markFit(scroll, table, spec);
+      }
+      return;
+    }
+    drawnLayout = layoutKey;
     laid.forEach((lp, i) => {
       const table = renderTableHtml(lp.model, lp.layout, doc, spec, { flexDataCols: true });
       paneScrolls[i]!.replaceChildren(table);
       const pc = paneCollapse[i]!;
-      attachTableInteractivity(table, lp.model, spec, () => pc.applyVis?.());
       if (spec.collapsible) {
         if (!pc.seeded) {
           pc.seeded = true;
@@ -673,6 +691,8 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
         }
         pc.applyVis = attachCollapsible(table, pc.collapsed, () => syncCollapseAll?.());
       }
+      // After collapse, so a carried-over sort re-applies through this table's applyVis.
+      attachTableInteractivity(table, lp.model, spec, paneSort[i]!, () => pc.applyVis?.());
       for (const fn of lp.model.footnotes) if (!fnMap.has(fn.marker)) fnMap.set(fn.marker, fn.text);
     });
     // Stub-header placement: seat the (stable) whole-figure control in the FIRST pane's corner
@@ -684,16 +704,8 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
       const table = scroll.querySelector("table");
       if (table) markFit(scroll, table, spec);
     }
-    fnBlock.replaceChildren();
+    fillFootnoteListHtml(fnBlock, Array.from(fnMap, ([marker, text]) => ({ marker, text })), doc);
     if (fnMap.size > 0) {
-      for (const [marker, text] of fnMap) {
-        const line = doc.createElement("div");
-        const sup = doc.createElement("sup");
-        sup.textContent = marker;
-        line.appendChild(sup);
-        line.appendChild(doc.createTextNode(` ${text}`));
-        fnBlock.appendChild(line);
-      }
       if (fnBlock.parentNode == null) card.appendChild(fnBlock);
     } else if (fnBlock.parentNode != null) {
       fnBlock.remove();
@@ -717,9 +729,8 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
     );
   }
 
-  const initialWidth = opts.width ?? (container.clientWidth || 720);
-  drawAll(initialWidth);
-  if (floorsColumns(spec, rows)) redrawWhenFontsLoad(doc, card, () => drawAll(card.clientWidth || initialWidth));
+  drawAll();
+  if (floorsColumns(spec, rows)) redrawWhenFontsLoad(doc, card, drawAll);
 
   const note = Array.isArray(spec.notes) ? spec.notes.join("\n") : spec.notes;
   // PNG export threading: the union of every pane's collapsed keys. Keys are stub-path tokens, so
@@ -747,8 +758,7 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
   let ro: ResizeObserver | undefined;
   if (typeof ResizeObserver !== "undefined") {
     ro = new ResizeObserver(() => {
-      const w = card.clientWidth;
-      if (w > 0) drawAll(w);
+      if (card.clientWidth > 0) drawAll();
     });
     ro.observe(card);
   }

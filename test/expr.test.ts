@@ -59,6 +59,15 @@ describe("expr — variables and constants", () => {
     expect(ev("q + 1")).toBeNaN();
   });
 
+  // The unvalidated renderChart path evaluates without the variable check, so an inherited
+  // Object.prototype name must not resolve through the constants table to a function.
+  it("returns NaN for an Object.prototype name used as a variable", () => {
+    for (const name of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
+      expect(ev(`${name} + 1`)).toBeNaN();
+      expect(ev(name)).toBeNaN();
+    }
+  });
+
   it("reports the variables an expression uses, deduped and sorted", () => {
     const r = parseExpression("b1*x + b0 + b1");
     expect(r.ok).toBe(true);
@@ -120,6 +129,14 @@ describe("expr — rejection", () => {
     const r = parseExpression("frobnicate(x)");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/frobnicate/);
+  });
+
+  it("rejects an Object.prototype name as an unknown function", () => {
+    for (const name of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
+      const r = parseExpression(`${name}(x)`);
+      expect(r.ok, name).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/unknown function/);
+    }
   });
 
   it("rejects the wrong argument count", () => {

@@ -1,10 +1,10 @@
-// The horizontal category band shared by the one-bar-per-row builders: bar.ts (single-series and
-// grouped) and stacked.ts. `columns.section` groups the rows into sections; every section after the
+// The horizontal category band shared by the one-row-per-category builders: bar.ts (single-series
+// and grouped), stacked.ts and dumbbell.ts. `columns.section` groups the rows into sections; every section after the
 // first is set off by a fixed section gap (axes.ts sectionGapPx) that holds its bold header, and the
 // first section's header sits in the top margin. Sectioned charts put the band on `fy` row facets (a mark
 // with fy-bound header marks but a plain `y` band makes Plot facet the whole plot from the headers
-// alone — the fig09/fig10 phantom-facet defect), so both builders compose the band here and cannot
-// drift apart.
+// alone — the fig09/fig10 phantom-facet defect), so every builder composes the band here and they
+// cannot drift apart.
 import { ownValue } from "../../spec/own-key";
 import type { ChartSpec } from "../../spec/types";
 import {
@@ -81,6 +81,21 @@ export interface CategoryBand {
   drawnOrder: string[];
   sectionHeaders: Header[];
   topSectionHeader: Header | null;
+}
+
+/** The non-empty category values of `catField`, in data-encounter order — declaration /
+ *  `category_order` is authoritative (the pane already sorted the rows by it upstream). */
+export function encounterCategories(data: readonly PreparedRow[], catField: string): string[] {
+  const categories: string[] = [];
+  const seen = new Set<string>();
+  for (const r of data) {
+    const cat = (r as unknown as Record<string, unknown>)[catField] as string | undefined;
+    if (typeof cat === "string" && cat !== "" && !seen.has(cat)) {
+      seen.add(cat);
+      categories.push(cat);
+    }
+  }
+  return categories;
 }
 
 /** Group `categories` (encounter order) into sections. Section order: `section_order` (filter +

@@ -6,10 +6,11 @@
 // collapse to one row — plus the swatch tinting and the interaction opt-out.
 import { describe, it, expect } from "vitest";
 import { renderChart } from "../src/engine/index";
+import { buildExportSvg } from "../src/embed/export-png";
 import { renderLegend } from "../src/engine/legend";
 import { buildAnnotationLegendItems, flattenOverWhite, annotationKey } from "../src/engine/annotation-legend";
 import { SHADE_CLASS } from "../src/engine/marks/line";
-import { ANNOTATION_LINE_CLASS } from "../src/engine/facet-chrome";
+import { ANNOTATION_LINE_CLASS, X_BAND_CLASS } from "../src/engine/facet-chrome";
 import { TBL_COLORS } from "../src/engine/palette";
 import { validateSpec } from "../src/spec/validate";
 import { TBL, swatchWidthFor } from "../src/engine/theme";
@@ -173,6 +174,24 @@ describe("annotation legend swatches", () => {
     expect(row?.color).toBe("#ff0000");
   });
 
+  it("keys a default-opacity band and fill as the mark's own paint flattened over white", () => {
+    // Reads the opacity off the DOM, so the chip cannot follow a default the mark does not paint
+    // (both now come from engine/annotation-paint.ts).
+    const spec = {
+      ...BASE,
+      annotations: { bands: [{ start: "2001", end: "2003", label: "Band", color: "#336699", legend: true }] },
+      shading: [{ label: "Fill", color: "#cc3300", legend: true }],
+    } as ChartSpec;
+    const { svg, legendItems } = renderChart(spec, DATA, OPTS);
+    const band = svg.querySelector(`g.${X_BAND_CLASS}-0`)!;
+    const shade = svg.querySelector(`g.${SHADE_CLASS}`)!;
+    const chip = (label: string): string | undefined => legendItems?.find((i) => i.label === label)?.color;
+    expect(band.getAttribute("fill-opacity")).toBe("0.1");
+    expect(shade.getAttribute("fill-opacity")).toBe("0.5");
+    expect(chip("Band")).toBe(flattenOverWhite(band.getAttribute("fill")!, Number(band.getAttribute("fill-opacity"))));
+    expect(chip("Fill")).toBe(flattenOverWhite(shade.getAttribute("fill")!, Number(shade.getAttribute("fill-opacity"))));
+  });
+
   it("falls back to the first series' color for a fill that names none", () => {
     const spec = { ...BASE, shading: [{ label: "Fill", legend: true, fillOpacity: 1 }] } as ChartSpec;
     const [row] = buildAnnotationLegendItems(spec, ["A"], colors);
@@ -197,10 +216,61 @@ describe("annotation legend swatches", () => {
     expect(rows[0]?.color).toBe(TBL.color.annotationDim);
   });
 
-  it("flattenOverWhite passes non-hex colors through untouched", () => {
+  it("flattenOverWhite passes colors it cannot read through untouched", () => {
     expect(flattenOverWhite("currentColor", 0.5)).toBe("currentColor");
+    expect(flattenOverWhite("oklch(0.5 0.1 200)", 0.5)).toBe("oklch(0.5 0.1 200)");
+    for (const c of [
+      "var(--x)", "lab(50% 20 30)", "lch(50% 30 200)", "oklab(0.5 0.1 0.1)", "hwb(200 10% 20%)",
+      "color(srgb 1 0 0)", "color-mix(in srgb, red, blue)", "hsl(120deg 100% 50%)", "hsl(120deg, 100%, 50%)",
+      "rgb(255.5, 0, 0)", "rgb(255.5 0 0)", "rgb(none 0 0)",
+    ]) {
+      expect(flattenOverWhite(c, 0.5)).toBe(c);
+    }
     expect(flattenOverWhite("#000000", 0)).toBe("#ffffff");
     expect(flattenOverWhite("#000000", 1)).toBe("#000000");
+  });
+
+  // It read only 6-digit hex, so any other color a spec may give a band or a fill keyed at full
+  // strength: a `#abc` band, painted at 10 %, got a chip about ten times darker than the band.
+  it("flattenOverWhite reads every hex length, rgb()/hsl() in both syntaxes and named colors", () => {
+    const tint = flattenOverWhite("#aabbcc", 0.1);
+    expect(tint).toBe("#f7f8fa");
+    expect(flattenOverWhite("#abc", 0.1)).toBe(tint);
+    expect(flattenOverWhite("#ABC", 0.1)).toBe(tint);
+    expect(flattenOverWhite("rgb(170, 187, 204)", 0.1)).toBe(tint);
+    expect(flattenOverWhite("rgb(170 187 204)", 0.1)).toBe(tint);
+    expect(flattenOverWhite("hsl(0, 100%, 50%)", 0.1)).toBe(flattenOverWhite("#ff0000", 0.1));
+    expect(flattenOverWhite("hsl(0 100% 50%)", 0.1)).toBe(flattenOverWhite("#ff0000", 0.1));
+    expect(flattenOverWhite("steelblue", 0.5)).toBe(flattenOverWhite("#4682b4", 0.5));
+    expect(flattenOverWhite("RED", 0.5)).toBe(flattenOverWhite("#ff0000", 0.5));
+    expect(flattenOverWhite("rgb(100%, 0%, 0%)", 0.5)).toBe(flattenOverWhite("#ff0000", 0.5));
+    expect(flattenOverWhite("rgb(100% 0% 0%)", 0.5)).toBe(flattenOverWhite("#ff0000", 0.5));
+  });
+
+  it("flattenOverWhite multiplies the color's own alpha into the opacity, as the painted fill does", () => {
+    expect(flattenOverWhite("#aabbcc80", 0.5)).toBe(flattenOverWhite("#aabbcc", (0.5 * 0x80) / 255));
+    expect(flattenOverWhite("#abc8", 0.5)).toBe(flattenOverWhite("#aabbcc", (0.5 * 0x88) / 255));
+    expect(flattenOverWhite("rgba(170, 187, 204, 0.5)", 0.4)).toBe(flattenOverWhite("#aabbcc", 0.2));
+    expect(flattenOverWhite("rgb(170 187 204 / 50%)", 0.4)).toBe(flattenOverWhite("#aabbcc", 0.2));
+    expect(flattenOverWhite("hsla(0, 100%, 50%, 0.5)", 0.4)).toBe(flattenOverWhite("#ff0000", 0.2));
+    expect(flattenOverWhite("hsl(0 100% 50% / 0.5)", 0.4)).toBe(flattenOverWhite("#ff0000", 0.2));
+    expect(flattenOverWhite("transparent", 0.5)).toBe("#ffffff");
+  });
+
+  it("keys a 3-digit-hex band with the tint it paints, live and in the PNG", () => {
+    const spec = {
+      ...BASE,
+      annotations: { bands: [{ start: "2001", end: "2003", label: "Band", color: "#abc", legend: true }] },
+    } as ChartSpec;
+    const { svg, legendItems } = renderChart(spec, DATA, OPTS);
+    const band = svg.querySelector(`g.${X_BAND_CLASS}-0`)!;
+    expect(band.getAttribute("fill")).toBe("#abc");
+    const chip = legendItems?.find((i) => i.label === "Band")?.color;
+    expect(chip).toBe(flattenOverWhite("#aabbcc", Number(band.getAttribute("fill-opacity"))));
+    expect(chip).not.toBe("#abc");
+    // The PNG legend draws the same chip.
+    const swatch = buildExportSvg(spec, DATA).querySelector("g.tbl-icon rect")!;
+    expect(swatch.getAttribute("style")).toContain(`fill:${chip};`);
   });
 });
 

@@ -47,7 +47,7 @@ function measureText(s: string, _fontPx: number, _weight: number) { return s.len
 
 describe("renderTableHtml — 3-tier header", () => {
   const model = buildTableModel(spec, rows);
-  const layout = layoutTable(model, { width: 800, measureText });
+  const layout = layoutTable(model, { measureText });
   let table: HTMLTableElement;
 
   it("returns an HTMLTableElement", () => {
@@ -167,7 +167,7 @@ describe("renderTableHtml — 3-tier header", () => {
 
 describe("renderTableHtml — 2-tier grouped body", () => {
   const model = buildTableModel(spec2, rows2);
-  const layout = layoutTable(model, { width: 600, measureText });
+  const layout = layoutTable(model, { measureText });
 
   it("<tbody> has group rows with class tbl-table-group", () => {
     const table = renderTableHtml(model, layout, document);
@@ -207,7 +207,7 @@ describe("renderTableHtml — 2-tier grouped body", () => {
 describe("renderTableHtml — config hooks", () => {
   it("spanner_rules:false drops the is-spanner class (plain banner text)", () => {
     const m = buildTableModel(spec, rows);
-    const l = layoutTable(m, { width: 800, measureText });
+    const l = layoutTable(m, { measureText });
     const withRules = renderTableHtml(m, l, document, spec);
     expect(withRules.querySelector("thead th.is-spanner")).not.toBeNull();
 
@@ -220,7 +220,7 @@ describe("renderTableHtml — config hooks", () => {
 
   it("header_max_lines adds the clamp class + --tbl-header-lines on leaf headers", () => {
     const m = buildTableModel(spec, rows);
-    const l = layoutTable(m, { width: 800, measureText, headerMaxLines: 2 });
+    const l = layoutTable(m, { measureText, headerMaxLines: 2 });
     const table = renderTableHtml(m, l, document, { ...spec, header_max_lines: 2 });
     // The clamp lives on an inner span (not the <th>) so it doesn't break the table-cell layout.
     const clamped = table.querySelector("thead th .tbl-table-header-clamp") as HTMLElement;
@@ -230,7 +230,7 @@ describe("renderTableHtml — config hooks", () => {
 
   it("stub_nowrap adds the is-nowrap class on stub cells and group inners", () => {
     const m = buildTableModel(spec2, rows2);
-    const l = layoutTable(m, { width: 600, measureText, stubNowrap: true });
+    const l = layoutTable(m, { measureText });
     const table = renderTableHtml(m, l, document, { ...spec2, stub_nowrap: true });
     expect(table.querySelector("tbody th.tbl-table-stub.is-nowrap")).not.toBeNull();
     expect(table.querySelector(".tbl-table-group-inner.is-nowrap")).not.toBeNull();
@@ -238,7 +238,7 @@ describe("renderTableHtml — config hooks", () => {
 
   it("stub_wrap keeps explicit data-column widths on the <col>s (Change A)", () => {
     const m = buildTableModel(spec, rows);
-    const l = layoutTable(m, { width: 380, measureText, stubWrap: true, stubMinWidth: 80 });
+    const l = layoutTable(m, { measureText, stubWrap: true, stubMinWidth: 80 });
     const table = renderTableHtml(m, l, document, { ...spec, stub_wrap: true });
     const cols = table.querySelectorAll("colgroup col");
     // Every leaf <col> still carries its computed px width — stub_wrap no longer frees the data cols.
@@ -249,7 +249,7 @@ describe("renderTableHtml — config hooks", () => {
 
   it("only opts.flexDataCols (multi-pane) frees the data <col> widths", () => {
     const m = buildTableModel(spec, rows);
-    const l = layoutTable(m, { width: 800, measureText });
+    const l = layoutTable(m, { measureText });
     const table = renderTableHtml(m, l, document, spec, { flexDataCols: true });
     const cols = table.querySelectorAll("colgroup col");
     m.leaves.forEach((_, i) => {
@@ -269,7 +269,7 @@ describe("renderTableHtml — config hooks", () => {
       { row: "r", metric: "num", value: "12.5" },
     ] as unknown as import("../../../src/data/index").TidyRow[];
     const m = buildTableModel(wrapSpec, wrapRows);
-    const l = layoutTable(m, { width: 800, measureText, columnWrap: { notes: true } });
+    const l = layoutTable(m, { measureText, columnWrap: { notes: true } });
     const table = renderTableHtml(m, l, document, wrapSpec);
     const wrapped = table.querySelector('td[data-col="notes"]')!;
     const other = table.querySelector('td[data-col="num"]')!;
@@ -279,7 +279,7 @@ describe("renderTableHtml — config hooks", () => {
 
   it("column_wrap: true wraps every data column's body cells", () => {
     const m = buildTableModel(spec, rows);
-    const l = layoutTable(m, { width: 800, measureText });
+    const l = layoutTable(m, { measureText });
     const table = renderTableHtml(m, l, document, { ...spec, column_wrap: true });
     const tds = table.querySelectorAll("tbody td");
     expect(tds.length).toBeGreaterThan(0);
@@ -297,7 +297,7 @@ describe("renderTableHtml — config hooks", () => {
       { row: "First\\\\second", metric: "x", value: "1" },
     ] as unknown as import("../../../src/data/index").TidyRow[];
     const m = buildTableModel(brSpec, brRows);
-    const l = layoutTable(m, { width: 400, measureText });
+    const l = layoutTable(m, { measureText });
     const table = renderTableHtml(m, l, document, brSpec);
     const stubTh = table.querySelector("tbody th.tbl-table-stub")!;
     expect(stubTh.querySelectorAll("br").length).toBe(1);
@@ -320,7 +320,7 @@ describe("renderTableHtml — whole-row emphasis (Task 3)", () => {
 
   it("emphasized row's stub <th> gets is-emphasis", () => {
     const m = buildTableModel(emphSpec, emphRows);
-    const l = layoutTable(m, { width: 400, measureText });
+    const l = layoutTable(m, { measureText });
     const table = renderTableHtml(m, l, document, emphSpec);
     const totalTr = table.querySelector('tbody tr[data-row="Total"]')!;
     const stubTh = totalTr.querySelector("th.tbl-table-stub")!;
@@ -329,7 +329,7 @@ describe("renderTableHtml — whole-row emphasis (Task 3)", () => {
 
   it("non-emphasized row's stub <th> does not get is-emphasis", () => {
     const m = buildTableModel(emphSpec, emphRows);
-    const l = layoutTable(m, { width: 400, measureText });
+    const l = layoutTable(m, { measureText });
     const table = renderTableHtml(m, l, document, emphSpec);
     const aTr = table.querySelector('tbody tr[data-row="A"]')!;
     const stubTh = aTr.querySelector("th.tbl-table-stub")!;
@@ -348,7 +348,7 @@ describe("renderTableHtml — whole-row emphasis (Task 3)", () => {
       { row: "A", metric: "M", value: "1.0", flag: "yes" },
     ] as unknown as import("../../../src/data/index").TidyRow[];
     const m = buildTableModel(colSpec, colRows);
-    const l = layoutTable(m, { width: 400, measureText });
+    const l = layoutTable(m, { measureText });
     const table = renderTableHtml(m, l, document, colSpec);
     // Sanity: the value cell IS emphasized (per-cell mechanism unaffected).
     const td = table.querySelector('tbody tr[data-row="A"] td')!;
@@ -380,7 +380,7 @@ describe("renderTableHtml — header separator under blank-group column (Task 5)
   ] as unknown as import("../../../src/data/index").TidyRow[];
 
   const m = buildTableModel(blankGroupSpec, blankGroupRows);
-  const l = layoutTable(m, { width: 800, measureText });
+  const l = layoutTable(m, { measureText });
   const table = renderTableHtml(m, l, document, blankGroupSpec);
   const thead = table.querySelector("thead")!;
   const trs = thead.querySelectorAll("tr");

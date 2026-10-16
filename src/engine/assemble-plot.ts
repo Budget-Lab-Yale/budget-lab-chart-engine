@@ -5,13 +5,11 @@
 // crosshair/overlay layers to read.
 import { Plot } from "./vendor";
 import { TBL, TBL_MARGIN_LEFT, TBL_MARGIN_RIGHT, TBL_MARGIN_TOP, MARK_POINT_R } from "./theme";
-import { tblPlotDefaults, gridAndYLabels, paneTitleMark, wrapToWidth, fittedSectionGapPx } from "./axes";
-import type { PaneTitleCell } from "./axes";
+import { tblPlotDefaults, gridAndYLabels, wrapToWidth, fittedSectionGapPx } from "./axes";
 import {
   collapseFacetChrome,
   collapseFacetChromeY,
   spreadSections,
-  collapseFacetGridChrome,
   GRIDLINE_CLASS,
   ZERO_BASELINE_CLASS,
   X_TICK_LABEL_CLASS,
@@ -23,7 +21,7 @@ import {
 import { domainBounds, makeTickFormatter } from "./scales";
 import { placePointCallouts, type CalloutBox } from "./callout-placement";
 import { paintedFill } from "./painted-fill";
-import { resolveColor, resolveColorOr } from "./palette";
+import { resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
 import { FILLED_CHART_TYPES } from "../spec/filled-chart-types";
 import { ownValue } from "../spec/own-key";
@@ -36,7 +34,8 @@ import {
   xMarkerLabel,
   yMarkerLabel,
 } from "../spec/annotations";
-import { resolveRugTracks, rugHeight, rugTrackColor } from "../spec/rug";
+import { resolveRugTracks, rugHeight } from "../spec/rug";
+import { BAND_FILL_OPACITY, rugBlockColor } from "./annotation-paint";
 import { labelMovedToLegend, annotationKey } from "./annotation-legend";
 import { drawRug } from "./rug";
 import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
@@ -149,7 +148,7 @@ function applySegmentGap(
   // pane, so two panes sharing a band position cannot have their segments interleaved into one
   // stack. (Not `closest("g[aria-label^='facet']")` — vendored Plot 0.6.16 puts no `aria-label` on a
   // facet group, so that selector matched nothing and only its `?? el.parentElement` fallback ever
-  // ran. `crosshair.ts` keeps the same selector deliberately, and says so.) Grouping only needs
+  // ran. `crosshair/dom-geometry.ts` keeps the same selector deliberately, and says so.) Grouping only needs
   // parents to be DISTINGUISHABLE, so each gets an id on first sight; the id used to be
   // `indexOf(parent)`, which rebuilt the grandparent's child list once per element — O(n²) in
   // segment count for the identical partition.
@@ -221,7 +220,7 @@ function labelsInside(
   );
 }
 
-/** A point callout as index.ts hands it to assemblePlot: coordinates resolved, plus the display
+/** A point callout as pane.ts hands it to assemblePlot: coordinates resolved, plus the display
  *  strings its `{point_label}` / `{x}` / `{series}` tokens read. The VALUES are computed where the
  *  rows are; the substitution happens here, in one pass with `{value}`, so a data cell that happens
  *  to contain "{value}" is never re-expanded by a second pass. */
@@ -240,15 +239,15 @@ export interface AssembleOptions {
   colors: Map<string, string>;
   spec: ChartSpec;
   /** Point callouts with any series-snap / `point:` coordinates already resolved and the row-token
-   *  VALUES attached (index.ts has the data). When present, used instead of spec.annotations.points
+   *  VALUES attached (pane.ts has the data). When present, used instead of spec.annotations.points
    *  so the resolved coordinates render. */
   points?: ResolvedPointCallout[];
   /** The resolved x-axis domain as a numeric span [min,max] (ms for dates) — the coordinate space
-   *  the marks are actually DRAWN in, so px estimates match what a reader sees. Falls back to the
-   *  data extent only where the adapter supplies no explicit domain (temporal/quarterly
-   *  non-histogram, where Plot infers the domain from the data). Used to estimate label px
-   *  positions for annotation-label collision avoidance and to convert a point callout's px
-   *  connector offset back to data space. Absent → no auto-stagger, no connector leader. */
+   *  the marks are actually DRAWN in, so px estimates match what a reader sees. A date axis' span
+   *  includes any marker, band or callout past the data (x-adapter.ts `drawnDateDomain`). Used to
+   *  estimate label px positions for annotation-label collision avoidance and to convert a point
+   *  callout's px connector offset back to data space. Absent → no auto-stagger, no connector
+   *  leader. */
   xAxisDomain?: [number, number];
   width?: number;
   height?: number;
@@ -270,18 +269,6 @@ export interface AssembleOptions {
    *  (byte-identical single-chart + per-pane output). Vertical (line) charts only — shared mode is
    *  line-only, so this never collides with the horizontal-bar `layers.marginLeft` gutter. */
   marginLeft?: number;
-  /** Optional SHARED-mode small-multiples faceting. When present, assemblePlot builds ONE
-   *  Plot with a 2-D facet grid (`fx` = columns, `fy` = rows) sharing the single `yDomain`,
-   *  then collapses the repeated per-facet chrome to the Style-Guide grid look (y-tick
-   *  labels on the leftmost column only, x-axis labels on the bottom row only, per-pane
-   *  gridlines + pane titles kept). Absent → behavior is EXACTLY as today (single frame).
-   *
-   *  The layer's marks must already carry `fx`/`fy` channels bound to the per-row grid-index
-   *  fields (`fx: "_fxCol"`, `fy: "_fyRow"` — String column/row indices the orchestrator adds
-   *  to each data row). assemblePlot drives Plot's `fx`/`fy` scale domains from `columns`/
-   *  `rows` so cell order is deterministic, adds one pane title per cell, and collapses the
-   *  repeated chrome. */
-  facet?: FacetOptions;
   /** Shared-mode small multiples, non-leftmost columns: emit the y gridlines (so the plot
    *  area stays aligned with the left column) but SKIP the y-tick label text marks. The left
    *  margin is unchanged so every pane is the same width. Default/absent → labels emitted
@@ -324,14 +311,38 @@ export interface AssembleResult {
   seriesPainted: Map<string, string>;
 }
 
-export interface FacetOptions {
-  /** Grid columns. Plot `fx` domain becomes ["0".."columns-1"]. */
-  columns: number;
-  /** Grid rows. Plot `fy` domain becomes ["0".."rows-1"]. */
-  rows: number;
-  /** One entry per pane: its (col,row) cell + display title. Drives the per-cell pane titles
-   *  (and documents the orchestrator's `_fxCol`/`_fyRow` assignment). */
-  cells: PaneTitleCell[];
+// A callout that draws a connector sits 12px above its point, not the 28 it used to: the 1.14.0
+// visual review read labels that far out as floating free of any point, and the research
+// consensus (ggrepel, cartographic leader-line practice) is a label CLOSE to its point with a
+// short leader only when something pushed it away. The no-connector default (6, below) is
+// deliberately untouched — two published figures render on it.
+const LABEL_CONNECTOR_DY = 12;
+// The leader stops MARK_POINT_R + 2 px short of the point CENTRE, so 2px of white separates its
+// end from the scatter marker's outline. The old `insetEnd: 4` was SHORTER than the 4.6px marker
+// radius, so the line ended underneath the dot and read as touching it. One inset for every chart
+// type, including those with no marker at the point (a line vertex): there the leader simply
+// stops a hair short of the vertex, which reads the same.
+const LEADER_END_INSET = MARK_POINT_R + 2;
+
+/** A point callout's label offset (px, SVG-down) when nothing auto-placed it. */
+const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -LABEL_CONNECTOR_DY : -6);
+
+/** Whether a leader from a label offset (dx, dy) px from its point has a shaft left once it starts
+ *  `startInset` clear of the label and stops LEADER_END_INSET short of the point. */
+function leaderShaftFits(dx: number, dy: number, startInset: number): boolean {
+  return Math.hypot(dx, dy) - startInset - LEADER_END_INSET > 0;
+}
+
+/** The px x-offset of the label end of a point callout's connector, for the one kind of leader that
+ *  reaches sideways past its point: a callout with an author's `dx` (fixed, so neither the
+ *  frame-edge flip nor the sweep moves it) whose shaft fits. The flip only ever moves a label 6px
+ *  INWARD of a point already on the axis. The end is a data coordinate (6c), so on a date axis it
+ *  is part of the range the chart is drawn over — see pane.ts. Null when no such leader is drawn
+ *  (also when the chart has no width or height, where 6c falls back to a dot). */
+export function sidewaysLeaderDx(p: PointCallout): number | null {
+  if (!p.connector || p.dx == null || p.dx === 0) return null;
+  // A fixed callout's dy is its default; a dx leaves the label clear by the 2px of air alone.
+  return leaderShaftFits(p.dx, defaultDy(p), 2) ? p.dx : null;
 }
 
 /** Wrap a tick formatter with the caller's `tickLabel` hook. `null` from the hook means "engine
@@ -365,7 +376,6 @@ export function assemblePlot({
   document,
   classNameSuffix,
   marginLeft,
-  facet,
   hideYAxisLabels,
   paneFacetValue,
   hooks,
@@ -374,23 +384,6 @@ export function assemblePlot({
   // Shared-mode small multiples override the left margin; absent → default TBL_MARGIN_LEFT.
   // Used for the plot defaults, the gridline insetLeft / y-label dx, and the zero-baseline.
   const effMarginLeft = marginLeft ?? TBL_MARGIN_LEFT;
-  // SHARED-mode small-multiples grid: a 2-D fx×fy facet sharing the single yDomain. The
-  // layer's marks already carry fx/fy channels; here we drive the fx/fy scale domains and
-  // (after render) collapse the repeated per-facet chrome to the grid look.
-  const gridFaceted = facet != null;
-
-  // Grid faceting (fx/fy small-multiples) of GROUPED bars is a later task (B8): a grouped-bar
-  // layer ALSO claims `fx` (its category group scale) and supplies `fxScaleOpts`, which would
-  // collide with the grid's own `fx` column scale — Plot would render into the wrong/empty
-  // cells and the chrome-collapse `else-if` chain (which prefers the `faceted` branch when
-  // `xScaleField === "fx"`) would skip `collapseFacetGridChrome` entirely. Rather than render
-  // silently-wrong output, fail loud until B8 implements it properly.
-  if (gridFaceted && (layers.xScaleField === "fx" || layers.fxScaleOpts != null)) {
-    throw new Error(
-      "grid faceting of grouped-bar charts is not yet supported (the grouped-bar `fx` " +
-        "category scale collides with the grid `fx` column scale; planned for task B8)",
-    );
-  }
 
   const marks: unknown[] = [];
   // Annotation LABEL text marks are collected here and pushed LAST (after every band rect, gridline,
@@ -473,18 +466,6 @@ export function assemblePlot({
   // Lateral offset a point-callout label takes when the frame edge flips it off centre — the same
   // magnitude the xAxis/yAxis marker labels use for their own side placement (section 6a).
   const LABEL_FLIP_DX = 6;
-  // A callout that draws a connector sits 12px above its point, not the 28 it used to: the 1.14.0
-  // visual review read labels that far out as floating free of any point, and the research
-  // consensus (ggrepel, cartographic leader-line practice) is a label CLOSE to its point with a
-  // short leader only when something pushed it away. The no-connector default (6, below) is
-  // deliberately untouched — two published figures render on it.
-  const LABEL_CONNECTOR_DY = 12;
-  // The leader stops MARK_POINT_R + 2 px short of the point CENTRE, so 2px of white separates its
-  // end from the scatter marker's outline. The old `insetEnd: 4` was SHORTER than the 4.6px marker
-  // radius, so the line ended underneath the dot and read as touching it. One inset for every chart
-  // type, including those with no marker at the point (a line vertex): there the leader simply
-  // stops a hair short of the vertex, which reads the same.
-  const LEADER_END_INSET = MARK_POINT_R + 2;
   /** Shortest shaft worth drawing. A leader is there to say WHICH point a label names; a hairline
    *  does not, so placement puts a displaced leader-drawing label far enough out to earn this. */
   const LEADER_MIN_SHAFT = 4;
@@ -580,7 +561,7 @@ export function assemblePlot({
         y1: "y1",
         y2: "y2",
         fill: resolveColorOr(band.color, TBL.color.annotationDim),
-        fillOpacity: 0.1,
+        fillOpacity: BAND_FILL_OPACITY,
         ...(bandClass ? { className: bandClass } : {}),
       }),
     );
@@ -966,7 +947,6 @@ export function assemblePlot({
   //     than merely leaving the frame.
   const innerWForPx = width != null ? width - effMarginLeft - effMarginRight : null;
   const innerHForPx = height != null ? height - TBL_MARGIN_TOP - xOpts.marginBottom : null;
-  const defaultDy = (p: PointCallout): number => (p.dy != null ? -p.dy : p.connector ? -LABEL_CONNECTOR_DY : -6);
   const autoDy = new Map<number, number>();
   const autoDx = new Map<number, number>();
   if (xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null && innerHForPx > 0 && yDomain[1] !== yDomain[0]) {
@@ -1025,7 +1005,7 @@ export function assemblePlot({
     });
   }
 
-  // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
+  // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by pane.ts
   //     (series-snap). With connector, draw a plain leader LINE from the label to the point — the
   //     label offset (dx/dy px) is converted to a second data coordinate via the x/y extents so
   //     the leader aims exactly at the point, then stops `LEADER_END_INSET` short of its centre.
@@ -1035,7 +1015,7 @@ export function assemblePlot({
     const p = pointsAnn[pi]!;
     // `px` is a number/Date on a numeric/temporal axis, or the CATEGORY STRING on a band scale
     // (Plot positions it at the bar center) — so point callouts now land on bar-type charts too.
-    // A `point:` callout arrives with `x` filled in by index.ts (or was dropped there); one that
+    // A `point:` callout arrives with `x` filled in by pane.ts (or was dropped there); one that
     // reaches this loop without `x` has no anchor and draws nothing.
     if (p.x == null) continue;
     const px = xOpts.markerToX({ x: p.x });
@@ -1080,7 +1060,7 @@ export function assemblePlot({
     // the dot below: that fallback is for an axis with no pixel geometry, where a pinned
     // callout still needs its point marked. Here the label already touches its point, and a
     // dot under it is the redundant mark the 1.14.0 review rejected.
-    const leaderFits = Math.hypot(dx, dy) - leaderStartInset - LEADER_END_INSET > 0;
+    const leaderFits = leaderShaftFits(dx, dy, leaderStartInset);
     // A pixel-offset leader needs a numeric axis domain; the band (categorical) scale has none, so
     // a category-anchored callout falls back to the simple dot (or no marker).
     if (leader && typeof px !== "string" && xAxisDomain != null && xAxisDomain[1] > xAxisDomain[0] && innerWForPx != null && innerHForPx != null) {
@@ -1132,14 +1112,7 @@ export function assemblePlot({
     );
   }
 
-  // 7. Pane titles (shared-mode small-multiples grid only): one per facet cell at the pane's
-  //    top-left. The mark facets on both fx (=String(col)) and fy (=String(row)) so each
-  //    title lands in its own (col,row) cell.
-  if (gridFaceted && facet) {
-    marks.push(...paneTitleMark(facet.cells));
-  }
-
-  // 8. Annotation labels LAST — on top of every band rect, gridline, axis rule, data line and
+  // 7. Annotation labels LAST — on top of every band rect, gridline, axis rule, data line and
   //    reference line, so no later stroke paints over them.
   marks.push(...labelMarks);
 
@@ -1207,26 +1180,6 @@ export function assemblePlot({
   // Per-series marker symbols (line point markers). axis:null suppresses Plot's symbol legend
   // (the engine renders its own legend).
   if (layers.symbolScaleOpts) plotOpts.symbol = { ...layers.symbolScaleOpts, axis: null };
-  // Shared-mode grid: drive the fx (columns) + fy (rows) facet scales from the layout. The
-  // domains are the String column/row indices the marks reference; explicit so cell order is
-  // deterministic. axis:null suppresses Plot's native facet-axis chrome (we supply our own
-  // pane titles + collapsed engine chrome).
-  if (gridFaceted && facet) {
-    // paddingInner separates the panes so each (col,row) cell reads as a DISTINCT small
-    // multiple sharing one y-scale — without a vertical gap the two stacked rows of a column
-    // run together and look like a single tall chart with a doubled axis. Rows need a larger
-    // gap (the shared y-axis repeats per row, so the boundary must be unmistakable).
-    plotOpts.fx = {
-      domain: Array.from({ length: facet.columns }, (_, i) => String(i)),
-      axis: null,
-      paddingInner: 0.08,
-    };
-    plotOpts.fy = {
-      domain: Array.from({ length: facet.rows }, (_, i) => String(i)),
-      axis: null,
-      paddingInner: 0.22,
-    };
-  }
   if (document) plotOpts.document = document;
 
   const svg = Plot.plot(plotOpts) as SVGSVGElement;
@@ -1236,8 +1189,8 @@ export function assemblePlot({
   // undeclared facet scale falls back to Plot's own default facet-axis chrome (raw domain
   // values rendered as text) instead of the engine's collapsed chrome. This is exactly how the
   // fig09/fig10 defect happened: a mark builder pushed fy-bound header marks without ever
-  // declaring `fyScaleOpts`. Every scale THIS module declares always sets `axis: null` (see
-  // `plotOpts.fx`/`plotOpts.fy` above), so Plot's default facet-axis groups appearing in the
+  // declaring `fyScaleOpts`. Every facet scale a layer declares sets `axis: null` (passed through
+  // as `plotOpts.fx`/`plotOpts.fy` above), so Plot's default facet-axis groups appearing in the
   // rendered SVG are a reliable, deterministic tell that a mark carries a facet channel the
   // layer never accounted for. Fail loudly here — at the one chokepoint every chart renders
   // through — instead of shipping a silently-broken chart.
@@ -1263,10 +1216,11 @@ export function assemblePlot({
 
   const sectionGapRanges = sectionGaps ? spreadSections(svg, { before: sectionGaps.before, gapPx: sectionGaps.px }) : [];
 
-  svg.dataset.marginLeft = String((plotOpts.marginLeft as number) ?? 0);
-  svg.dataset.marginRight = String((plotOpts.marginRight as number) ?? 8);
-  svg.dataset.marginTop = String((plotOpts.marginTop as number) ?? 18);
-  svg.dataset.marginBottom = String((plotOpts.marginBottom as number) ?? 28);
+  // tblPlotDefaults always sets all four margins, so plotOpts carries a number for each.
+  svg.dataset.marginLeft = String(plotOpts.marginLeft as number);
+  svg.dataset.marginRight = String(plotOpts.marginRight as number);
+  svg.dataset.marginTop = String(plotOpts.marginTop as number);
+  svg.dataset.marginBottom = String(plotOpts.marginBottom as number);
 
   // Facet-aware chrome collapse: when the layer faceted the categories onto `fx` (grouped
   // bars), Plot repeated the gridlines / zero baseline / y-tick labels inside every facet.
@@ -1284,15 +1238,10 @@ export function assemblePlot({
       Number(svg.getAttribute("height")) || (plotOpts.height as number) + sectionGapTotal || 400;
     collapseFacetChromeY(svg, {
       height: svgHeight,
-      marginTop: (plotOpts.marginTop as number) ?? 18,
-      marginBottom: (plotOpts.marginBottom as number) ?? 24,
+      marginTop: plotOpts.marginTop as number,
+      marginBottom: plotOpts.marginBottom as number,
       ...(sectionGapRanges.length ? { sectionGaps: sectionGapRanges } : {}),
     });
-  } else if (gridFaceted) {
-    // Shared-mode small-multiples grid: Plot repeated the y-tick labels in every column and
-    // the x-axis labels in every row. Keep the leftmost column's y-labels + the bottom row's
-    // x-labels; drop the duplicates. Per-pane gridlines + pane titles are kept (correct).
-    collapseFacetGridChrome(svg);
   }
 
   // Tag data-series for legend hover-dim. Each mark layer declares a selector + the series
@@ -1435,8 +1384,7 @@ export function assemblePlot({
     // hover-dim in both directions.
     keyFor: (track) => (track.legend ? annotationKey(track.label) : undefined),
     // The SAME resolution the legend chip uses, so a block and its key always match.
-    colorFor: (track) =>
-      rugTrackColor(track, (s) => colors.get(s), resolveColor, TBL.color.annotationDim),
+    colorFor: (track) => rugBlockColor(track, colors),
     parseX: (v: string) => xOpts.markerToX({ x: v }),
   });
 

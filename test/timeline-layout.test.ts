@@ -563,7 +563,9 @@ describe("horizontal layout", () => {
     for (let labelWidth = 60; labelWidth <= 160; labelWidth++) {
       for (const events of [RANGE(), OPEN()]) {
         const l = layoutTimeline(base(events, { labelWidth }));
-        for (const d of l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "date"))) {
+        const dates = l.labels.flatMap((x) => x.lines.filter((ln) => ln.role === "date"));
+        expect(dates.length).toBeGreaterThan(0);
+        for (const d of dates) {
           expect(d.text).not.toBe("–");
           expect(d.text).not.toBe(" –");
           expect(d.text.startsWith(" ")).toBe(false);
@@ -1761,6 +1763,7 @@ describe("vertical lane columns (exactly two lanes)", () => {
       expect(lab.lines.every((ln) => ln.anchor === "end" && ln.x === lab.box.x1)).toBe(true);
       expect(lab.box.x1).toBeLessThan(rx(l, 0) - TL_GEOM.dotR);
     }
+    expect(l.spans.filter((x) => x.category === "b").length).toBeGreaterThan(0);
     for (const lab of b) {
       expect(lab.lines[0]!.role).toBe("date");
       expect(lab.lines.every((ln) => ln.anchor === "start" && ln.x === lab.box.x0)).toBe(true);

@@ -1,11 +1,13 @@
-// Shared jsdom hover harness for the two DEFAULT-CONFIGURATION hover test files
-// (hover-card-reach.test.ts, hover-claims-defaults.test.ts). Not a test file — `vitest.config.ts`
+// Shared jsdom hover harness. Written for the two DEFAULT-CONFIGURATION hover test files
+// (hover-card-reach.test.ts, hover-claims-defaults.test.ts) and now imported by many other hover,
+// figure and tooltip tests (grep `helpers/hover-harness`). Not a test file — `vitest.config.ts`
 // only collects `test/**/*.test.ts`, so this is imported, never run on its own.
 //
 // Everything here is measurement plumbing, not policy: no helper sets a spec field, so a test
 // cannot accidentally acquire a non-default dial from the harness. That matters because the class
-// of defect these two files gate is "a claim verified by a test that quietly turned a default off".
-import { mountChart } from "../../src/engine/render-live";
+// of defect the two default-configuration files gate is "a claim verified by a test that quietly
+// turned a default off".
+import { mountChart, type MountOptions } from "../../src/engine/render-live";
 import { CROSSHAIR_HIT_SELECTOR } from "../../src/engine/crosshair";
 import type { ChartSpec } from "../../src/spec/types";
 import type { TidyRow } from "../../src/data/index";
@@ -55,24 +57,37 @@ export function mockRect1to1(svg: SVGSVGElement): void {
   }
 }
 
-export type Mounted = { container: HTMLElement; svgs: SVGSVGElement[]; calls: () => number };
+export type Mounted = {
+  container: HTMLElement;
+  svgs: SVGSVGElement[];
+  calls: () => number;
+  /** The disposer `mountChart` returned. */
+  teardown: () => void;
+};
 
 /** Mount `spec` exactly as given — the harness adds no spec field of its own — with a counting
- *  `hooks.tooltip`. `faceted` picks the pane selector only; the spec decides whether panes exist. */
-export function mountHover(spec: ChartSpec, rows: TidyRow[], faceted = false): Mounted {
+ *  `hooks.tooltip`. `faceted` picks the pane selector only; the spec decides whether panes exist.
+ *  `onHover` is a mount option, not a spec field, so passing it does not change what is drawn. */
+export function mountHover(
+  spec: ChartSpec,
+  rows: TidyRow[],
+  faceted = false,
+  extra: { onHover?: MountOptions["onHover"] } = {},
+): Mounted {
   let calls = 0;
   const container = document.createElement("div");
   document.body.appendChild(container);
-  mountChart(container, {
+  const teardown = mountChart(container, {
     spec,
     rows,
     width: faceted ? 838 : 720,
     height: faceted ? 420 : 400,
     hooks: { tooltip: () => { calls++; return null; } },
+    ...(extra.onHover ? { onHover: extra.onHover } : {}),
   } as never);
   const svgs = Array.from(container.querySelectorAll<SVGSVGElement>(faceted ? ".figure-pane svg" : ".figure-canvas svg"));
   svgs.forEach(mockRect1to1);
-  return { container, svgs, calls: () => calls };
+  return { container, svgs, calls: () => calls, teardown };
 }
 
 /** Is a floating card actually SHOWN? A non-emitOnly attach creates the singleton up front, so
@@ -120,6 +135,22 @@ export function hoverFirstMark(svg: SVGSVGElement, markSel: string): void {
   svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
     new PointerEvent("pointermove", { clientX: cx, clientY: cy, bubbles: true }),
   );
+}
+
+/** Hover a continuous-x chart at fraction `frac` (0..1) of its plot width, read from the margins
+ *  assemblePlot stamps on the SVG. Needs `mockRect1to1` first (mountHover applies it). */
+export function hoverPlotAt(svg: SVGSVGElement, frac: number): void {
+  const vb = svg.viewBox.baseVal;
+  const ml = +(svg.dataset.marginLeft ?? "") || 0;
+  const mr = +(svg.dataset.marginRight ?? "") || 0;
+  svg.querySelector(CROSSHAIR_HIT_SELECTOR)!.dispatchEvent(
+    new PointerEvent("pointermove", { clientX: ml + frac * (vb.width - ml - mr), clientY: vb.height / 2, bubbles: true }),
+  );
+}
+
+/** The shown card's inner HTML, or "" when no card is shown. */
+export function cardHtml(): string {
+  return cardShown() ? document.body.querySelector<HTMLElement>(".tbl-tooltip")!.innerHTML : "";
 }
 
 export const BAR_MARK = 'g[aria-label="bar"] rect';

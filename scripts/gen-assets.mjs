@@ -35,7 +35,10 @@ function extractViewBox(svg) {
 
 async function main() {
   console.log("Reading logo SVG...");
-  const logoSvg = await readFile(LOGO_PATH, "utf8");
+  // CRLF on purpose, whatever the checkout gives: the published logo bytes (LOGO_SVG, and
+  // LOGO_DATA_URL, whose hash every export golden pins) have always carried the CRLF of a Windows
+  // checkout. Changing them to LF changes every rendered figure and needs a named exception.
+  const logoSvg = (await readFile(LOGO_PATH, "utf8")).replace(/\r?\n/g, "\r\n");
   const { w, h } = extractViewBox(logoSvg);
   const logoAspect = w / h;
   console.log(`  viewBox: ${w}x${h}  -> LOGO_ASPECT = ${logoAspect.toFixed(6)}`);

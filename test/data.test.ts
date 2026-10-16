@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { readFileSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, existsSync, unlinkSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -90,6 +90,70 @@ describe("parseCsv", () => {
   });
 });
 
+// The parser read malformed input without a word: an unterminated quote swallowed the rest of the
+// file into one cell, text after a closing quote shifted the columns, a duplicate header let the last
+// column win and a cell past the header's last column was dropped. Each is now an error naming the
+// line, so a broken file stops the build rather than publishing a chart with rows missing.
+describe("parseCsv — malformed input is an error naming the line", () => {
+  it("an unterminated quoted field (it took the rest of the file as one cell)", () => {
+    expect(() => parseCsv('a,b\n"x,1\n2,3\n4,5\n')).toThrow(/^CSV line 2: a quoted field has no closing quote/);
+  });
+
+  it("names the line the quote OPENED on, counting line breaks inside earlier quoted fields", () => {
+    expect(() => parseCsv('a,b\n"multi\nline",1\n"open,2\n')).toThrow(/^CSV line 4: /);
+    expect(() => parseCsv('a,b\r\n"multi\r\nline",1\r\n"open,2\r\n')).toThrow(/^CSV line 4: /);
+  });
+
+  it("text after a closing quote (the columns shifted)", () => {
+    expect(() => parseCsv('a,b,c\n1,2,3\n"x"y,1,2\n')).toThrow(/^CSV line 3: text after the closing quote of "x"/);
+    expect(() => parseCsv('a,b\n"x" ,1\n')).toThrow(/^CSV line 2: /);
+  });
+
+  it("two header columns with one name (the later one won)", () => {
+    expect(() => parseCsv("time,value,time\n1,2,3\n")).toThrow(/^CSV line 1: two header columns are named "time"/);
+    expect(() => parseCsv("time, value ,value\n1,2,3\n")).toThrow(/named "value"/);
+  });
+
+  it("blank header names may repeat (a spreadsheet's stray empty columns), as before", () => {
+    expect(parseCsv("time,value,,,\n2021,1,,,\n")).toEqual([{ time: "2021", value: "1", "": "" }]);
+    expect(parseCsv(",a,,b\nx,1,y,2\n")).toEqual([{ "": "y", a: "1", b: "2" }]);
+  });
+
+  it("a non-empty cell past the header's last column (it was dropped)", () => {
+    expect(() => parseCsv("a,b\n1,2\n3,4,5\n")).toThrow(/^CSV line 3: 3 cells, but the header names 2 columns/);
+  });
+
+  it("still reads what it always read: short rows, empty trailing cells, quotes inside unquoted text", () => {
+    expect(parseCsv("a,b,c\n1,2\n")).toEqual([{ a: "1", b: "2", c: "" }]);
+    expect(parseCsv("a,b\n1,2,\n3,4,,\n")).toEqual([{ a: "1", b: "2" }, { a: "3", b: "4" }]);
+    expect(parseCsv('a,b\n5" screen,1\n')).toEqual([{ a: '5" screen', b: "1" }]);
+    expect(parseCsv('a,b\n"x",\n')).toEqual([{ a: "x", b: "" }]);
+    expect(parseCsv('a,b\n"x"')).toEqual([{ a: "x", b: "" }]);
+  });
+
+  it("reads a line break inside a quoted cell, and bare-CR line endings (CONFIG-SPEC CSV format)", () => {
+    expect(parseCsv('a,b\n"one\ntwo",1\n')).toEqual([{ a: "one\ntwo", b: "1" }]);
+    expect(parseCsv("a,b\r1,2\r3,4\r")).toEqual([{ a: "1", b: "2" }, { a: "3", b: "4" }]);
+  });
+
+  it("drops a leading byte-order mark, so a quoted first header loses its quotes", () => {
+    expect(Object.keys(parseCsv('\uFEFF"time",value\n2021,1\n')[0]!)).toEqual(["time", "value"]);
+    expect(Object.keys(parseCsv("\uFEFFtime,value\n2021,1\n")[0]!)).toEqual(["time", "value"]);
+  });
+
+  it("loadData names the file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "csv-strict-"));
+    try {
+      writeFileSync(join(dir, "bad.csv"), 'a,b\n"x,1\n');
+      await expect(loadData({ file: "bad.csv" }, { baseDir: dir })).rejects.toThrow(
+        /^loadData: .*bad\.csv: CSV line 2: a quoted field has no closing quote/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // rowsToCsv
 // ---------------------------------------------------------------------------
@@ -158,6 +222,13 @@ describe("rowsToCsv", () => {
 
   it("returns empty string for empty rows array", () => {
     expect(rowsToCsv([])).toBe("");
+  });
+
+  it("quotes a bare carriage return, so the cell stays one row (it re-parsed as two)", () => {
+    const rows: TidyRow[] = [{ time: "a\rb", series: "s", value: "1" }];
+    expect(rowsToCsv(rows)).toBe('time,series,value\n"a\rb",s,1\n');
+    // parseCsv reads any line break as \n, inside quotes too.
+    expect(parseCsv(rowsToCsv(rows))).toEqual([{ time: "a\nb", series: "s", value: "1" }]);
   });
 });
 

@@ -15,6 +15,30 @@ export interface ShapeLegendEntry {
   markerSymbol: string;
 }
 
+/** A legend's pin state in all three dimensions, each in click order. */
+export interface LegendPins {
+  series: string[];
+  annotations: string[];
+  shapes: string[];
+}
+
+/** A legend's selection state: its pins plus the row hovered (or focused) in each dimension. Read
+ *  off the legend a redraw replaces and handed to its replacement (`renderLegend`'s `state`), since
+ *  every live redraw rebuilds the legend from scratch. Hover is carried explicitly rather than
+ *  re-derived from focus: a mouse click leaves a button focused, so focus says nothing about
+ *  whether its row is still highlighted. */
+export interface LegendState {
+  pins: LegendPins;
+  hovered: { series: string | null; annotation: string | null; shape: string | null };
+}
+
+/** The legend control holding keyboard focus, so a rebuilt legend can hand focus to its counterpart.
+ *  `key` is null for the reset button. */
+export interface LegendFocus {
+  kind: "series" | "annotation" | "shape" | "reset";
+  key: string | null;
+}
+
 /** Handle returned by renderLegend: the rendered element plus a `toggle(series)` that
  *  flips the SAME pin state a legend-button click would, keeping ONE source of truth
  *  (the internal `pinned` Set) so the chart can act as a second selection input. */
@@ -29,9 +53,20 @@ export interface LegendHandle {
   toggleAnnotation(key: string): void;
   /** Pinned series in click order (the live layer uses this to compute a restack order). */
   pinnedSeries(): string[];
-  /** Re-point the hover-dim root to a new SVG (after the chart body is re-rendered) and re-apply
-   *  the current highlight to it, so dim/pin state carries over to the swapped-in SVG. */
-  rebind(svg: Element): void;
+  /** Pins and hover, all three dimensions — what a redraw hands to the legend that replaces this one. */
+  state(): LegendState;
+  /** The active color-series set onHighlight would be handed now: pinned series plus a hovered one. */
+  active(): Set<string>;
+  /** Re-apply the current dim/pin classes WITHOUT calling onHighlight. For marks the live layer adds
+   *  to the svg after the legend was built (line hit paths, for one), which a carried state would
+   *  otherwise leave undimmed. */
+  restyle(): void;
+  /** The legend control that has keyboard focus, or null when focus is elsewhere. */
+  focused(): LegendFocus | null;
+  /** Focus this legend's control matching `target` (a `focused()` read off the legend this one
+   *  replaced), SILENTLY: the row's focus handler neither marks it hovered nor notifies, since the
+   *  carried `state` already holds the hover. False when there is none, or it is hidden. */
+  focus(target: LegendFocus): boolean;
 }
 
 export function renderLegend(
@@ -43,12 +78,14 @@ export function renderLegend(
   // Point charts with DUAL color/shape encoding pass `shapeItems` (+ optional group titles) to
   // render a second, non-interactive SHAPE legend group beside the color legend.
   {
-    svg: initialSvg,
+    svg,
     onHighlight,
     shapeItems,
     colorTitle,
     shapeTitle,
     hooks,
+    state: carried,
+    abandoned,
   }: {
     svg?: Element;
     onHighlight?: (active: Set<string>) => void;
@@ -59,6 +96,14 @@ export function renderLegend(
      *  color-legend row (the neutral SHAPE-legend rows below have no `series` key and never
      *  invoke it). */
     hooks?: RenderHooks;
+    /** State carried from the legend this one replaces. Keys this legend lacks are dropped; the rest
+     *  are applied to the legend and `svg` WITHOUT calling `onHighlight` — the caller compares
+     *  `state()` with what it passed and decides what to report. */
+    state?: LegendState | null;
+    /** Read once the rows are built, before the legend is attached: true when the owner was torn
+     *  down meanwhile (a `legendKey` hook can do it). Then nothing is attached and the result is
+     *  null. */
+    abandoned?: () => boolean;
   } = {},
 ): LegendHandle | null {
   const hasColor = !!items?.length;
@@ -66,9 +111,6 @@ export function renderLegend(
   if (!hasColor && !hasShape) return null;
 
   const doc = parent.ownerDocument;
-  // Mutable highlight root: re-pointed by handle.rebind() when the chart body is re-rendered
-  // (area restack), so dim/pin keeps targeting the live SVG.
-  let svg = initialSvg;
   const legend = doc.createElement("div");
   legend.className = "tbl-legend";
 
@@ -122,10 +164,17 @@ export function renderLegend(
   // appended at the END of the legend so it sits after the last item. Hidden until pinned,
   // so toggling it in on the first pin does not shift the data-series rows above it.
   const resetBtn = doc.createElement("button");
+  // Set while handle.focus() hands focus over from a replaced legend, so the focus handlers below
+  // leave the carried hover alone and do not notify.
+  let restoringFocus = false;
 
-  const applyHighlight = (): void => {
+  const activeSeries = (): Set<string> => {
     const active = new Set(pinned);
     if (hovered) active.add(hovered);
+    return active;
+  };
+  const applyHighlight = (notify = true): void => {
+    const active = activeSeries();
     const activeShape = new Set(pinnedShape);
     if (hoveredShape) activeShape.add(hoveredShape);
     const activeAnn = new Set(pinnedAnn);
@@ -174,7 +223,7 @@ export function renderLegend(
     // (e.g. recoloring net-total labels by the behind-segment's dim class). Runs on every
     // highlight change — pin, hover, focus, blur, and reset. The active color-series set is
     // passed so the callback can drive the value-pill renderer (an empty set clears it).
-    onHighlight?.(active);
+    if (notify) onHighlight?.(active);
   };
 
   // Shared pin toggle — the single source of truth for both legend-button clicks and
@@ -261,7 +310,7 @@ export function renderLegend(
         : () => { hovered = null; applyHighlight(); };
       btn.addEventListener("pointerenter", enter);
       btn.addEventListener("pointerleave", leave);
-      btn.addEventListener("focus", enter);
+      btn.addEventListener("focus", () => { if (!restoringFocus) enter(); });
       btn.addEventListener("blur", leave);
       btn.addEventListener("click", () => {
         if (annotation) togglePinAnnotation(series);
@@ -310,7 +359,11 @@ export function renderLegend(
       btn.appendChild(labelEl);
       btn.addEventListener("pointerenter", () => { hoveredShape = shape; applyHighlight(); });
       btn.addEventListener("pointerleave", () => { hoveredShape = null; applyHighlight(); });
-      btn.addEventListener("focus", () => { hoveredShape = shape; applyHighlight(); });
+      btn.addEventListener("focus", () => {
+        if (restoringFocus) return;
+        hoveredShape = shape;
+        applyHighlight();
+      });
       btn.addEventListener("blur", () => { hoveredShape = null; applyHighlight(); });
       btn.addEventListener("click", () => { togglePinShape(shape); });
       shapeGroup!.appendChild(btn);
@@ -318,7 +371,20 @@ export function renderLegend(
     legend.appendChild(shapeGroup!);
   }
 
+  if (abandoned?.()) return null;
   parent.appendChild(legend);
+  if (carried) {
+    const { pins: p, hovered: h } = carried;
+    for (const s of p.series) if (allSeries.includes(s)) pinned.add(s);
+    for (const k of p.annotations) if (allAnnotations.includes(k)) pinnedAnn.add(k);
+    for (const sh of p.shapes) if (allShapes.includes(sh)) pinnedShape.add(sh);
+    if (h.series != null && allSeries.includes(h.series)) hovered = h.series;
+    if (h.annotation != null && allAnnotations.includes(h.annotation)) hoveredAnn = h.annotation;
+    if (h.shape != null && allShapes.includes(h.shape)) hoveredShape = h.shape;
+    if (pinned.size || pinnedAnn.size || pinnedShape.size || hovered || hoveredAnn || hoveredShape) {
+      applyHighlight(false);
+    }
+  }
   return {
     element: legend,
     toggle: togglePin,
@@ -330,9 +396,35 @@ export function renderLegend(
     },
     toggleAnnotation: togglePinAnnotation,
     pinnedSeries: () => [...pinned],
-    rebind: (newSvg: Element) => {
-      svg = newSvg;
-      applyHighlight();
+    state: () => ({
+      pins: { series: [...pinned], annotations: [...pinnedAnn], shapes: [...pinnedShape] },
+      hovered: { series: hovered, annotation: hoveredAnn, shape: hoveredShape },
+    }),
+    active: activeSeries,
+    restyle: () => applyHighlight(false),
+    focused: () => {
+      const el = doc.activeElement as HTMLElement | null;
+      if (!el || !legend.contains(el)) return null;
+      if (el === resetBtn) return { kind: "reset", key: null };
+      if (el.dataset.series != null) return { kind: "series", key: el.dataset.series };
+      if (el.dataset.annotation != null) return { kind: "annotation", key: el.dataset.annotation };
+      if (el.dataset.shape != null) return { kind: "shape", key: el.dataset.shape };
+      return null;
+    },
+    focus: (target: LegendFocus) => {
+      const el = target.kind === "reset"
+        ? resetBtn
+        : [...legend.querySelectorAll<HTMLElement>(".tbl-legend-item")]
+            .find((b) => b.dataset[target.kind] === target.key);
+      if (!el || (el as HTMLButtonElement).hidden) return false;
+      restoringFocus = true;
+      try {
+        // A resize must not scroll the page back to the legend.
+        el.focus({ preventScroll: true });
+      } finally {
+        restoringFocus = false;
+      }
+      return true;
     },
   };
 }

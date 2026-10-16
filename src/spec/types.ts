@@ -1,5 +1,5 @@
-// The single contract for one chart. The ajv JSON-schema (schema.ts) and the engine
-// both derive from this. One chart = one spec (no figure/tracker/nav wrapper).
+// The single contract for one chart. The ajv JSON-schema (schema.ts) is kept in step with this by
+// hand (nothing generates either from the other). One chart = one spec (no figure/tracker/nav wrapper).
 //
 // Ported and reduced from the AI Labor Market Tracker's chart-block schema
 // (scripts/build-manifest.py + data/CONFIG-REFERENCE.md), which supported `line` only. `chartType`
@@ -81,7 +81,8 @@ export type HatchChar = "/" | "\\" | "|" | "-" | "+" | "x";
  *  `label` (see XAxisMarker/YAxisMarker/PointCallout `label`). Absent → falls back to the
  *  chart's value-axis tick format (yAxis markers, points) or the raw x string (xAxis markers). */
 export interface ValueFormat {
-  /** Fixed decimal places. Default 2. */
+  /** Fixed decimal places. The default depends on the reader: 2 for an annotation's `{value}`,
+   *  1 for a dumbbell's gap label (marks/dumbbell.ts), 0 on a treemap. */
   decimals?: number;
   /** Text prepended to the formatted number. */
   prefix?: string;
@@ -260,8 +261,9 @@ export interface SeriesStyle {
  *  independent and paint in list order, so several regions may cover one series with different
  *  tints — overlapping fills deliberately compound their opacity.
  *
- *  The baseline is zero when zero lies inside the resolved y-domain, else the nearer domain edge,
- *  so a fill never leaves the frame. `side` always keys off ZERO, never off that clamped baseline. */
+ *  The fill runs to `baseline` (default 0), drawn clamped into the resolved y-domain so a fill never
+ *  leaves the frame. `side` is measured against `baseline` as written, never against zero or that
+ *  clamped edge (marks/line.ts). */
 export interface ShadeRegion {
   /** Series to fill under. Omitted → every in-scope series gets its own region, each in its own color. */
   series?: string;
@@ -326,7 +328,7 @@ export interface Overlay {
   intercept?: number;
   /** KIND 4 — a data column holding a precomputed value per row (a fit produced in Stata, R or
    *  Python), drawn as a line over the marks. Unlike the other three kinds, this is real per-row data
-   *  and therefore DOES fold into the value-axis extent — see index.ts's yForAxis. */
+   *  and therefore DOES fold into the value-axis extent — see pane.ts's yForAxis. */
   column?: string;
   /** `method` and `column`: one line per colour series (`series`, default) or one over every in-scope
    *  point (`none`). Rejected on `fun` and `slope`+`intercept`, which do not read the data. */
@@ -340,10 +342,12 @@ export interface Overlay {
    *  `[min, max]` states it explicitly (numeric x only, min < max). Omitted ⇒ the extent of the
    *  group's OBSERVATIONS for `method`/`column` (matching Stata `lfit`'s own default) — a row with a
    *  blank value cell is not one, so a fit stops at the last point it was fitted from — and the
-   *  resolved x-domain for `fun` and `slope`+`intercept`. An overlay NEVER widens the axis, and no
-   *  field currently does: `xAxisPolicy` carries only `anchorAtZero`, which extends the domain to
-   *  include 0 and nothing more. There is no x counterpart to `yAxisPolicy.min`/`.max`, so a
-   *  `[min, max]` reaching past the data is CLIPPED rather than expanding the frame. */
+   *  resolved x-domain for `fun` and `slope`+`intercept`. An overlay NEVER widens the axis, and
+   *  `xAxisPolicy` carries only `anchorAtZero`, which extends the domain to include 0 and nothing
+   *  more. (On a temporal or quarterly axis an `annotations.xAxis` marker, a `bands` entry or a
+   *  `points` callout past the data does widen it, and `"axis"` then spans the wider axis.) There
+   *  is no x counterpart to `yAxisPolicy.min`/`.max`, so a `[min, max]` reaching past the data is
+   *  CLIPPED rather than expanding the frame. */
   domain?: "axis" | [number, number];
   /** What this line MEANS. Drawn in-frame at the line's `labelPosition` end unless `legend: true`
    *  moves it to a legend row (the convention `annotations.yAxis` follows). */
@@ -475,9 +479,9 @@ export interface SmallMultiplesConfig {
 export interface ColumnMap {
   /** Column holding the x value (any xAxisType). Default "time". */
   x?: string;
-  /** Dumbbell charts: the categorical axis column (income group, etc.). A synonym for `x` — the
-   *  dumbbell's categorical axis IS the engine's x/y band, so `category` resolves onto the same
-   *  role bars read via `x`. `x` still works; `category` wins when both are set. */
+  /** A synonym for `x`, named for the dumbbell's categorical axis (income group, etc.) but read on
+   *  every chart type: `resolveColumns` (columns.ts) resolves it onto the x role whatever the
+   *  chartType. `category` wins when both are set. A timeline or treemap rejects it. */
   category?: string;
   /** Column holding the numeric value. Default "value". */
   value?: string;
@@ -600,9 +604,9 @@ export interface ChartSpec {
    *  rather than a granularity auto-detect deliberately: a repin re-renders the whole archive, so
    *  changing the default would move the tooltips of every published temporal figure at once.
    *
-   *  Reaches the CARD and the coordinated cursor alike: render-live.ts passes it as `xFormat` into
-   *  `attachSecondaryLineCursor` (with `xFormatExplicit`, which is what distinguishes an author's
-   *  pattern from the adapter's axis-matching default), and the cursor draws its x echo with it on
+   *  Reaches the CARD and the coordinated cursor alike: engine/live/hover-options.ts passes it as
+   *  `xFormat` into `attachSecondaryLineCursor` (with `xFormatExplicit`, which is what distinguishes
+   *  an author's pattern from the adapter's axis-matching default), and the cursor draws its x echo with it on
    *  one line — including on a DAILY multi-pane line, where the axis ticks on whole months, no tick
    *  row exists to annotate, and the echo would otherwise be skipped. See CONFIG-SPEC.md and
    *  test/hover-claims-defaults.test.ts, which gates set-and-absent on monthly and daily panes. */
@@ -672,8 +676,8 @@ export interface ChartSpec {
    *  or a list in the axis' grammar (`"2001"`, `"2001-01-01"`, `"2001Q1"`, a number). Thinned to
    *  every k-th value when the labels would overlap. Absent → the axis picks its own ticks. */
   x_ticks?: "data" | Array<string | number>;
-  /** Dumbbell charts: category render order along the categorical axis — a synonym for `x_order`
-   *  (order-only, never filters). `category_order` wins when both are set. See `categoryOrderFor`. */
+  /** A synonym for `x_order` (order-only, never filters), named for the dumbbell's categorical axis
+   *  but read wherever `x_order` is. `category_order` wins when both are set. See `categoryOrderFor`. */
   category_order?: string[];
   /** Categorical x: raw category value → display label, used in the hover CARD's header
    *  (e.g. "1" → "1st Decile"). Lets that card read more verbosely than the compact axis ticks.
@@ -747,7 +751,8 @@ export interface ChartSpec {
    *  to "horizontal" (see dumbbell-orientation.ts). */
   orientation?: "vertical" | "horizontal";
   /** In-bar value labels. `decimals` fixes the label precision; omitted ⇒ the minimum precision
-   *  the data needs, capped at 2 (so raw floats don't print 15 digits). */
+   *  the data needs, capped at 2 (so raw floats don't print 15 digits). `signed` is accepted and
+   *  read by nothing. */
   valueLabels?: { show?: boolean; signed?: boolean; decimals?: number };
   /** Stacked-bar display options. */
   barStack?: {
@@ -764,6 +769,7 @@ export interface ChartSpec {
     netDisplay?: "auto" | "text" | "dot" | "none";
     /** Monochrome override: render all segments using shades of one base color. */
     mono?: { base: ColorRef };
+    /** Accepted and read by nothing: the net label it coloured is gone. */
     netLabelColor?: "white" | "black";
     /** Normalize each bar to 100 % (0–1 scale). */
     normalize?: boolean;

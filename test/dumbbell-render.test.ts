@@ -9,6 +9,7 @@ import { computeChartHeight } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 import { tokens } from "../src/theme/tokens";
+import { translateOf } from "./helpers/geometry";
 
 const INK = tokens.structural.text_heading;
 
@@ -40,17 +41,7 @@ const opts = { width: 720, height: 400 } as const;
 // element's own position (cx/cy for circles, x/y attrs for text). jsdom has no layout engine, so we
 // read the transforms Plot emits directly — the same technique golden.test.ts uses.
 function absPos(el: Element | null): { x: number; y: number } {
-  let x = 0;
-  let y = 0;
-  let n: Element | null = el;
-  while (n && n.tagName.toLowerCase() !== "svg") {
-    const tf = n.getAttribute("transform");
-    if (tf) {
-      const m = /translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)/.exec(tf);
-      if (m) { x += Number(m[1]); y += Number(m[2]); }
-    }
-    n = n.parentElement;
-  }
+  let [x, y] = translateOf(el);
   const tag = el?.tagName.toLowerCase();
   // Add the element's own position. Guard non-numeric attrs — Plot emits text `y="0.32em"` (a
   // baseline nudge), which is not a coordinate; the real position is in the ancestor transforms.
@@ -129,7 +120,7 @@ describe("dumbbell mark — draw order, facet layout, auto-height", () => {
     expect(lastIdx("static")).toBeLessThan(firstIdx("collected"));
   });
 
-  it("horizontal facets draw as groups in one chart (Ruling 80)", () => {
+  it("horizontal: sections draw the groups in one chart (columns.facet is rejected there)", () => {
     const rows: TidyRow[] = [
       { pane: "A", group: "Q1", measure: "static", rate: "2" },
       { pane: "A", group: "Q1", measure: "collected", rate: "3" },
@@ -138,8 +129,7 @@ describe("dumbbell mark — draw order, facet layout, auto-height", () => {
     ] as TidyRow[];
     const spec: ChartSpec = {
       ...DUMBBELL_H,
-      columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
-      small_multiples: { mode: "shared" },
+      columns: { category: "group", series: "measure", value: "rate", section: "pane" },
     };
     const svg = renderChart(spec, rows, { width: 900, document }).svg as SVGSVGElement;
     const titles = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent);
@@ -203,7 +193,7 @@ describe("dumbbell mark — faceting (vertical)", () => {
   });
 
   // Each pane must contain ONLY its own facet's categories (proof the facet split is real, not one
-  // pane drawing everything). A horizontal dumbbell draws its facets as groups instead (above).
+  // pane drawing everything). A horizontal dumbbell takes sections instead (above).
   for (const orientation of ["vertical"] as const) {
     it(`${orientation}: each pane draws only its facet's category dots`, () => {
       const result = renderFigure(facetSpec(orientation), FACET_ROWS, { width: 838, height: 440, document });
@@ -275,9 +265,9 @@ describe("dumbbell mark — structure", () => {
     expect(labels.length).toBe(1);
   });
 
-  it("composes with faceting (top-decile breakout as a separate group)", () => {
-    // Main quintiles in one facet, the top-decile breakout in another — on a horizontal dumbbell
-    // each facet is a group of one chart, sharing the series/colors/legend and the value scale.
+  it("composes with sections (top-decile breakout as a separate group)", () => {
+    // Main quintiles in one section, the top-decile breakout in another: groups of one chart,
+    // sharing the series/colors/legend and the value scale.
     const facetRows: TidyRow[] = [
       { pane: "Quintiles", group: "Q1", measure: "static", rate: "2.1" },
       { pane: "Quintiles", group: "Q1", measure: "collected", rate: "2.0" },
@@ -292,8 +282,7 @@ describe("dumbbell mark — structure", () => {
       ...DUMBBELL_H,
       series_order: ["static", "collected"],
       series_marker: { static: "hollow", collected: "filled" },
-      columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
-      small_multiples: { mode: "shared" },
+      columns: { category: "group", series: "measure", value: "rate", section: "pane" },
     };
     const svg = renderChart(spec, facetRows, { width: 838, height: 420, document }).svg as SVGSVGElement;
     const titles = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent);

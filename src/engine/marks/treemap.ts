@@ -4,12 +4,9 @@
 // export); an unlabelled tile is named by its aria-label and the hover card. The live mount and the
 // PNG export both call renderTreemap at their width; nothing here is live-only. All text is SVG
 // <text> (HTML inside an SVG does not rasterise).
-//
-// Imports buildColorMap back from ../index, which imports renderTreemap from here: the same safe
-// ES-module cycle as marks/timeline.ts (both references resolve at call time).
 import { TBL } from "../theme";
 import { tokens } from "../../theme/tokens";
-import { buildColorMap } from "../index";
+import { buildColorMap } from "../color-map";
 import { withoutRepeatedOrderEntries } from "../util";
 import { ownValue } from "../../spec/own-key";
 import type { LegendItem, RenderOptions, RenderResult } from "../index";

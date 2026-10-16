@@ -1,0 +1,26 @@
+# card
+(no card)
+# pane 0 (hovered)
+<rect class="tbl-hist-hover-hit" x="0" y="0" width="432" height="240" fill="transparent" style="cursor: default; pointer-events: all;"/>
+<g class="tbl-coord" opacity="1" style="pointer-events: none;">
+  <rect class="tbl-coord-region" x="44" y="18" width="93" height="200" fill="#BBBBBB" opacity="0.12"/>
+  <rect class="tbl-coord-pill" x="73.48" y="1.25" width="34.04" height="15.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-pill-text" x="90.5" y="9" dy="0.32em" text-anchor="middle" fill="#0072B2" font-size="10.5" font-weight="700">
+    "5.00"
+  </text>
+  <rect class="tbl-coord-axis-label" x="70.225" y="224.25" width="40.55" height="14.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-axis-label-text" x="90.5" y="231.5" dy="0.32em" text-anchor="middle" fill="#1A1A2E" font-size="10.5" font-weight="700">
+    "0 \u2013 5"
+  </text>
+</g>
+# pane 1
+<rect class="tbl-hist-hover-hit" x="0" y="0" width="390" height="240" fill="transparent" style="cursor: default; pointer-events: all;"/>
+<g class="tbl-coord" opacity="1" style="pointer-events: none;">
+  <rect class="tbl-coord-region" x="2" y="18" width="93" height="200" fill="#BBBBBB" opacity="0.12"/>
+  <rect class="tbl-coord-pill" x="31.48" y="1.25" width="34.04" height="15.5" rx="3" fill="#ffffff" fill-opacity="0.82" stroke="#c8cdd7" stroke-opacity="0.7"/>
+  <text class="tbl-coord-pill-text" x="48.5" y="9" dy="0.32em" text-anchor="middle" fill="#0072B2" font-size="10.5" font-weight="600">
+    "5.00"
+  </text>
+</g>
+# onHover (last payload)
+(no onHover call)

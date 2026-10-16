@@ -52,12 +52,6 @@ export interface PreparedRow {
   /** Waterfall charts: the row's step kind from `columns.kind` — "total"/"skip"/"branch"/else delta.
    *  Absent when the column isn't mapped (⇒ every row is a delta). */
   _kind?: string;
-  /** Small-multiples (shared mode): the pane's grid COLUMN index as a String, bound to Plot's
-   *  `fx` facet channel by the orchestrator-built marks. */
-  _fxCol?: string;
-  /** Small-multiples (shared mode): the pane's grid ROW index as a String, bound to Plot's
-   *  `fy` facet channel. */
-  _fyRow?: string;
   /** Set when `spec.projected_field` is configured: true when this row's flag column parsed
    *  truthy (`1`/`true`/`yes`, case-insensitive, trimmed). Absent when the field isn't
    *  configured. Drives the line dashed-run split (marks/projected.ts) and the area fade veil. */
@@ -93,13 +87,6 @@ export interface MarkContext {
   plotWidth?: number;
   /** Inner plot height in px (outer height minus top+bottom margins). Approximate. */
   plotHeight?: number;
-  /** Small-multiples (shared mode): the PreparedRow field bound to Plot's `fx` (column)
-   *  facet channel — set by the figure orchestrator (`"_fxCol"`). When present, mark builders
-   *  must bind `fx` on their marks so they face into the grid. Absent → single frame. */
-  fxField?: string;
-  /** Small-multiples (shared mode): the PreparedRow field bound to Plot's `fy` (row) facet
-   *  channel (`"_fyRow"`). Bound alongside `fxField`. */
-  fyField?: string;
   /** Small-multiples (either mode): this mark belongs to a (small) pane, so line marks render
    *  with the thinner pane stroke (TBL.strokeWidth.pane). Set by the figure orchestrator for
    *  BOTH shared- and per-pane panes; absent → single chart → default solid stroke. */
@@ -149,9 +136,7 @@ export interface MarkContext {
   yDomain?: [number, number];
   /** This pane's facet value, when the chart is one pane of a small-multiples figure (set by the
    *  figure orchestrator from `RenderOptions.paneFacetValue`). Absent → single chart, or a pane
-   *  with no facet identity. Threaded so builders can populate `ValueLabelHookCtx.facet`; the
-   *  DORMANT shared-mode Plot-facet-grid path (`fxField`/`fyField` above) tags rows with `_facet`
-   *  instead, but no live caller uses that path today (see `FacetInfo` in engine/index.ts). */
+   *  with no facet identity. Threaded so builders can populate `ValueLabelHookCtx.facet`. */
   facet?: string;
   /** Programmatic render hooks (see spec/hooks.ts). Only `valueLabel` is consumed by mark
    *  builders today. Absent/`{}` ⇒ every builder's own text stands unchanged. */

@@ -69,3 +69,24 @@ describe("comparePng — mismatched dimensions", () => {
     expect(result.diffPixels).toBe(16); // all pixels count as diff
   });
 });
+
+describe("comparePng — diffWritten", () => {
+  it("is true only when a diff image was actually written", async () => {
+    const { mkdtempSync, existsSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "cmp-"));
+    try {
+      const diffOutPath = join(dir, "d.diff.png");
+      const black = makePng(4, 4, 0, 0, 0);
+      expect((await comparePng(black, black, { diffOutPath })).diffWritten).toBe(false);
+      expect((await comparePng(black, makePng(8, 8, 0, 0, 0), { diffOutPath })).diffWritten).toBe(false);
+      expect(existsSync(diffOutPath)).toBe(false);
+      expect((await comparePng(black, makePng(4, 4, 255, 255, 255))).diffWritten).toBe(false);
+      expect((await comparePng(black, makePng(4, 4, 255, 255, 255), { diffOutPath })).diffWritten).toBe(true);
+      expect(existsSync(diffOutPath)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

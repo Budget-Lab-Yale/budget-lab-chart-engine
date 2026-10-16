@@ -1,0 +1,44 @@
+# card
+<div class="tbl-tooltip-head">
+  "A"
+</div>
+<div class="tbl-tooltip-row">
+  <span class="tbl-tooltip-swatch">
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M5.754,0A5.754,5.754,0,1,1,-5.754,0A5.754,5.754,0,1,1,5.754,0" transform="translate(7,7)" style="fill:#0072B2"/>
+    </svg>
+  </span>
+  <span>
+    <span class="tbl-tooltip-label">
+      "A:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "3.00"
+    </span>
+  </span>
+</div>
+<div class="tbl-tooltip-row">
+  <span class="tbl-tooltip-swatch">
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M5.754,0A5.754,5.754,0,1,1,-5.754,0A5.754,5.754,0,1,1,5.754,0" transform="translate(7,7)" style="fill:#E69F00"/>
+    </svg>
+  </span>
+  <span>
+    <span class="tbl-tooltip-label">
+      "B:"
+    </span>
+    "\u00a0"
+    <span class="tbl-tooltip-value">
+      "7.00"
+    </span>
+  </span>
+</div>
+# pane 0 (hovered)
+<rect class="tbl-catline-hl" fill="#BBBBBB" y="18" height="280" opacity="0.12" style="pointer-events: none;" x="76" width="155"/>
+<rect class="tbl-catline-hit" x="0" y="0" width="432" height="320" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
+# pane 1
+<rect class="tbl-catline-hl" fill="#BBBBBB" y="18" height="280" opacity="0" style="pointer-events: none;"/>
+<rect class="tbl-catline-hit" x="0" y="0" width="390" height="320" fill="transparent" style="cursor: pointer; pointer-events: all;"/>
+# onHover (last payload)
+(no onHover call)

@@ -2,7 +2,7 @@
 export interface FormatRule {
   /** "number" (default), "percent" (multiply by 100), or "currency". */
   type?: "number" | "percent" | "currency";
-  /** Decimal places to display. */
+  /** Decimal places to display: an integer 0–10 (validated). */
   decimals?: number;
   /** Group thousands with ",". */
   thousands?: boolean;
@@ -125,7 +125,8 @@ export interface TableSpec {
      *  download action row (the pre-1.3.1 placement). PNG export omits the control either way. */
     control?: "stub-header" | "footer";
   };
-  /** Fixed px width for the stub column (overrides the computed width). */
+  /** Px width for the stub column (overrides the computed width). A table narrower than its space
+   *  is stretched to fill it; see CONFIG-SPEC for how this column follows. */
   stub_width?: number;
   /** Minimum px width for the stub column. Without stub_wrap it is a floor on the auto-sized width;
    * with stub_wrap it is the width the stub shrinks toward (labels wrap to it) — i.e. the knob for
@@ -137,7 +138,8 @@ export interface TableSpec {
   stub_wrap?: boolean;
   /** When true, stub labels do not wrap; the stub is sized to the longest label. Default false. */
   stub_nowrap?: boolean;
-  /** Fixed px width for data columns: one number applies to all leaves, or a { leafKey: px } map. */
+  /** Px width for data columns: one number applies to all leaves, or a { leafKey: px } map. A table
+   *  narrower than its space is stretched to fill it; see CONFIG-SPEC for how these columns follow. */
   column_width?: number | Record<string, number>;
   /** Wrap body data cells onto multiple lines within the column width: `true` wraps every data
    * column, or a { leafKey: true } map wraps only the named ones. Default false. Pair with

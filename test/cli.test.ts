@@ -10,8 +10,25 @@ import { existsSync, unlinkSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeFileSync, mkdirSync } from "node:fs";
-import { runValidate, runRender, runAssets } from "../src/cli/index";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import {
+  runValidate,
+  runRender,
+  runAssets,
+  runSnapshot,
+  parseServeArgs,
+  listenServe,
+  serveUrl,
+  snapshotDiffPath,
+  startServe,
+  type ServeArgs,
+} from "../src/cli/index";
+import * as http from "node:http";
+import { PNG } from "pngjs";
+import { BUNDLE_PATH } from "./setup/global-build";
+import { CHART_CSS } from "../src/embed/styles";
+import { HAS_BROWSER } from "./helpers/browser";
+import { HORIZONTAL_FACET_ERROR } from "../src/spec/facet-groups";
 
 const EXAMPLE_SPEC = resolve(
   fileURLToPath(new URL("./fixtures/sample-chart/chart.yaml", import.meta.url)),
@@ -138,6 +155,34 @@ describe("runValidate — series_order lists a series twice", () => {
     const result = await runValidate(specPath);
     expect(result.exitCode).toBe(1);
     expect(result.message).toBe(`${specPath}: /series_order: "a" appears more than once`);
+  });
+});
+
+describe("runValidate / runRender — columns.facet on a horizontal chart", () => {
+  // Rejected (spec/facet-groups.ts); snapshot and serve load through the same loadSpecAndRows.
+  it("fails validation with the one message and writes no HTML", async () => {
+    const dir = join(tmpdir(), `cli-test-hfacet-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    const outPath = join(dir, "out.html");
+    tempFiles.push(specPath, csvPath, outPath);
+    writeFileSync(csvPath, "cat,pane,value\na,P,1\nb,Q,2\n", "utf8");
+    writeFileSync(
+      specPath,
+      [
+        "chartType: bar", "orientation: horizontal", "title: Test", "xAxisType: categorical", "data: data.csv",
+        "columns: { x: cat, value: value, facet: pane }",
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    const validated = await runValidate(specPath);
+    expect(validated.exitCode).toBe(1);
+    expect(validated.message).toBe(`${specPath}: ${HORIZONTAL_FACET_ERROR}`);
+    const rendered = await runRender(specPath, { outPath, liveBundleJs: STUB_BUNDLE, css: "body{}" });
+    expect(rendered.exitCode).toBe(1);
+    expect(rendered.message).toContain(HORIZONTAL_FACET_ERROR);
+    expect(existsSync(outPath)).toBe(false);
   });
 });
 
@@ -553,4 +598,138 @@ describe("runValidate — a lone yAxisPolicy bound past every value in the data"
       expect.stringMatching(/warning: yAxisPolicy\.min \(50\) is above every bin height in the data$/),
     ]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// serve: bind address (B8)
+// ---------------------------------------------------------------------------
+
+describe("serve — bind address", () => {
+  it("binds 127.0.0.1 by default, not every interface", () => {
+    const parsed = parseServeArgs(["some/dir"]);
+    expect(parsed).toMatchObject({ host: "127.0.0.1", port: 5173, rootDir: resolve("some/dir") });
+  });
+
+  it("takes --host as an explicit opt-in", () => {
+    expect(parseServeArgs(["--host", "0.0.0.0", "--port", "8080"])).toMatchObject({ host: "0.0.0.0", port: 8080 });
+  });
+
+  it("still rejects a bad port", () => {
+    expect(parseServeArgs(["--port", "0"])).toEqual({ error: 'tbl-chart serve: invalid port "0"' });
+  });
+
+  it("listens on the host it is given and reports that host in the URL", async () => {
+    const server = http.createServer((_req, res) => res.end("ok"));
+    try {
+      const { host } = parseServeArgs([]) as { host: string };
+      const url = await listenServe(server, 0, host);
+      const addr = server.address() as import("node:net").AddressInfo;
+      expect(addr.address).toBe("127.0.0.1");
+      expect(url).toBe(`http://127.0.0.1:${addr.port}`);
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  it("rejects, rather than hanging, when the port is taken", async () => {
+    const a = http.createServer();
+    const b = http.createServer();
+    try {
+      await listenServe(a, 0, "127.0.0.1");
+      const port = (a.address() as import("node:net").AddressInfo).port;
+      await expect(listenServe(b, port, "127.0.0.1")).rejects.toMatchObject({ code: "EADDRINUSE" });
+    } finally {
+      await new Promise((r) => a.close(r));
+    }
+  });
+
+  it("serve's start path, fed parsed default args, binds 127.0.0.1 and prints that URL", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cli-serve-"));
+    // Port 0 (the OS picks a free one) only; everything else is what `serve <dir>` parses to.
+    const args = { ...(parseServeArgs([dir]) as ServeArgs), port: 0 };
+    const started = await startServe(args, STUB_BUNDLE);
+    expect(started.exitCode).toBe(0);
+    if (started.exitCode !== 0) return;
+    try {
+      const addr = started.server.address() as import("node:net").AddressInfo;
+      expect(addr.address).toBe("127.0.0.1");
+      expect(started.url).toBe(`http://127.0.0.1:${addr.port}`);
+      expect(started.message).toBe(`Serving 0 specs from ${dir} at http://127.0.0.1:${addr.port}`);
+    } finally {
+      await new Promise((r) => started.server.close(r));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("serve's start path reports a taken port instead of throwing", async () => {
+    // An empty root: startServe walks rootDir for specs before it listens, and the OS temp dir
+    // itself is far too large to walk inside a test timeout.
+    const dir = mkdtempSync(join(tmpdir(), "cli-serve-port-"));
+    const blocker = http.createServer();
+    await listenServe(blocker, 0, "127.0.0.1");
+    try {
+      const port = (blocker.address() as import("node:net").AddressInfo).port;
+      const started = await startServe({ rootDir: dir, port, host: "127.0.0.1" }, STUB_BUNDLE);
+      expect(started).toEqual({ exitCode: 1, message: expect.stringContaining(`port ${port} is already in use`) });
+    } finally {
+      await new Promise((r) => blocker.close(r));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("brackets an IPv6 address in the URL", () => {
+    expect(serveUrl("::1", 5173)).toBe("http://[::1]:5173");
+    expect(serveUrl("0.0.0.0", 80)).toBe("http://0.0.0.0:80");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// snapshot: diff path and the dimension-mismatch message (B9)
+// ---------------------------------------------------------------------------
+
+describe("snapshotDiffPath", () => {
+  it("replaces a .png suffix (any case)", () => {
+    expect(snapshotDiffPath(join("a", "base.png"))).toBe(join("a", "base.diff.png"));
+    expect(snapshotDiffPath(join("a", "base.PNG"))).toBe(join("a", "base.diff.png"));
+  });
+
+  it("appends .diff.png when there is no .png suffix, so it never names the baseline", () => {
+    for (const p of [join("a", "base"), join("a", "base.bin"), join("a.png", "base")]) {
+      expect(snapshotDiffPath(p)).toBe(`${p}.diff.png`);
+      expect(snapshotDiffPath(p)).not.toBe(p);
+    }
+  });
+});
+
+describe.skipIf(!HAS_BROWSER)("runSnapshot — baseline safety", () => {
+  it("never overwrites a baseline without a .png suffix, and only claims a diff it wrote", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cli-snapshot-"));
+    const baselinePath = join(dir, "baseline");
+    const diffPath = `${baselinePath}.diff.png`;
+    tempFiles.push(baselinePath, diffPath);
+    const opts = { baselinePath, liveBundleJs: readFileSync(BUNDLE_PATH, "utf8"), css: CHART_CSS };
+
+    expect((await runSnapshot(EXAMPLE_SPEC, { ...opts, update: true })).exitCode).toBe(0);
+
+    // Same size, a block of pixels changed: a real pixel diff.
+    const png = PNG.sync.read(readFileSync(baselinePath));
+    for (let i = 0; i < 400 * 4; i++) png.data[i] = 255 - (png.data[i] as number);
+    const tampered = PNG.sync.write(png);
+    writeFileSync(baselinePath, tampered);
+
+    const differs = await runSnapshot(EXAMPLE_SPEC, opts);
+    expect(differs.exitCode).toBe(1);
+    expect(readFileSync(baselinePath).equals(tampered)).toBe(true);
+    expect(existsSync(diffPath)).toBe(true);
+    expect(differs.message).toContain(`wrote ${diffPath}`);
+
+    // Different dimensions: comparePng writes nothing, so the message must not say it did.
+    unlinkSync(diffPath);
+    writeFileSync(baselinePath, PNG.sync.write(new PNG({ width: 4, height: 4 })));
+    const resized = await runSnapshot(EXAMPLE_SPEC, opts);
+    expect(resized.exitCode).toBe(1);
+    expect(resized.message).not.toContain("wrote");
+    expect(resized.message).toMatch(/size/i);
+    expect(existsSync(diffPath)).toBe(false);
+  }, 120_000);
 });

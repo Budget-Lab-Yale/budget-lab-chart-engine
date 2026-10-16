@@ -49,7 +49,7 @@ function groupTr(table: HTMLTableElement, label: string): HTMLTableRowElement {
 describe("collapsible groups — markup (render-html)", () => {
   it("renders a toggle button + caret + aria-expanded when spec.collapsible is set", () => {
     const model = buildTableModel(SPEC, ROWS);
-    const layout = layoutTable(model, { width: 600, measureText });
+    const layout = layoutTable(model, { measureText });
     const table = renderTableHtml(model, layout, document, SPEC);
     const btn = table.querySelector("tr.tbl-table-group button.tbl-table-group-toggle") as HTMLButtonElement;
     expect(btn).not.toBeNull();
@@ -62,7 +62,7 @@ describe("collapsible groups — markup (render-html)", () => {
 
   it("group <tr> carries data-group-key and data-group-parents; data rows carry data-group-parents", () => {
     const model = buildTableModel(SPEC, ROWS);
-    const layout = layoutTable(model, { width: 600, measureText });
+    const layout = layoutTable(model, { measureText });
     const table = renderTableHtml(model, layout, document, SPEC);
     const gtr = groupTr(table, "China");
     expect(gtr.getAttribute("data-group-key")).toBe("China");
@@ -74,7 +74,7 @@ describe("collapsible groups — markup (render-html)", () => {
   it("non-collapsible spec renders NO toggle buttons (plain group labels)", () => {
     const plainSpec: TableSpec = { ...SPEC, collapsible: undefined };
     const model = buildTableModel(plainSpec, ROWS);
-    const layout = layoutTable(model, { width: 600, measureText });
+    const layout = layoutTable(model, { measureText });
     const table = renderTableHtml(model, layout, document, plainSpec);
     expect(table.querySelector("button.tbl-table-group-toggle")).toBeNull();
     // Group label text is still present, just not wrapped in a button.

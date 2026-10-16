@@ -4,6 +4,493 @@ All notable changes to the Budget Lab chart engine are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/); this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Large data: a histogram of more than about 125,000 observations, or a numeric- or temporal-x
+  chart whose rows (with a line chart's CI bounds) pass about 125,000 values, now renders. It threw
+  `RangeError: Maximum call stack size exceeded`. Standalone and small-multiples both.
+- Histograms with `bins` or automatic binning on a temporal axis, or on values of about 1e7 and up:
+  the chart draws the bin count it computes. Rounding error in the edge loop could add a final
+  sliver bin, a few rounding steps wide (under a millisecond on a date axis), that took the
+  observations at the maximum, so the last visible bin undercounted, and under
+  `normalize: density` that bin's height flattened every other bar. Only such slivers are dropped:
+  a genuine short final bin is kept, and every other bin edge is unchanged. No published figure
+  moves: the archive's one histogram is numeric with `binWidth: 0.25`.
+- Temporal histograms with a calendar `binWidth` (`day`, `week`, `month`, `quarter`, `year`): bin
+  edges are now in local time, as the dates are parsed and the axis is ticked, and so are every
+  temporal histogram's hover bin labels. Both were in UTC, so a reader east of UTC (Europe, Asia)
+  saw an observation on a period's first day counted and labelled in the previous period
+  (2020-01-01 in the 2019 bin), live and in the PNG. Day and week edges stay on local midnight
+  across a daylight-saving change. Under UTC nothing changes. West of UTC (the US) the counts and
+  labels are the same, and the edges shift by the UTC offset onto local midnight, in line with the
+  axis ticks.
+- Small multiples in `mode: "shared"` with a reversed value axis (`yAxisPolicy.min` > `max`): when
+  the panes' own domains differ (one pane's data overflows into `autoWiden`, or a facet-scoped
+  marker extends one pane), every pane now shares their union. The figure took their intersection,
+  so the wider pane's data or marker ran off the frame. No published figure moves: the archive's
+  two reversed charts are single charts.
+- Single (non-faceted) temporal and quarterly charts with an x marker, band or point callout past
+  the data: overlay `domain: axis` now spans the whole drawn x-axis, as CONFIG-SPEC says, and the
+  top-label auto-stagger and point-callout placement measure positions on it. All three used the
+  data extent at most widths, so an `axis` overlay stopped short of the frame, overlapping labels
+  shared a row, and a callout near the data's end could flip as if at the frame edge; which widths
+  were affected depended on the tick count. The drawn range is now computed before rendering, so a
+  chart renders once (it rendered twice when its ticks thinned) and a small-multiples pane and a
+  single chart measure the same way. A callout connector with `dx` past the data still widens the
+  axis to hold its end, now exactly: the label end sits on the frame edge and the connector is
+  `dx` px long. Blank values at the x-extent boundary: where a date-axis chart's marks drop
+  blank-value rows (a `projected_field` line; scatter and dot plot rendered without validation) and
+  its first or last rows are blank, the axis now spans the full data extent, as a plain line or
+  area chart's already did. It used to stop at the first and last tick label, which moved with the
+  width. No published figure moves: in every archive temporal chart the annotations lie inside the
+  data, and none is a point chart, uses `projected_field` or has a blank boundary row.
+- Small multiples with a categorical x-axis, line marks and a legend: the hover cursor no longer
+  drops out when the pointer is within a few pixels of a line. The invisible click targets that let
+  a click on a line pin its series were stacked above the hover area instead of below it.
+- Categorical-x line and area hover with multi-word categories whose axis labels wrap onto two
+  lines: the card now shows the category and its values (it showed the two lines run together and
+  no values), and the coordinated cursor draws on every pane (it drew nothing).
+- Live charts: tearing down a mount, or a redraw (resize, title-selector reselect), while the
+  pointer rests on the chart no longer leaves its hover card on the page, and `onHover` /
+  `tbl-hover` now report `null` when that ends a hover. Tearing down one chart leaves another
+  chart's card alone. Treemaps already hid their card.
+- Live tables with `sort: true`: sorting a column orders each group by its own rows' values. Where
+  a row label repeated across groups (or two labels shared one `row_labels` display), every group
+  after the first was sorted on the first group's values.
+- Live tables with `sort: true`: the sort no longer resets when the card resizes or a collapsible
+  group is collapsed or expanded, and a collapse no longer rebuilds the table (the pressed toggle
+  keeps focus). Sortable column headers keep their column-header role so screen readers announce
+  `aria-sort`; the header label is now a button, which is what takes keyboard focus.
+- Live charts and small multiples: legend pins survive a resize and a title-selector reselect (they
+  were silently cleared, and `onLegendSelect` was not told). A redraw whose legend no longer has a
+  pinned row drops that pin and fires `onLegendSelect` once; on an area chart it also restores the
+  stack order. Pinning an area series from the keyboard keeps focus on its legend button. An area
+  pin now fires `onLegendSelect` once; it fired once per pinned series plus once more, the extra
+  calls carrying partial sets as the pins were re-applied.
+- Live charts, click to pin: a standalone categorical-x line chart now pins a series on a click
+  within a few pixels of its line, and shows a pointer cursor, as its small-multiples panes already
+  did (a click had to land on the 2px stroke itself). Standalone dumbbells and multi-series
+  histograms, which already pinned on click, now show the pointer too.
+  Small-multiples histogram and dumbbell panes now pin a series when a bin or dot is clicked, with
+  the pointer cursor; they ignored the click. Small-multiples dot plots and scatters no longer mark
+  the card selectable, since their panes do not pin on click. Static SVG and PNG output is unchanged.
+- `tbl-chart serve`: a malformed percent-escape in a `/chart/` URL (`/chart/%E0%A4%A`) now answers
+  400; it crashed the server. `/chart/` serves only `chart.yaml` and `table.yaml`: any other file
+  under the root answers 404 instead of being read and YAML-parsed.
+- `tbl-chart snapshot --baseline <path>` with no `.png` suffix: a failing compare overwrote the
+  baseline with the diff image. The diff now goes to `<path>.diff.png`. When the rendered image's
+  size differs from the baseline's, no diff image is written, and the message no longer says one was.
+- Live charts and small multiples, teardown from a callback: a host that tears the mount down from
+  `onRender` no longer gets a later pane's `onRender`, a dropped-pin `onLegendSelect`, or (on an
+  area chart) the restack's `onLegendSelect` and morph. A legend or title selector left on the page
+  after teardown fires no `onLegendSelect`, `onSelect` or `tbl-title-select`, and redraws nothing.
+  A teardown from inside `onHover`, `onRender`, `onLegendSelect` or `onSelect` also withholds that
+  callback's bubbling `tbl-*` event, which was still dispatched; the `onHover(null)` and `tbl-hover`
+  the teardown itself sends for a hover it ends are unchanged. A teardown from inside a hook
+  (`tickLabel`, `afterRender`, `legendKey`, `tooltip`) or `onHover` now stops the redraw or hover
+  where it is; the redraw went on to finish, rebuild the legend and fire `onRender`, and the hover
+  showed its card.
+- Live charts and small multiples, a failed render: the error message is shown as text (it was
+  parsed as HTML), and a non-`Error` throw shows its value rather than `undefined`. The legend, and
+  on a standalone chart the y-axis labels, of the last good render are removed. A standalone chart
+  retries a resize to the width that failed; it skipped it as unchanged. Both retry a resize back
+  to the last width that rendered, which they also skipped as unchanged.
+- Live charts and small multiples in a hidden container (width 0, such as a collapsed tab) are no
+  longer redrawn at the minimum width, which also moved a right legend to the top, until shown. On
+  a page with no layout, pinning an area series beside a right legend no longer narrows the chart.
+- Line charts with a single x value: the hover guide is drawn on the point (it was `x1="NaN"`), and
+  the small-multiples coordinated cursor's guide on the point rather than at the left edge.
+- `overlays[].fun`: a function name inherited from JavaScript objects (`constructor(x)`,
+  `toString(x)`) is now a validation error naming the known functions. It passed validation and the
+  render threw.
+- PNG export with a `legendKey` hook that returns `ctx.rendered` unchanged: the download now matches
+  the one without the hook, as documented. The row was drawn unwrapped (a long label ran off the
+  frame) and took a single row in a right-hand legend column. Markup a hook changes is still drawn
+  as returned, unwrapped.
+- PNG export of a single-series chart with a colored title selector: a legend row colored from the
+  series (a dashed series' row, for one) now takes the active option's color, which the series is
+  drawn in, on a standalone chart (top or right legend) and a small-multiples figure. It kept the
+  series' own color, so the swatch did not match the line. The export's legend pass now paints a
+  single series in the accent, as its final pass and the live chart do.
+- Stacked bars with a hard `yAxisPolicy.min` or `max` that a stack's sum passes: the segments are
+  now clipped to the plot frame, as every other chart type's marks already were. They painted past
+  the frame, over the title and legend or into the category-label gutter, live and in the PNG. The
+  net total and its dot stay unclipped. A stack that fits its domain is unchanged. See
+  **Upgrading**.
+- Legend hover and pin, the hover card, and `series_patterns` textures now reach the marks they
+  name in three cases where the `data-series` / `data-category` tags were attached to the wrong
+  elements. Horizontal grouped bars with sections (the `columns.facet` spelling is now an error;
+  see **Horizontal facets** under **Upgrading**), whose rows are drawn in a different order from the
+  data (`section_order` differs from it, or sections interleave in it) and whose categories do
+  not all hold the same series in the same order: rects carried another series' tag, so hover
+  dimmed the wrong bars and a texture was painted on the other series' bars, in the PNG too. A sectioned horizontal dumbbell drawn in a different order
+  from its data: dots and category labels carried another row's category, so hovering one row
+  showed another row's card. A line chart with a series that has no value (in the chart, or in one
+  small-multiples pane), unless it is the last of its dashed or solid group: each line after it
+  took the tag of the series before it. Charts whose tags were already right are unchanged. See
+  **Upgrading**.
+- Stacked bars with `barStack.stackOrder` and `valueLabels.show`: each segment label now sits in
+  its own segment. The labels walked the stack in `series_order`, so they were placed at the
+  midpoints of segments they do not name, live and in the PNG. Stacks without `stackOrder` are
+  unchanged. No published figure moves: the archive's two `stackOrder` stacks draw no segment labels.
+- Callouts that give `series` and no `y` on a stacked bar or area chart: under
+  `barStack.stackOrder`, or after pinning a series on a live area chart (which moves it to the
+  bottom of the stack), the callout now follows that order. It ranked series by `series_order`
+  whatever the stack order, and added every lower series' value, negatives included, so it named
+  one segment and pointed at another. Positive and negative values now sum separately, as the bars
+  stack: a negative series' callout points at its outer end below zero. No published figure moves: every
+  archive point callout is on a line chart.
+- Stacked and waterfall value labels without `valueLabels.decimals`: the precision is now the
+  fewest decimals the data needs, as CONFIG-SPEC says. Rounding error in a sum counted as
+  precision, so stacked nets of 1.1 + 2.2 and 1.5 + 2.5 printed "3.30" and "4.00", and a waterfall
+  of 1.1, 2.2, 0.5 printed "1.10", "3.30", "3.80" in its labels and "+1.10" in its value pill, live
+  and in the PNG. They print "3.3", "4.0", "1.1", "3.3", "3.8" and "+1.1". Values are counted to
+  12 significant digits of the chart's largest value. No published figure moves: the archive's
+  stacks without `decimals` hold integer data, and its waterfall sets `decimals`.
+- Value-axis ticks below 1e-6: each tick now prints its value. Every tick printed "0" (or "0.0000")
+  because the decimal count read JavaScript's exponent form ("2e-7"). Ticks take the fewest
+  decimals that write every tick exactly (counted, as above, to 12 significant digits of the
+  largest tick), and never fewer than the tick step has, so every tick prints its own value: a
+  domain pinned to [1e12, 1e12 + 1] reads 1000000000000.0, 1000000000000.2, and so on. No
+  published figure moves.
+- Value labels count decimals to 12 significant digits of the chart's largest value, so where that
+  value is 1e10 or more, decimals below its 12th digit are dropped (a label on 12345678901.25 reads
+  12345678901.3). No published figure has values that large.
+- Tables, a value that rounds to zero at its decimals: it prints without a sign and takes no
+  `sign_color`, live and in the PNG. The sign was read before rounding, so -0.04 at one decimal
+  printed "-0.0" (in red under `sign_color`) and +0.04 printed "0.0" in green. See **Upgrading**.
+- Table PNG export: a footnote marker on a text cell is drawn. Only numeric cells drew theirs. A
+  marker after math sits at the usual height beside the whole text; after a trailing superscript it
+  rose with the superscript, and after a stacked sub- and superscript it could overlap it.
+- Table PNG export with three or more header tiers where a leaf's blank upper tier is absorbed
+  from below: each upper-tier header cell now sits over its own columns. It was placed after the
+  previous cell drawn in its tier, so it could land over the absorbed leaves' columns, and the
+  banner-width fit widened those columns instead.
+- Table PNG export, `\\` in a group label, the corner (`stub_header`), a banner or a sublabel: the
+  row or header tier is a line taller per break, so every line sits in its own band. The second
+  line was drawn into the next row or the tier below with no room reserved. A banner centres its
+  lines; the corner grows upward from the leaf-label baseline, as the leaf labels do. Text without
+  a `\\` lays out as before. See **Upgrading**.
+- Table PNG export, banner flanking rules: a rule never runs backwards or into its label. The rules
+  were placed by a 7 px-per-character estimate over the whole label (a `\\` label included), which
+  in Figtree overshoots, so where a banner's cell is about as wide as its label the rules were drawn
+  backwards (x1 > x2), out past the cell or across the label. Where that estimate leaves no room,
+  or falls short of the label, or the label has a `\\`, the rules now flank the label's measured
+  width (its widest line), and a banner with no room beside its label has no rules. Every other
+  banner keeps exactly the rules it had. See **Upgrading**.
+- Tables with both `stub_wrap` and `stub_nowrap`: `stub_nowrap` wins in the layout as it did in the
+  live cell, so the stub is sized to its longest label and the PNG keeps each label on one line.
+  The layout wrapped the stub, so the PNG wrapped labels the live table kept on one line, overrunning
+  a stub column sized for the wrapped text.
+- Table PNG export with `header_max_lines`: a leaf header that needs more lines shows its first N,
+  the last ending in an ellipsis, as the live clamp does. The last line took all the remaining words
+  and ran past its column. A header that fits in N lines is unchanged. A `header_max_lines` below 1
+  now means no limit and a fraction is rounded down, live and in the PNG; on screen neither clamped
+  (the CSS clamp takes only a whole number), while the export left the header out of the column
+  width as if it would wrap.
+- Table PNG export, a table narrower than the frame: it is stretched to the frame's content width
+  (480 px in the 560 px frame), as the live table fills its card. It was drawn at its natural width,
+  flush left, under a title, notes and source that span the frame. As on screen, a single table
+  scales its row-label column and every data column, `stub_width` and `column_width` included, by
+  one factor. A multi-pane table keeps its shared row-label width and its data columns take the
+  rest in proportion to their widths (on screen they take equal shares). Row labels, text cells,
+  clamped headers and group notes wrap at the wider widths, and a banner left no room for its
+  flanking rules can now have them. A table at or wider than the frame is unchanged. See
+  **Upgrading**.
+- Table footnote list: math in a footnote renders on screen (it printed its `\( … \)` source while
+  the PNG rendered it), and a `\\` starts a new line on screen and in both PNG layouts, with the
+  height reserved. A multi-pane table's PNG now wraps a long footnote to the frame (it ran off the
+  edge) and renders its math (it printed the source). Footnotes with neither are unchanged.
+- Table PNG export, footnote list: each footnote's marker is drawn as a superscript, as on screen,
+  in both PNG layouts. It printed inline at the text's size ("a Phased in…"). It is now 11/1.2 px
+  and raised 11/3 + 1 px, as Chromium draws the live list's `<sup>`, with the text straight after
+  it; a line after a `\\` or a wrap has no marker. The list is drawn at weight 500, as on screen
+  (it was 400). A multi-pane table wraps a footnote's first line with the marker at its drawn size
+  and weight, and a first word too wide to fit beside the marker starts the next line, leaving the
+  marker alone, as on screen (it ran past the frame edge). See **Upgrading**.
+- Table PNG export, a body cell's footnote marker: drawn at the live `<sup>` size and height, 9.1
+  px and raised 13/3 + 1 px. It was 11 px and rose about 10.5 px, twice the live 5.3 px: Chromium
+  applied `baseline-shift: super` on top of the explicit 4 px rise. See **Upgrading**.
+- Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
+  `url("#p")`) no longer breaks the swatch markup.
+- `xAxisPolicy.anchorAtZero: true` on a numeric x-axis whose values are all negative: the axis now
+  runs to 0, as CONFIG-SPEC says, on a standalone chart and in every small-multiples pane, live and
+  in the PNG. Only the minimum was anchored, so the axis stopped at the largest value. An axis that
+  spans 0 or lies above it is unchanged. No published figure moves: the archive sets the field only
+  to `false`.
+- Stacked charts: a negative value in a series that `series_order` leaves out no longer makes the
+  chart count as diverging. The chart does not draw it, but the test read every row, so a stack with
+  no negative segment on show took a right-hand legend, live and in the PNG. No published figure
+  moves: no stacked spec in the archive drops rows by `series_order`.
+- PNG export of small multiples: a pane title wider than its column wraps at word boundaries
+  within the column, as the live title does, and its grid row's title band grows by a line per
+  extra line, so every pane in that row starts below it. The title was drawn on one line and ran
+  into the next pane's title. Whether a title fits is measured with Figtree's own advance widths
+  (the table timelines use), not the browser's canvas, so the layout is the same wherever the PNG
+  is made. A title that fits is drawn exactly as before. Under a frame's `fillPanes`, the panes
+  shrink to make room, and every hook still runs once per export pass. No published figure moves:
+  the widest archive pane title (scf `home-sale-exclusion`) fits its 270 px column in the slides'
+  half frame.
+- Annotation legend chips for bands and `shading` fills colored with 3-, 4- or 8-digit hex, a CSS
+  color name, `transparent`, or `rgb()`/`rgba()`/`hsl()`/`hsla()` (whole-number or percentage
+  `rgb` channels, a unitless hue, a number alpha or a `/` percentage, comma- or space-separated):
+  the chip shows the tint the fill paints, flattened over white at its opacity, with the color's own
+  alpha applied too. It showed the color at full strength, about ten times darker than a
+  10 %-opaque band. Every other color (`var()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `hwb()`,
+  `color()`, `color-mix()`, `currentColor`, a hue with a unit, a fractional `rgb` channel, a
+  `none` channel) still keys at full strength, now documented in CONFIG-SPEC.
+  No published figure moves: every archive band and fill color is a palette token or 6-digit hex.
+- CSV data: a byte-order mark before a quoted first header no longer leaves the header's quotes in
+  its name (`"time"` did not match `time`). The data download (charts and tables) and
+  `freezeRemote` quote a field holding a bare carriage return, which read back as two rows.
+- CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
+  - Colors: lists the forms validation accepts (hex, the named CSS functions, Plot's CSS keywords) in
+    place of "any CSS color passes through". `yellowgreen` is rejected; `"Blue"` is the CSS keyword,
+    not the palette's blue. Color fields elsewhere now point to that section rather than saying
+    "named color or `#hex`".
+  - Table inline math: `\$` is a dollar sign only in text parsed for math. In the PNG export,
+    multi-line text can be parsed line by line, so `\$` can keep its backslash on a line without
+    math; the table's `notes` line is never parsed.
+  - Hooks: what a throwing `legendKey` (out of `mountChart` on the first draw, no teardown, no
+    resize redraw, and on a standalone chart no title-selector redraw) and `tooltip` (on hover only;
+    a card from an earlier move stays with its old content) actually do. The old account said both
+    were retried on the next resize.
+  - Hooks: `legendKey` receives `__annotation:<label>` as `ctx.series` on annotation rows, and markup
+    a hook changes is exported unwrapped on every chart type, not only timelines.
+  - `barStack.netLabelColor` and `valueLabels.signed` are documented as accepted with no effect.
+  - Point callouts: the frame clamp has a second exception. In the fallback sweep (more than nine
+    auto-placed callouts, or no arrangement meeting every constraint), clearing other callouts'
+    markers can push a label outside the frame even where the column of labels would fit in it.
+  - Shading: `side` is measured against `baseline`, not zero.
+  - Rug: tracks group by label within bands and within shading (explicit tracks never), painted in
+    the first entry's color, while the legend chip keys every entry's color; the full-cover
+    validation error only catches a track inside one later interval.
+  - Keying annotations: which same-label rows merge (fills always; lines only with the same dash, in
+    the first line's color), the row order includes `overlays` (before `xAxis`), and a no-`series`
+    shading chip shows every series' tint, painted or not.
+  - `columns.category` works on every chart type but `timeline` and `treemap`, not only dumbbells.
+  - `MountOptions.height`: honoured by a standalone chart; ignored by timelines, treemaps,
+    small-multiples figures and the PNG download.
+  - `series_order` on a stacked bar sets which series draw, the legend order and the colours, not
+    the stack: each category stacks in the order its rows appear in the data, and
+    `barStack.stackOrder` sets the stack. Without `stackOrder`, a category whose rows arrive out of
+    `series_order` can draw a segment label inside a segment it does not name (unchanged).
+  - Now documented: the `waterfall` block (`colors.increase`/`decrease`/`total`, `connectors`,
+    `connectorColor`), `category_order`, table `collapsible.control`, `category_colors` on
+    waterfalls, the dumbbell gap label's default of 1 decimal place, and `legend` in the
+    `annotations.xAxis` / `annotations.yAxis` entry shapes.
+  - Tables: `stub_width` and `column_width` are no longer called fixed. A table narrower than the
+    card stretches on screen, and these columns widen with it; a multi-pane table's data columns
+    split the width beside the row labels equally whatever their `column_width`, so on screen
+    neither a wrapping cell's widest word nor a banner widens them (both still do on a single
+    table and in every PNG). The PNG export now stretches too (see the narrow-table entry above).
+
+### Changed
+- Validation is stricter, and looser where it rejected figures that render correctly. See
+  **Upgrading**.
+- `validateSpec` (and `tbl-chart validate`) reports every cross-field rule a spec breaks, not only
+  the first rule's errors, in a fixed rule order. Two cases still end the report early: a schema
+  error reports only the schema errors, and a field a timeline or treemap does not support reports
+  only those errors. Where a rule added in this release fires before an older one, the first error
+  is the new rule's: a temporal histogram with `binWidth: "fortnight"` and an `overlays[].fun`
+  reports the `binWidth` error first, where 1.18.0 reported the `fun` error.
+- CSV data that cannot be read unambiguously is an error naming its line (and, from `loadData`, the
+  file or URL): a quoted field with no closing quote, which took the rest of the file as one cell;
+  text after a closing quote (`"x"y`), which shifted the row's later cells; two header columns
+  sharing a non-blank name, of which the last silently won (blank names may repeat); and a
+  non-empty cell past the header's last column, which was dropped. A short row is still padded with
+  empty cells. See **Upgrading**.
+- Requires Node 24: `engines.node` is now `>=24` (it was `>=20`), and CI runs on Node 24. See
+  **Upgrading**.
+- `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while
+  printing a `localhost` URL, so another machine on the same network could open every spec under
+  the root, data included. `--host <addr>` opts in to another address, and the printed URL is the
+  address actually bound.
+
+### Removed
+- From the package entry: the `FacetInfo` type and `renderPane`'s fifth (`facetInfo`) parameter,
+  the dormant shared-mode Plot-faceting path they drove; `render()`, a dispatcher nothing in the
+  engine called (use `renderChart`, or `renderFigure` for a `small_multiples` spec); and
+  `FigureRenderResult.combinedSvg`, which was always `undefined`.
+
+### Upgrading
+- **Archive scan** (`budget-lab-charts` at main 8ef220b): every `chart.yaml` and `table.yaml`, 88
+  in all (77 figures under `charts/` and 11 slide-pipeline fixtures), validates exactly as it did
+  on 1.18.0, except two `ecec-macro` figures that set `columns.facet` on a horizontal stack and need
+  a rename first (see **Horizontal facets**, below). The one other failure, the slide pipeline's
+  deliberate bad-input fixture `scripts/slides/fixtures/unknown-field/chart.yaml`, already failed.
+  `budget-lab-interactives` has no specs this engine validates.
+- **Newly rejected** by `tbl-chart validate` (and `validateChart`). Except for table `decimals`
+  from 11 to 100, `highlightSeries` off a bar or histogram, and `columns.facet` on a horizontal
+  chart (below), each of these rendered wrongly, blank, or not at all, so a spec that now fails
+  needs fixing, not waiving. The validation changes below alter no rendered output; a horizontal
+  chart's `columns.facet` also stops rendering (see its entry).
+  - A spec key that names a value in the data and is not in the data, on every chart type,
+    histograms included, wherever the chart reads the field: the `series_*` maps,
+    `highlightSeries` (bar, histogram), `series_marker` and `gap_annotation.series_a`/`series_b`
+    (dumbbell), `barStack.stackOrder` (stacked), `x_labels` (where a hover card or a callout's `{x}`
+    is sure to read it), `section_order`, `section_labels`,
+    `small_multiples.pane_order`/`pane_titles`/`pane_widths`, `overlays[].facet`,
+    `annotations.points[].series`, and `facet` on reference markers and x-anchored callouts. On a
+    histogram none of these was checked; elsewhere a typo in the newly checked ones dimmed every
+    series, drew a scoped marker nowhere, or silently did nothing the chart showed. CONFIG-SPEC's
+    CSV format section lists the fields checked only on some charts.
+  - `columns.section`, and on a waterfall `columns.kind`, naming a column the data lacks. A
+    misspelled `kind` column drew every waterfall step as a delta.
+  - `histogram.bins` that is not a positive integer: 0 or less fell back to automatic binning, and
+    a fraction such as 2.5 drew about that many bins, the last one short.
+  - `histogram.binWidth` of 0 or less, which fell back to automatic binning. A string is accepted
+    only on a temporal axis, as `day`, `week`, `month`, `quarter`, `year` or a positive day count
+    such as `"7"`; any other string fell back to automatic binning.
+  - `histogram.domain` that is not ascending. A reversed one drew a single bin.
+  - A cell holding only whitespace in a numeric column (the value, a confidence bound, a `column`
+    overlay's column, `histogram.weight`): leave the cell empty for a missing observation. A
+    whitespace-only value cell drew as 0.
+  - A hex color without 3, 4, 6 or 8 digits, and `rgb()`, `rgba()`, `hsl()` or `hsla()` whose
+    contents are not three channels and an optional alpha, comma- or space-separated (`rgb(foo)`).
+    A 5- or 7-digit hex or `rgb(foo)` reached the SVG as written and the browser dropped it: a
+    filled mark took the chart's text color and a line was not drawn.
+  - Under a `series_patterns` texture, a color the engine cannot read (`oklch()`, `currentColor`, a
+    space-separated `rgb()`, an `rgb()` with fractional channels, …) where it is the color actually
+    painted under the texture, when the chart is validated with its data: `bar_color` on a chart
+    whose one series is named, or beside a `series_colors[""]`; `category_colors`;
+    `waterfall.colors`; a title-selector option's color. These threw at render.
+  - Tables: a `format` `decimals` that is not an integer from 0 to 10, in any scope (a negative or
+    over-100 value threw at render, and a fraction was truncated; 11 to 100 rendered correctly and is
+    rejected for consistency with the chart `decimals` bound of 10); and an `emphasis_column` or
+    `footnote_column` naming a column the data lacks (a typo dropped every emphasis or footnote).
+  - Tables: unsupported math (`\frac`, `\sqrt` and the other two-dimensional constructs) in a
+    `footnotes` definition, as CONFIG-SPEC says of every table string. Footnotes were the one
+    rendered table string not checked, so such a footnote drew its command as text (`\frac12`).
+    No table in `budget-lab-charts` or in State of Tariffs (`manifest.json` and every previous
+    vintage) sets `footnotes`.
+  - An `overlays[].fun` function name inherited from JavaScript objects (`constructor(x)`); see
+    **Fixed**.
+  - `highlightSeries` on a line, area, stacked, scatter, dot plot, waterfall or dumbbell chart
+    (timelines and treemaps already rejected it). Only `bar` and `histogram` read it: CONFIG-SPEC
+    listed it under the bar and stacked-bar options, but a stacked chart, like the others, drew
+    exactly as it would without the field. Stacked charts do not support it. No published figure
+    sets the field.
+  - `columns.facet` on a horizontal `bar`, `stacked` or `dumbbell` chart (a dumbbell with
+    `orientation` omitted included), with or without `small_multiples`. Since 1.16.0 the engine drew
+    it as `columns.section` (Ruling 80; see 1.16.0 **Changed**, "Horizontal charts draw
+    `columns.facet` as groups"). It is now one error that names the section spelling, and it
+    replaces the errors 1.16.0 added beside it for `columns.section`, `small_multiples.columns`,
+    `mode`, `pane_widths`, `coordinated_cursor`, `section_order` and `section_labels`. A `facet` on
+    an annotation, `yAxisPolicy.markers` or `overlays` entry is still reported, since the rename
+    does not cover it. `tooltip_section` on such a chart now also reports that it needs
+    `columns.section`. `renderChart`, `renderFigure`, `mountChart` and the PNG export throw the
+    same message instead of drawing the chart, so `budget-lab-interactives`, which renders without
+    validating, fails too. Published specs use it: see **Horizontal facets**, below.
+- **Horizontal facets** (see **Newly rejected**): these specs set `columns.facet` on a horizontal
+  chart and must be migrated before a repin, or they fail validation and do not render. Rename
+  `columns.facet` to `columns.section`, `small_multiples.pane_order` to `section_order` and
+  `small_multiples.pane_titles` to `section_labels`, and delete `small_multiples`. 1.16.0 drew the
+  facet spelling by making exactly that rewrite on the spec (Ruling 80), so after the rename the
+  output is identical: the engine's two goldens recorded from the facet spelling
+  (`figure7-tariff-grouped`, `hstacked-grouped`) match byte for byte from the section spelling.
+  - `budget-lab-charts`: `charts/articles/2026/10/ecec-macro/full-workforce-gdp-by-estimate/chart.yaml`
+    (stacked, `facet: estimate`) and
+    `charts/articles/2026/10/ecec-macro/parental-contributions-by-policy/chart.yaml` (stacked,
+    `facet: year`).
+  - `budget-lab-interactives`, State of Tariffs: `tools/state-of-tariffs/data/manifest.json` (the
+    consumer-prices bar figure, `facet: substitution`, in every tab and vintage) and 43 specs in 31 files under
+    `tools/state-of-tariffs/data/previous-vintages/*/vintage.json`. Either edit those files, or add
+    the rename as a shim in `tools/state-of-tariffs/render.js`, which already rewrites
+    `spec.columns.facet`; the shim is the cheaper route.
+- **No longer rejected**, because they render correctly:
+  - `small_multiples.pane_widths` sized to the panes the grid draws, when a facet cell is blank. A
+    blank cell is not a pane, but it was counted as one.
+  - Under a texture, a color that is never painted under it. The check follows fill precedence: a
+    `series_colors` entry that `bar_color` overrides, and `bar_color` on a stacked, area or
+    waterfall chart, now pass; a later title selector's color is not checked when an earlier
+    selector colors every option. `validateSpec` without the data no longer makes this check.
+  - Under a texture, a single series' `series_colors` entry, and on a bar chart its `bar_color`,
+    when some title selector colors every option: an accent is then painted over it under every
+    selection. The PNG export painted it in its legend pass and threw (see **Fixed**). A
+    histogram's `bar_color` still wins over the accent, so it is still checked.
+- **Node 24** (see **Changed**): `budget-lab-charts` installs the engine from its git tag and builds
+  it (`prepare`) under its CI runner's default Node, and its CI and `package.json` assume `>=20`.
+  Its CI must run Node 24 or later before it repins. Under an older Node, npm warns `EBADENGINE`
+  (an error under `engine-strict`).
+- **Stricter CSV parsing** (see **Changed**): every CSV in `budget-lab-charts` (165 files) and in
+  `budget-lab-interactives` (473, of which 431 are State of Tariffs data) parses, row for row, to
+  the same rows as on 1.18.0. A data file that now fails was being read wrongly; fix the file.
+- **PNG export legend accent** (see **Fixed**): no published figure moves. No `budget-lab-charts`
+  figure has `title_selectors`; the only specs there that do are two slide fixtures, single-series
+  lines with no legend rows. In State of Tariffs, `default-scenario/gdp-by-category` (and the same
+  figure in 38 earlier vintages) has option colors but no legend rows under either selection, so
+  there is no swatch to recolor.
+- **Stacked bars clipped** (see **Fixed**): three published figures move, all in
+  `articles/2026/10/ecec-macro`: `full-workforce-gdp-by-estimate`, `parental-contributions-by-policy`
+  and `parents-and-children-contributions`. Each is a horizontal stack with `yAxisPolicy.min: 0`
+  whose Child allowance rows are small negatives (down to -0.0014). Those segments painted up to
+  about 5 px left of the zero line, into the category-label gutter (about 7 px in the PNG). They are
+  now clipped away, so the slivers no longer show, and the stack mark gains a `clip-path` group.
+  The notes on two of these figures say the child allowance's contributions are small and negative;
+  to show them, drop `min: 0` from the three specs in `budget-lab-charts` (to be done there
+  separately). No other published stacked figure has a hard bound its data passes.
+- **Hover and legend tags** (see **Fixed**): no `budget-lab-charts` figure moves. Its one dumbbell
+  has its sections in data order, its grouped horizontal bars are unsectioned, and no line has a
+  blank series. Two `budget-lab-interactives` tools change once they re-vendor the engine, live
+  only (no texture is involved, so neither PNG changes): State of Tariffs
+  `default-scenario/consumer-prices` (and the same figure in 38 earlier vintages), a horizontal bar
+  with `columns.series` and `columns.facet` on one column (it renders only after the
+  **Horizontal facets** rename, and the change is seen from then), where 20 of 42 bars carry the
+  other series' tag, so legend hover and pin dim the wrong bars; and the BLSMM `plot_10yr_yield` and
+  `plot_federal_funds` charts, where a scenario that leaves the first variable unchanged blanks its
+  Scenario series and the second variable's Scenario line takes the first's tag.
+- **Table export, line breaks and signed zero** (see **Fixed**). In `budget-lab-charts` only PNG
+  downloads change; no archive table uses what the live-table fixes touch. Five published figures
+  move:
+  - `articles/2026/10/revenue-potential-top-taxes/income-above-top-thresholds`: its banners
+    "Income above \\ threshold" and "After-tax income \\ above threshold" have a line break. The
+    banner row is 15 px taller, so the figure is 15 px taller and both banner lines sit above the
+    "$ billions" / "% of GDP" row (the second line was drawn 13 px above it, inside that row).
+    Their rules ran backwards across the first line: "Income above threshold" now has short rules
+    beside its wider line, and "After-tax income above threshold", whose cell is exactly as wide
+    as its label, has none.
+  - `articles/2026/07/ai-fiscal/key-parameters` and `key-parameters-symbols`: the banner "AI
+    Adoption Scenarios via Karger et al. (2026)" fills its cell, and its rules were drawn backwards,
+    sticking out past the cell into the stub column and the right margin. It has no rules now.
+  - `articles/2026/07/tariff-model-update-july2026/headline-results` and `update-decomposition`:
+    the "10-year revenue ($B)" banner's rules were drawn backwards (about 9 px); they are now about
+    3 px long, beside the label. Their other banners are unchanged.
+  No other `budget-lab-charts` table changes: none has `footnote_column` or `footnotes`, a
+  `stub_wrap`/`stub_nowrap` pair, a header longer than its `header_max_lines`, a value that rounds
+  to zero under `sign_color`, a `\\` outside its banners, or an upper header tier that the fix
+  moves. In State of Tariffs, on re-vendor: the `alternative-scenarios/summary-statistics` cells
+  that print "-0.0%" or "-0.00 pp" and the two in `alternative-scenarios/etr-by-country` (and
+  earlier vintages) lose the minus, on screen and in the PNG; the 2026-02-21 and 2026-03-09
+  `summary-statistics` banners with a `\\` (such as "Policy Before\\SCOTUS Ruling") get a
+  taller banner row and measured rules. Rendered over every table the tool mounts (each scenario,
+  toggle and selector, in Chromium with Figtree), banner rules also move in 36 more earlier-vintage
+  tables: the "Average Effective Tariff Rate" banner of `etr-by-country` ("by Trading Partner" in
+  26 vintages from 2025-04-10 to 2026-04-08, "by Region" in 2026-02-20) had rules drawn about 9 px
+  backwards, and now has measured rules. No current State of Tariffs banner moves.
+- **Narrow tables in the PNG** (see **Fixed**): no `budget-lab-charts` figure moves. All 13 of its
+  tables are wider than the 480 px content width (the narrowest,
+  `articles/2026/07/ai-fiscal/key-parameters`, is 512 px as the export lays it out in Chromium with
+  Figtree), so their PNGs are unchanged, the five figures named under **Table export, line breaks
+  and signed zero** included. Live tables are unchanged. State of Tariffs table PNGs do move, when
+  it re-vendors the engine (not at the `budget-lab-charts` repin), counted the same way. Two current
+  tables are narrower than 480 px and are stretched: `default-scenario/summary-statistics` (about
+  307 px) and `default-scenario/etr-by-country` (about 347 px). In earlier vintages, 42 of the 166
+  tables the tool can mount are stretched: "Summary of Results" in every vintage but 2026-02-20,
+  2026-02-21 and 2026-03-09 (36 tables), "Average Effective Tariff Rate by Trading Partner" in the
+  four vintages from 2026-07-16 on, "Summary of Results by Scenario" in 2026-07-16, and
+  "Summary of July 7 & 9 Letters" in 2025-07-10. With the 40 whose banner rules move (see
+  **Table export, line breaks and signed zero**), the stretch and the measured banner rules change
+  82 earlier-vintage table PNGs, in all 33 vintages. The five table export goldens, all narrow
+  synthetic tables, were re-recorded for this change under an owner waiver; `table-wide`, a new
+  golden, pins the unstretched branch every `budget-lab-charts` table takes.
+- **Footnote markers and the footnote list in the PNG** (see **Fixed**): no `budget-lab-charts`
+  figure moves. None of its 13 tables sets `footnotes` (the only source of the list) or
+  `footnote_column` (the only source of cell markers). Live tables are unchanged. Of the table
+  export goldens, only `table-footnotes` moves (its two cell markers and its footnote list); it is
+  re-recorded for this change under an owner waiver.
+
 ## [1.18.0] - 2026-10-14
 
 ### Added

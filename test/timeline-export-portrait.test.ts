@@ -4,8 +4,6 @@
 // `orientation: vertical`; the export never auto-switches) gets a portrait frame, sized to the
 // timeline's block and never wider than 640px. Every other export must stay byte-identical.
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { buildExportSvg } from "../src/embed/export-png";
 import { renderChart } from "../src/engine/index";
@@ -15,18 +13,9 @@ import { TL_GEOM } from "../src/engine/timeline-layout";
 import { timelineTextWidth } from "../src/engine/timeline-text";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
+import { csvFixtureReader } from "./helpers/csv";
 
-function parseCsv(path: string): TidyRow[] {
-  const text = readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").trim();
-  const [header, ...lines] = text.split(/\r?\n/);
-  const cols = (header as string).split(",");
-  return lines.map((line) => {
-    const cells = line.split(",");
-    const row: Record<string, string> = {};
-    cols.forEach((c, i) => { row[c] = cells[i] ?? ""; });
-    return row as TidyRow;
-  });
-}
+const parseCsv = csvFixtureReader(import.meta.url);
 const FIG7 = parseCsv("./fixtures/timeline-figure7.csv");
 const SPANS = parseCsv("./fixtures/timeline-spans.csv");
 const sha = (svg: SVGSVGElement): string => createHash("sha256").update(svg.outerHTML).digest("hex").slice(0, 16);
@@ -200,6 +189,7 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     // title included: it starts below the logo's row (Ruling 50). jsdom measures 8px a character, as
     // wrapText does here; timeline-export-portrait-chrome.test.ts measures closer to Figtree.
     const logoBottom = num(logo, "y") + num(logo, "height");
+    expect(chromeTexts(svg).length).toBeGreaterThan(0);
     for (const t of chromeTexts(svg)) {
       expect(num(t, "x")).toBe(MARGIN);
       expect(num(t, "x") + 8 * (t.textContent ?? "").length).toBeLessThanOrEqual(frameW - MARGIN);
@@ -280,14 +270,20 @@ describe("vertical timeline export: portrait frame (E3, Ruling 33)", () => {
     // Precondition: the engine's own legend key wraps this label within the portrait frame.
     const plain = buildExportSvg(spec, rows);
     expect(labelTexts(plain).length).toBeGreaterThan(2);
-    // A hook returning the default markup unchanged draws it as one row: the export does not re-wrap
-    // markup it did not draw.
-    const hooked = buildExportSvg(spec, rows, { hooks: { legendKey: (ctx) => ctx.rendered } });
+    // A hook that CHANGES the markup (here, wraps it in a group of its own) has it drawn as one
+    // row: the export does not re-wrap markup it did not draw.
+    const hooked = buildExportSvg(spec, rows, {
+      hooks: { legendKey: (ctx) => `<g class="mine">${ctx.rendered}</g>` },
+    });
     const lines = labelTexts(hooked);
     expect(lines).toHaveLength(1);
     expect(lines[0]!.textContent).toBe(long);
-    expect(lines[0]!.closest("g")).not.toBeNull();
+    expect(lines[0]!.closest("g.mine")).not.toBeNull();
     expect(8 * long.length).toBeGreaterThan(num(hooked, "width"));
+    // `ctx.rendered` returned UNCHANGED is no hook at all: the export draws (and wraps) its own row,
+    // as CONFIG-SPEC's "simply return `ctx.rendered` unchanged" promises.
+    const passThrough = buildExportSvg(spec, rows, { hooks: { legendKey: (ctx) => ctx.rendered } });
+    expect(passThrough.outerHTML).toBe(plain.outerHTML);
   });
 
   it("centres the x-axis title on the portrait frame", () => {

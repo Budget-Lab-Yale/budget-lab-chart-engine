@@ -9,6 +9,7 @@ import { resolveColor } from "./palette";
 import { TBL } from "./theme";
 import { overlayKind, overlayDashed, overlayPerSeries } from "../spec/overlays";
 import { parseExpression, evalExpression } from "../spec/expr";
+import { POLY_DEFAULT_DEGREE } from "../spec/defaults";
 import type { OverlayKind } from "../spec/overlays";
 import type { ChartSpec, Overlay } from "../spec/types";
 import type { PreparedRow } from "./marks/index";
@@ -94,7 +95,7 @@ export function overlayLineColor(
 }
 
 /** Does this entry draw in the pane being rendered? SINGLE SOURCE for the draw-time filter and the
- *  value-axis fold (both in index.ts): an overlay that is filtered OUT of a pane must not widen that
+ *  value-axis fold (both in pane.ts): an overlay that is filtered OUT of a pane must not widen that
  *  pane's value axis either — and in `small_multiples.mode: "shared"` the unioned domain then
  *  flattens every pane, including the one that legitimately draws the line. Deriving the two
  *  separately is exactly how they drifted apart.
@@ -177,7 +178,7 @@ function columnPoints(
 }
 
 /** Every `overlays[].column` value the overlay lines of THIS pane actually draw. `column` is real
- *  per-row data, so unlike the constructed kinds it folds into the value-axis extent (see index.ts's
+ *  per-row data, so unlike the constructed kinds it folds into the value-axis extent (see pane.ts's
  *  yForAxis) — otherwise a fitted series that runs above the raw data would silently sit off-frame.
  *
  *  Scoped to what is drawn, via the same `columnPoints`/`overlayDrawsInPane` the geometry uses: a
@@ -189,7 +190,7 @@ export function overlayColumnValues(
   rows: PreparedRow[],
   ctx: {
     /** The adapter's raw `xField`. Anything but "_xn"/"_xd" — i.e. "_xc", a categorical axis —
-     *  renders no overlays at all, matching index.ts's own draw-side guard, so it folds nothing.
+     *  renders no overlays at all, matching pane.ts's own draw-side guard, so it folds nothing.
      *  Narrowed here rather than cast at the call site: a cast would silently make a categorical
      *  axis read `_xn` off every row as NaN. */
     xField: string;
@@ -409,7 +410,7 @@ export function resolveOverlays(
       }
 
       if (kind === "method") {
-        const degree = o.method === "poly" ? (o.degree ?? 2) : 1;
+        const degree = o.method === "poly" ? (o.degree ?? POLY_DEFAULT_DEGREE) : 1;
         const fit = fitPoly(pairs!, degree);
         if (!fit) continue;
         // A straight line needs two points; a curve is sampled. (`n` is rejected on a fit, so the

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateSpec, validateChartData, validateChart } from "../src/spec/validate";
+import { HORIZONTAL_FACET_ERROR } from "../src/spec/facet-groups";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -890,31 +891,16 @@ describe("small_multiples config", () => {
     expect(r.errors.join("\n")).toMatch(/pane_widths has 3 proportions but the grid has 2 column/);
   });
 
-  it("accepts faceted horizontal BAR charts (now supported)", () => {
-    const r = validateSpec({
-      chartType: "bar",
-      title: "t",
-      xAxisType: "categorical",
-      orientation: "horizontal",
-      columns: { facet: "scenario" },
-      small_multiples: { mode: "shared" },
-      data: "d.csv",
+  // A horizontal chart groups its rows with columns.section; columns.facet there is rejected
+  // (spec/facet-groups.ts, test/facet-groups.test.ts).
+  for (const chartType of ["bar", "stacked"] as const) {
+    it(`rejects faceted horizontal ${chartType} charts, accepts the section spelling`, () => {
+      const base = { chartType, title: "t", xAxisType: "categorical", orientation: "horizontal", data: "d.csv" };
+      const r = validateSpec({ ...base, columns: { facet: "scenario" }, small_multiples: { mode: "shared" } });
+      expect(r.errors).toEqual([HORIZONTAL_FACET_ERROR]);
+      expect(validateSpec({ ...base, columns: { section: "scenario" } }).valid).toBe(true);
     });
-    expect(r.valid).toBe(true);
-  });
-
-  it("accepts faceted horizontal STACKED charts (now supported)", () => {
-    const r = validateSpec({
-      chartType: "stacked",
-      title: "t",
-      xAxisType: "categorical",
-      orientation: "horizontal",
-      columns: { facet: "scenario" },
-      small_multiples: { mode: "shared" },
-      data: "d.csv",
-    });
-    expect(r.valid).toBe(true);
-  });
+  }
 
   it("accepts a boolean points flag", () => {
     expect(validateSpec({ ...VALID, points: true }).valid).toBe(true);
