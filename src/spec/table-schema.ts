@@ -2,7 +2,8 @@
 // every level so a typo is caught loudly instead of silently ignored.
 //
 // This must stay in lockstep with spec/table-types.ts (the TS contract). Both describe
-// the same shape; the type is for authoring, the schema for runtime validation.
+// the same shape; the type is for authoring, the schema for runtime validation. Gated by
+// test/types-schema-sync.test.ts (types) and test/schema-doc-coverage.test.ts (CONFIG-SPEC.md).
 
 const FORMAT_RULE = {
   type: "object",

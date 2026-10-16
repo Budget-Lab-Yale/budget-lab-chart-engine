@@ -102,7 +102,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     small-multiples figures and the PNG download.
   - Now documented: the `waterfall` block (`colors.increase`/`decrease`/`total`, `connectors`,
     `connectorColor`), `category_order`, table `collapsible.control`, `category_colors` on
-    waterfalls, and the dumbbell gap label's default of 1 decimal place.
+    waterfalls, the dumbbell gap label's default of 1 decimal place, and `legend` in the
+    `annotations.xAxis` / `annotations.yAxis` entry shapes.
 
 ### Changed
 - Validation is stricter; specs it now rejects rendered wrongly, blank, or not at all. Rendered

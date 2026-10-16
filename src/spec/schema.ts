@@ -6,7 +6,8 @@
 // silently ignored.
 //
 // This must stay in lockstep with spec/types.ts (the TS contract). Both describe the same
-// shape; the type is for authoring, the schema for runtime validation.
+// shape; the type is for authoring, the schema for runtime validation. test/types-schema-sync.test.ts
+// gates the two agreeing, and test/schema-doc-coverage.test.ts gates every field being in CONFIG-SPEC.md.
 
 // Shared annotation fragments — reused by the legacy axis policies AND the unified `annotations`
 // block, so both accept the same shapes.
