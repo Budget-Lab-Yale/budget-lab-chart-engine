@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - Large data: a histogram of more than about 125,000 observations, or a numeric- or temporal-x
   chart whose rows (with a line chart's CI bounds) pass about 125,000 values, now renders. It threw
   `RangeError: Maximum call stack size exceeded`. Standalone and small-multiples both.
+- Histograms with `bins` or automatic binning on a temporal axis, or on values of about 1e7 and up:
+  the chart draws the bin count it computes. Rounding error in the edge loop could add a final
+  sliver bin, a few rounding steps wide (under a millisecond on a date axis), that took the
+  observations at the maximum, so the last visible bin undercounted, and under
+  `normalize: density` that bin's height flattened every other bar. Only such slivers are dropped:
+  a genuine short final bin is kept, and every other bin edge is unchanged. No published figure
+  moves: the archive's one histogram is numeric with `binWidth: 0.25`.
+- Temporal histograms with a calendar `binWidth` (`day`, `week`, `month`, `quarter`, `year`): bin
+  edges are now in local time, as the dates are parsed and the axis is ticked, and so are every
+  temporal histogram's hover bin labels. Both were in UTC, so a reader east of UTC (Europe, Asia)
+  saw an observation on a period's first day counted and labelled in the previous period
+  (2020-01-01 in the 2019 bin), live and in the PNG. Day and week edges stay on local midnight
+  across a daylight-saving change. Under UTC nothing changes. West of UTC (the US) the counts and
+  labels are the same, and the edges shift by the UTC offset onto local midnight, in line with the
+  axis ticks.
 - Small multiples with a categorical x-axis, line marks and a legend: the hover cursor no longer
   drops out when the pointer is within a few pixels of a line. The invisible click targets that let
   a click on a line pin its series were stacked above the hover area instead of below it.
@@ -78,6 +93,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   drawn in, on a standalone chart (top or right legend) and a small-multiples figure. It kept the
   series' own color, so the swatch did not match the line. The export's legend pass now paints a
   single series in the accent, as its final pass and the live chart do.
+- Stacked bars with a hard `yAxisPolicy.min` or `max` that a stack's sum passes: the segments are
+  now clipped to the plot frame, as every other chart type's marks already were. They painted past
+  the frame, over the title and legend or into the category-label gutter, live and in the PNG. The
+  net total and its dot stay unclipped. A stack that fits its domain is unchanged. See
+  **Upgrading**.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
 - CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
@@ -93,11 +113,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     a card from an earlier move stays with its old content) actually do. The old account said both
     were retried on the next resize.
   - Hooks: `legendKey` receives `__annotation:<label>` as `ctx.series` on annotation rows, and markup
-- Stacked bars with a hard `yAxisPolicy.min` or `max` that a stack's sum passes: the segments are
-  now clipped to the plot frame, as every other chart type's marks already were. They painted past
-  the frame, over the title and legend or into the category-label gutter, live and in the PNG. The
-  net total and its dot stay unclipped. A stack that fits its domain is unchanged. See
-  **Upgrading**.
     a hook changes is exported unwrapped on every chart type, not only timelines.
   - `barStack.netLabelColor` and `valueLabels.signed` are documented as accepted with no effect.
   - Shading: `side` is measured against `baseline`, not zero.
@@ -192,6 +207,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   lines with no legend rows. In State of Tariffs, `default-scenario/gdp-by-category` (and the same
   figure in 38 earlier vintages) has option colors but no legend rows under either selection, so
   there is no swatch to recolor.
+- **Stacked bars clipped** (see **Fixed**): three published figures move, all in
+  `articles/2026/10/ecec-macro`: `full-workforce-gdp-by-estimate`, `parental-contributions-by-policy`
+  and `parents-and-children-contributions`. Each is a horizontal stack with `yAxisPolicy.min: 0`
+  whose Child allowance rows are small negatives (down to -0.0014). Those segments painted up to
+  about 5 px left of the zero line, into the category-label gutter (about 7 px in the PNG). They are
+  now clipped away, so the slivers no longer show, and the stack mark gains a `clip-path` group.
+  The notes on two of these figures say the child allowance's contributions are small and negative;
+  to show them, drop `min: 0` from the three specs in `budget-lab-charts` (to be done there
+  separately). No other published stacked figure has a hard bound its data passes.
 
 ## [1.18.0] - 2026-10-14
 
@@ -207,15 +231,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   started later drew a different axis from its neighbours. The shared range is the union of every
   pane's own; on a date axis that includes markers, bands and callouts past the data. Categorical
   panes keep their own categories; histograms keep their binning rules.
-- **Stacked bars clipped** (see **Fixed**): three published figures move, all in
-  `articles/2026/10/ecec-macro`: `full-workforce-gdp-by-estimate`, `parental-contributions-by-policy`
-  and `parents-and-children-contributions`. Each is a horizontal stack with `yAxisPolicy.min: 0`
-  whose Child allowance rows are small negatives (down to -0.0014). Those segments painted up to
-  about 5 px left of the zero line, into the category-label gutter (about 7 px in the PNG). They are
-  now clipped away, so the slivers no longer show, and the stack mark gains a `clip-path` group.
-  The notes on two of these figures say the child allowance's contributions are small and negative;
-  to show them, drop `min: 0` from the three specs in `budget-lab-charts` (to be done there
-  separately). No other published stacked figure has a hard bound its data passes.
 - Temporal and quarterly tick labels no longer overprint in a narrow plot. The cadence still comes
   from the span of the data, and now steps up (quarterly, half-yearly, then 1, 2, 5, 10, 20, 50, 100
   years and so on, down to a single tick) while adjacent labels would overlap at the drawn width,
