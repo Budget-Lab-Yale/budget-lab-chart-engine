@@ -527,7 +527,8 @@ export function renderRichSvgText(doc: Document, s: string, opts: RichSvgOpts): 
   if (opts.cls) t.setAttribute("class", opts.cls);
 
   // Position every tspan with ABSOLUTE x and y. Script rise/drop are explicit pixel offsets
-  // (not `baseline-shift`, which Chromium's SVG rasterizer ignores), so super/sub land at the
+  // (not `baseline-shift`, whose amount Chromium takes from the font's metrics, and which it adds
+  // to any explicit offset when rasterising), so super/sub land at the
   // right height and a stacked cluster's two halves sit one above the other at the same x. Each
   // hard-break line drops the baseline by lineHeight and re-anchors from that line's own start.
   const supRise = opts.fontSize * 0.42;

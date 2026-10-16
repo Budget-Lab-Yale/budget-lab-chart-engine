@@ -7,7 +7,7 @@ import type { TableSpec } from "../spec/table-types.js";
 import type { TidyRow } from "../data/index.js";
 import type { TableModel } from "../table/model.js";
 import { buildTableModel, applyCollapse } from "../table/model.js";
-import { layoutTable, layoutOptionsFromSpec, footnoteListLines } from "../table/layout.js";
+import { layoutTable, layoutOptionsFromSpec, footnoteListLines, FOOTNOTE_MARKER_SIZE, FOOTNOTE_LIST_WEIGHT } from "../table/layout.js";
 import type { TableLayout } from "../table/layout.js";
 import { renderTableSvg, renderFootnoteLinesSvg } from "../table/render-svg.js";
 import { makeMeasureText } from "../table/measure.js";
@@ -249,7 +249,8 @@ function buildMultiPaneExportSvg(
   if (figFootnotes.length) {
     const lines = footnoteListLines(figFootnotes, {
       maxWidth: width - MARGIN * 2,
-      measure: (s) => richWidth(s, FN_FONT, 400, measureText),
+      measure: (s) => richWidth(s, FN_FONT, FOOTNOTE_LIST_WEIGHT, measureText),
+      markerWidth: (m) => measureText(m, FOOTNOTE_MARKER_SIZE, FOOTNOTE_LIST_WEIGHT),
     });
     const g = document.createElementNS(SVG_NS, "g");
     g.setAttribute("class", "tbl-figure-footnotes");

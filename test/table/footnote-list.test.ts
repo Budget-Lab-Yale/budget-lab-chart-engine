@@ -65,7 +65,8 @@ describe("footnote list: math", () => {
       expect(texts).toHaveLength(1);
       expect(texts[0]!.textContent).not.toContain("\\(");
       expect(texts[0]!.textContent).toContain("σai");
-      expect(texts[0]!.querySelector("tspan[font-size]")?.textContent).toBe("ai"); // the subscript
+      // The marker, then the subscript.
+      expect(Array.from(texts[0]!.querySelectorAll("tspan[font-size]")).map((s) => s.textContent)).toEqual(["a", "ai"]);
     });
   }
 });
@@ -141,5 +142,97 @@ describe("footnote list: multi-pane PNG wraps a long footnote to the frame", () 
   it("a footnote that fits stays one line", () => {
     const root = buildTableExportSvg({ ...spec, footnotes: { b: "Short." } }, rows(["One", "Two"]));
     expect(Array.from(root.querySelectorAll("g.tbl-figure-footnotes > text")).map((t) => t.textContent)).toEqual(["b Short."]);
+  });
+});
+
+// The live list draws each footnote as `<sup>marker</sup> text`. The list sets no rule on that
+// <sup>, so it takes Chromium's UA style under the list's 11 px type: `font-size: smaller` (11/1.2
+// px) and `vertical-align: super`, which raises its baseline 11/3 + 1 px; the text follows at once.
+// The PNG draws the marker the same way. test/table/footnote-marker-live.test.ts measures both in
+// Chromium; these pin the drawn SVG.
+describe("footnote list: the PNG draws the marker as a superscript, as the live <sup>", () => {
+  const SIZE = 11 / 1.2;
+  const RISE = 11 / 3 + 1;
+  const tspans = (t: Element) => Array.from(t.children).filter((c) => c.localName === "tspan");
+
+  for (const [name, pane, rs] of [
+    ["single-pane", {}, rows()],
+    ["multi-pane", { pane: "section" }, rows(["One", "Two"])],
+  ] as Array<[string, Partial<TableSpec>, TidyRow[]]>) {
+    it(`${name}: the marker is smaller and raised, and the text follows on the line's baseline`, () => {
+      const [t] = exportTexts({ ...base, ...pane, footnotes: { a: "Phased in." } }, rs);
+      const y = Number(t!.getAttribute("y"));
+      const [marker, text] = tspans(t!);
+      expect(marker!.textContent).toBe("a");
+      expect(Number(marker!.getAttribute("font-size"))).toBeCloseTo(SIZE, 6);
+      expect(Number(marker!.getAttribute("y"))).toBeCloseTo(y - RISE, 6);
+      expect(text!.textContent).toBe(" Phased in.");
+      expect(Number(text!.getAttribute("y"))).toBe(y);
+      expect(text!.hasAttribute("font-size")).toBe(false); // the list's 11 px
+      expect(t!.textContent).toBe("a Phased in.");
+    });
+
+    it(`${name}: every line is drawn at the live list's weight, 500`, () => {
+      const texts = exportTexts({ ...base, ...pane, footnotes: { a: "Phased in.", b: `One ${BS2} two` } }, rs);
+      expect(texts).toHaveLength(3);
+      for (const t of texts) expect(t.getAttribute("font-weight")).toBe("500");
+    });
+
+    it(`${name}: a line after a \`\\\` carries no marker`, () => {
+      const texts = exportTexts({ ...base, ...pane, footnotes: { a: `First line ${BS2} second line` } }, rs);
+      expect(texts.map((t) => t.textContent)).toEqual(["a First line", "second line"]);
+      expect(tspans(texts[0]!)[0]!.textContent).toBe("a");
+      expect(texts[1]!.querySelector("tspan[font-size]")).toBeNull();
+    });
+
+    it(`${name}: with math, the marker leads and the text starts after its width at the marker's size`, () => {
+      const [t] = exportTexts({ ...base, ...pane, footnotes: { a: MATH } }, rs);
+      const x = Number(t!.getAttribute("x"));
+      const [marker, first] = tspans(t!);
+      expect(marker!.textContent).toBe("a");
+      expect(Number(marker!.getAttribute("font-size"))).toBeCloseTo(SIZE, 6);
+      expect(Number(marker!.getAttribute("y"))).toBeCloseTo(Number(t!.getAttribute("y")) - RISE, 6);
+      // The fallback measurer: 0.6 em per character, at the marker's size.
+      expect(Number(first!.getAttribute("x"))).toBeCloseTo(x + SIZE * 0.6, 6);
+      expect(first!.textContent).toBe(" Elasticity ");
+      expect(t!.textContent).toBe("a Elasticity σai held fixed.");
+    });
+  }
+
+  it("multi-pane: the first line wraps with the marker at its drawn size, not the text's", () => {
+    // Frame content width 480. Marker "abc" at 11 px plus a space and a 69-character word is 73
+    // characters at 6.6 px = 481.8 px, which overflows; at the marker's drawn size it is
+    // 3 x 5.5 + 70 x 6.6 = 478.5 px, which fits.
+    const word = "x".repeat(69);
+    const spec: TableSpec = { ...base, pane: "section", footnotes: { abc: `${word} tail` } };
+    const texts = exportTexts(spec, rows(["One", "Two"]));
+    expect(texts.map((t) => t.textContent)).toEqual([`abc ${word}`, "tail"]);
+    expect(texts[1]!.querySelector("tspan")).toBeNull();
+  });
+
+  it("multi-pane: a first word that cannot fit beside the marker starts the next line; the marker stands alone", () => {
+    // Marker "a" at 5.5 px plus a 6.6 px space leaves 467.9 px; a 72-character word is 475.2 px.
+    // Live, the line breaks at the space after the <sup>, so the marker sits alone.
+    const word = "x".repeat(72);
+    const spec: TableSpec = { ...base, pane: "section", footnotes: { a: `${word} tail` } };
+    const texts = exportTexts(spec, rows(["One", "Two"]));
+    expect(texts.map((t) => t.textContent)).toEqual(["a", word, "tail"]);
+    const markerOnly = texts[0]!;
+    expect(tspans(markerOnly)).toHaveLength(1);
+    expect(tspans(markerOnly)[0]!.textContent).toBe("a");
+    expect(texts[1]!.querySelector("tspan")).toBeNull();
+  });
+
+  it("multi-pane: a first line never runs past the frame, marker included", () => {
+    const root = buildTableExportSvg({ ...base, pane: "section", footnotes: { a: `${"x".repeat(72)} tail`, b: `${"y".repeat(70)} z` } }, rows(["One", "Two"]));
+    const width = Number(root.getAttribute("width"));
+    for (const t of Array.from(root.querySelectorAll("g.tbl-figure-footnotes > text"))) {
+      const [first, ...rest] = Array.from(t.childNodes);
+      const marker = first?.nodeType === 1 && (first as Element).hasAttribute("font-size") ? (first as Element) : null;
+      const text = marker ? rest.map((n) => n.textContent).join("") : t.textContent ?? "";
+      // The fallback measurer: 0.6 em per character, the marker at its drawn size.
+      const drawn = (marker ? (marker.textContent ?? "").length * SIZE * 0.6 : 0) + text.length * 11 * 0.6;
+      expect(drawn).toBeLessThanOrEqual(width - 2 * MARGIN);
+    }
   });
 });

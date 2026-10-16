@@ -202,6 +202,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the PNG rendered it), and a `\\` starts a new line on screen and in both PNG layouts, with the
   height reserved. A multi-pane table's PNG now wraps a long footnote to the frame (it ran off the
   edge) and renders its math (it printed the source). Footnotes with neither are unchanged.
+- Table PNG export, footnote list: each footnote's marker is drawn as a superscript, as on screen,
+  in both PNG layouts. It printed inline at the text's size ("a Phased in…"). It is now 11/1.2 px
+  and raised 11/3 + 1 px, as Chromium draws the live list's `<sup>`, with the text straight after
+  it; a line after a `\\` or a wrap has no marker. The list is drawn at weight 500, as on screen
+  (it was 400). A multi-pane table wraps a footnote's first line with the marker at its drawn size
+  and weight, and a first word too wide to fit beside the marker starts the next line, leaving the
+  marker alone, as on screen (it ran past the frame edge). See **Upgrading**.
+- Table PNG export, a body cell's footnote marker: drawn at the live `<sup>` size and height, 9.1
+  px and raised 13/3 + 1 px. It was 11 px and rose about 10.5 px, twice the live 5.3 px: Chromium
+  applied `baseline-shift: super` on top of the explicit 4 px rise. See **Upgrading**.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
 - `xAxisPolicy.anchorAtZero: true` on a numeric x-axis whose values are all negative: the axis now
@@ -455,6 +465,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   figures named under **Table export, line breaks and signed zero** included. Live tables are
   unchanged. State of Tariffs tables were not checked. The five table export goldens, all narrow
   synthetic tables, were re-recorded for this change under an owner waiver.
+- **Footnote markers and the footnote list in the PNG** (see **Fixed**): no `budget-lab-charts`
+  figure moves. None of its 13 tables sets `footnotes` (the only source of the list) or
+  `footnote_column` (the only source of cell markers). Live tables are unchanged. Of the table
+  export goldens, only `table-footnotes` moves (its two cell markers and its footnote list); it is
+  re-recorded for this change under an owner waiver.
 
 ## [1.18.0] - 2026-10-14
 

@@ -2,3 +2,5 @@
 // SVG builder, so one page can lay out both.
 export { mountChart } from "../../src/engine/render-live";
 export { buildExportSvg } from "../../src/embed/export-png";
+export { mountTable } from "../../src/table/mount";
+export { buildTableExportSvg } from "../../src/embed/export-table-png";

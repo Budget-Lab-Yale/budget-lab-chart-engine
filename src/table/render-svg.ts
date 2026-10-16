@@ -8,13 +8,16 @@
 // Fully deterministic: no Date/random, attributes set in a fixed order. Takes the target
 // `document` via opts so it works under jsdom (tests) and in the browser (export).
 import type { TableModel } from "./model";
-import type { TableLayout, CellRect } from "./layout";
+import type { TableLayout, CellRect, FootnoteLine } from "./layout";
 import { columnAlignOf } from "./layout";
 import type { ColumnAlign } from "../spec/table-types";
 import {
   INDENT_STEP,
   FOOTNOTE_TOP_GAP,
   FOOTNOTE_LINE_HEIGHT,
+  FOOTNOTE_MARKER_SIZE,
+  FOOTNOTE_MARKER_RISE,
+  FOOTNOTE_LIST_WEIGHT,
   HEADER_LINE_HEIGHT,
   SUBLABEL_LINE,
   GROUP_NOTE_GAP,
@@ -36,7 +39,6 @@ const BODY_FONT = 13; // matches layout bodyFontPx + HTML td/th
 const SUBLABEL_FONT = TBL.size.annotation; // 11
 const NOTE_FONT = TBL.size.annotation; // 11
 const PAD_X = 8; // half of layout.padX — inset from a cell edge
-const FOOTNOTE_DY = -4; // superscript rise
 const LEAF_BOTTOM_PAD = 7; // gap from the leaf label's last line down to the sublabel / header rule
 const SUBLABEL_BOTTOM_PAD = 6; // gap from the sublabel baseline to the header→body rule
 const RICH_BODY_LINE = BODY_FONT + 3; // renderRichSvgText's line height at the body size
@@ -85,19 +87,63 @@ function svgTextKit(doc: Document, measure: Measure) {
   return { el, drawText };
 }
 
+/** How a footnote marker is drawn: `size` px, its baseline `rise` px above the line's. The rise is
+ *  explicit only: no `baseline-shift`, which Chromium applies on top of it when rasterising. */
+type MarkerGeometry = { size: number; rise: number };
+// A cell's marker, as the live `.tbl-table sup` (0.7em, vertical-align: super) under the 13 px body:
+// Blink raises `super` by a third of the parent's size plus 1 px.
+const CELL_MARKER: MarkerGeometry = { size: BODY_FONT * 0.7, rise: BODY_FONT / 3 + 1 };
+// The footnote list's marker, as the live list's <sup> (see layout.ts).
+const LIST_MARKER: MarkerGeometry = { size: FOOTNOTE_MARKER_SIZE, rise: FOOTNOTE_MARKER_RISE };
+
+/** A footnote marker as a superscript <tspan>, shared by the cells and the footnote list. With `at`
+ *  it is placed on that line (x optional, so it can continue the text): its y is the line's
+ *  baseline less the rise. Without it, it continues the text and rises by dy, so nothing may follow
+ *  it in that <text>. */
+function markerTspan(doc: Document, marker: string, g: MarkerGeometry, at?: { x?: number; y: number }): SVGElement {
+  const ts = doc.createElementNS(SVG_NS, "tspan");
+  ts.setAttribute("class", "tbl-table-fn-marker");
+  if (at?.x != null) ts.setAttribute("x", String(at.x));
+  if (at) ts.setAttribute("y", String(at.y - g.rise));
+  ts.setAttribute("font-size", String(g.size));
+  if (!at) ts.setAttribute("dy", String(-g.rise));
+  ts.textContent = marker;
+  return ts;
+}
+
 /** The footnote list as SVG: one <text> per line of `lines` (footnoteListLines), the first
- *  baseline at `firstBaselineY`, `lineHeight` apart, math rendered. Shared by the single-pane table
- *  body and the multi-pane export, so both draw a footnote the same way. */
+ *  baseline at `firstBaselineY`, `lineHeight` apart, math rendered. A footnote's first line leads
+ *  with its marker as a superscript and the text follows on the line's baseline, as the live list
+ *  draws `<sup>marker</sup> text`. Shared by the single-pane table body and the multi-pane export,
+ *  so both draw a footnote the same way. */
 export function renderFootnoteLinesSvg(
   doc: Document,
-  lines: string[],
+  lines: FootnoteLine[],
   opts: { x: number; firstBaselineY: number; lineHeight: number; measure: Measure },
 ): SVGElement[] {
-  const { drawText } = svgTextKit(doc, opts.measure);
-  return lines.map((ln, i) =>
-    drawText(opts.x, opts.firstBaselineY + i * opts.lineHeight, ln, {
-      anchor: "start", weight: 400, fill: TBL.color.muted, size: NOTE_FONT,
-    }));
+  const { el, drawText } = svgTextKit(doc, opts.measure);
+  const o: TextOpts = { anchor: "start", weight: FOOTNOTE_LIST_WEIGHT, fill: TBL.color.muted, size: NOTE_FONT };
+  return lines.map((ln, i) => {
+    const y = opts.firstBaselineY + i * opts.lineHeight;
+    if (ln.marker == null) return drawText(opts.x, y, ln.text, o);
+    const marker = markerTspan(doc, ln.marker, LIST_MARKER, { y });
+    if (hasMath(ln.text)) {
+      // The rich text places every tspan absolutely: start it where the marker ends.
+      const markerW = opts.measure(ln.marker, LIST_MARKER.size, o.weight);
+      const t = drawText(opts.x + markerW, y, ln.text, o);
+      t.setAttribute("x", String(opts.x));
+      t.insertBefore(marker, t.firstChild);
+      return t;
+    }
+    const t = drawText(opts.x, y, "", o);
+    t.appendChild(marker);
+    if (ln.text) {
+      const rest = el("tspan", { y });
+      rest.textContent = ln.text;
+      t.appendChild(rest);
+    }
+    return t;
+  });
 }
 
 // Sign coloring (no dedicated structural token; use brand green/red categorical bases).
@@ -163,17 +209,14 @@ export function renderTableSvg(
     target: SVGElement, marker: string,
     at: { drawn: string; x: number; anchor: "start" | "middle" | "end"; baseline: number; weight: number },
   ): void => {
-    let attrs: Record<string, string | number> = { "baseline-shift": "super", "font-size": SUBLABEL_FONT, dy: FOOTNOTE_DY };
+    let place: { x: number; y: number } | undefined;
     if (hasMath(at.drawn) || hasBreak(at.drawn)) {
       const segs = splitBreaks(at.drawn);
       const w = richWidth(segs[segs.length - 1]!, BODY_FONT, at.weight, measure);
       const start = at.anchor === "middle" ? at.x - w / 2 : at.anchor === "end" ? at.x - w : at.x;
-      const lineBaseline = at.baseline + (segs.length - 1) * RICH_BODY_LINE;
-      attrs = { x: start + w, y: lineBaseline + FOOTNOTE_DY, "baseline-shift": "super", "font-size": SUBLABEL_FONT };
+      place = { x: start + w, y: at.baseline + (segs.length - 1) * RICH_BODY_LINE };
     }
-    const sup = el("tspan", attrs);
-    sup.textContent = marker;
-    target.appendChild(sup);
+    target.appendChild(markerTspan(doc, marker, CELL_MARKER, place));
   };
   // Hairline rule in the lighter border tone, used for the inline flanking rules on banner cells.
   const spannerLine = (x1: number, y1: number, x2: number, y2: number): SVGElement =>

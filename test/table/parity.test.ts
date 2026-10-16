@@ -77,7 +77,7 @@ interface SvgLine { text: string; y: number; fontSize: number }
 /** Drawn lines of one or more SVG <text> elements, each with its baseline y. Handles the three
  *  shapes render-svg emits: plain text; `drawLines` (one <tspan dy> per line); and the rich emitter
  *  (absolute-y tspans, one baseline per `\\` line, scripts offset from it by less than half a line).
- *  A footnote superscript (<tspan baseline-shift="super">) is returned as `marker`, not as text. */
+ *  A footnote superscript (<tspan class="tbl-table-fn-marker">) is returned as `marker`, not as text. */
 function svgLines(texts: Element[]): { lines: SvgLine[]; marker?: string } {
   const out: SvgLine[] = [];
   let marker: string | undefined;
@@ -94,7 +94,7 @@ function svgLines(texts: Element[]): { lines: SvgLine[]; marker?: string } {
       if (n.nodeType === 3) { (cur ??= open(baseY)).text += n.textContent ?? ""; continue; }
       const el = n as Element;
       if (el.localName !== "tspan") continue;
-      if (el.getAttribute("baseline-shift") === "super") { marker = (marker ?? "") + (el.textContent ?? ""); continue; }
+      if (el.getAttribute("class") === "tbl-table-fn-marker") { marker = (marker ?? "") + (el.textContent ?? ""); continue; }
       if (el.hasAttribute("dy")) {
         curY += Number(el.getAttribute("dy"));
         cur = open(curY);
@@ -411,13 +411,13 @@ function headerClampViolations(r: Rendered, spec: TableSpec, part: "count" | "fi
  *  that line's baseline (a marker that continues after a superscript inherits its raised baseline)
  *  and start right of every glyph run on the line (a stacked sub+super is as wide as its wider half).
  *  Run widths use the same `length * fontPx * 0.6` fallback the renderer measured with. */
-const FOOTNOTE_RISE = 4;
+const FOOTNOTE_RISE = 13 / 3 + 1; // the live `.tbl-table sup` rise under the 13 px body
 function markerViolations(r: Rendered): { checked: number; violations: string[] } {
   const out: string[] = [];
   let checked = 0;
   for (const cg of Array.from(r.body.querySelectorAll("g.tbl-table-cell"))) {
     const texts = allTexts(cg);
-    const marker = cg.querySelector('tspan[baseline-shift="super"]');
+    const marker = cg.querySelector("tspan.tbl-table-fn-marker");
     if (!marker) continue;
     checked++;
     const host = marker.parentElement!;

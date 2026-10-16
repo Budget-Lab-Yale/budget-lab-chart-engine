@@ -51,7 +51,7 @@ export interface TableLayout {
   /** Lines in every sublabel block when some sublabel has a `\\` break (absent otherwise). */
   sublabelLines?: number;
   /** The footnote list as drawn, one entry per line (absent when there are no footnotes). */
-  footnoteLines?: string[];
+  footnoteLines?: FootnoteLine[];
   header: HeaderEntry[][];
   rows: RowEntry[];
 }
@@ -67,6 +67,8 @@ const bodyWeight = 400;
 // than the 400 / 700 the export draws. Used only for the word floor, which must hold in both.
 const liveBodyWeight = 500;
 const liveEmphasisWeight = 800;
+/** The footnote list's weight, live (`--tw-body`) and in the PNG. */
+export const FOOTNOTE_LIST_WEIGHT = liveBodyWeight;
 const padX = 16;            // total horizontal padding per cell (left + right)
 const tierHeight = 26;      // one banner tier's row height (HTML header ≈ 12px + 6+6 padding)
 const sublabelLine = 14;    // extra height on the bottom tier when any leaf has a sublabel
@@ -91,6 +93,13 @@ export const INDENT_STEP = 14;
 // renderer places each footnote text row at the same baseline the layout reserved.
 export const FOOTNOTE_TOP_GAP = 8;
 export const FOOTNOTE_LINE_HEIGHT = 16;
+// The footnote list's marker, drawn as the live list's <sup> renders. The list sets no rule on that
+// <sup>, so it takes Chromium's UA style under the list's 11 px type: `font-size: smaller` (1/1.2)
+// and `vertical-align: super`, which raises its baseline a third of the list's size plus 1 px. The
+// text follows at once. test/table/footnote-marker-live.test.ts measures both in Chromium.
+const FOOTNOTE_LIST_FONT = TBL.size.annotation;
+export const FOOTNOTE_MARKER_SIZE = FOOTNOTE_LIST_FONT / 1.2;
+export const FOOTNOTE_MARKER_RISE = FOOTNOTE_LIST_FONT / 3 + 1;
 // Shared with render-svg so drawn text aligns with the heights reserved here.
 export const HEADER_LINE_HEIGHT = headerLineHeight;
 export const SUBLABEL_LINE = sublabelLine;
@@ -133,17 +142,24 @@ function clampWithEllipsis(lines: string[], maxLines: number, maxWidth: number, 
   return kept;
 }
 
-/** The footnote list as drawn, one entry per line. Each footnote is `marker text`; a `\\` in it
- *  starts a new line, and with `wrap` a line also soft-wraps to `wrap.maxWidth`. A footnote with
- *  neither stays the single `marker text` line it always was. */
+/** One drawn line of the footnote list. A footnote's first line carries its `marker`, drawn as a
+ *  superscript, and its `text` starts with the space after the marker; the lines after it carry
+ *  no marker. */
+export interface FootnoteLine { marker?: string; text: string }
+
+/** The footnote list as drawn, one entry per line. A `\\` in a footnote starts a new line, and with
+ *  `wrap` a line also soft-wraps to `wrap.maxWidth` (`wrap.measure` measures at the list's size).
+ *  The first line's room is less the marker as drawn (`wrap.markerWidth`) and the space after it. */
 export function footnoteListLines(
   footnotes: Array<{ marker: string; text: string }>,
-  wrap?: { maxWidth: number; measure: (s: string) => number },
-): string[] {
+  wrap?: { maxWidth: number; measure: (s: string) => number; markerWidth: (marker: string) => number },
+): FootnoteLine[] {
   return footnotes.flatMap((fn) => {
-    const s = `${fn.marker} ${fn.text}`;
-    const lines = wrap ? wrapToLines(s, wrap.maxWidth, UNLIMITED_LINES, wrap.measure) : splitBreaks(s);
-    return hasBreak(s) ? lines.map((l) => l.trim()) : lines;
+    const lines = splitBreaks(fn.text).flatMap((seg, i) => wrap
+      ? wrapSegment(seg, wrap.maxWidth, UNLIMITED_LINES, wrap.measure, i === 0 ? wrap.markerWidth(fn.marker) + wrap.measure(" ") : 0)
+      : [seg]);
+    const drawn = hasBreak(fn.text) ? lines.map((l) => l.trim()) : lines;
+    return drawn.map((text, i): FootnoteLine => (i === 0 ? { marker: fn.marker, text: text && ` ${text}` } : { text }));
   });
 }
 
@@ -158,9 +174,11 @@ function wrapToLines(s: string, maxWidth: number, maxLines: number, measure: (s:
 
 /** Greedy word-wrap into at most `maxLines` lines that each fit `maxWidth` px (via `measure`).
  * The final line absorbs any overflow rather than dropping words, so no text is lost. Returns a
- * single-element array when the text fits on one line. */
-function wrapSegment(s: string, maxWidth: number, maxLines: number, measure: (s: string) => number): string[] {
-  if (maxLines <= 1 || measure(s) <= maxWidth) return [s];
+ * single-element array when the text fits on one line. The first line has `firstIndent` px less
+ * room (taken by something drawn before it); a first word that does not fit beside that starts the
+ * second line, leaving the first empty. */
+function wrapSegment(s: string, maxWidth: number, maxLines: number, measure: (s: string) => number, firstIndent = 0): string[] {
+  if (maxLines <= 1 || measure(s) + firstIndent <= maxWidth) return [s];
   const words = splitRichWords(s);
   const lines: string[] = [];
   let cur = "";
@@ -168,7 +186,9 @@ function wrapSegment(s: string, maxWidth: number, maxLines: number, measure: (s:
   for (let i = 0; i < words.length; i++) {
     const w = words[i]!;
     const next = cur ? `${cur} ${w}` : w;
-    if (measure(next) <= maxWidth || cur === "") {
+    const indented = lines.length === 0 && firstIndent > 0;
+    // A word too wide for any line still goes on one, alone, unless an indent leaves it a wider line below.
+    if (measure(next) <= (indented ? maxWidth - firstIndent : maxWidth) || (cur === "" && !indented)) {
       cur = next;
     } else {
       lines.push(cur);

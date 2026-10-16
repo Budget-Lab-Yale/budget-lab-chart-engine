@@ -2,8 +2,9 @@
 //
 // The export draws a link as an SVG <tspan text-decoration="underline">, and the download pipeline
 // is XMLSerializer → SVG Blob → <img> → canvas. A DOM assertion that the attribute is present says
-// nothing about whether that pipeline paints it: this codebase already documents the same rasterizer
-// silently ignoring `baseline-shift`. So the attribute test in source-links-render.test.ts is
+// nothing about whether that pipeline paints it, or paints it as the attribute suggests: the
+// table's footnote markers once rose twice as far in the PNG as live, because the rasterizer applies
+// `baseline-shift` on top of an explicit offset. So the attribute test in source-links-render.test.ts is
 // necessary and NOT sufficient, and this file is the sufficient half.
 //
 // If this ever fails, the fix is not to delete the assertion — it is to draw the underline as an
