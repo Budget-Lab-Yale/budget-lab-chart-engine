@@ -38,6 +38,7 @@ import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../s
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
 import { categoryBand, encounterCategories, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
+import { rowEmissionOrder } from "./emission-order";
 
 // The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
 const SINGLE_SLOT = "_v";
@@ -396,14 +397,11 @@ export function buildStackedMarks(
   // "Labor" rows then all "Capital"). Using a category-major order misaligns whenever the data
   // isn't grouped that way — the cause of the legend→segment highlight mismatch.
   // Sectioned (fy rows): Plot emits the rects facet by facet, in drawn (section-grouped) order, and in
-  // data order within a facet — so the tags follow that, not the plain data order.
+  // data order within a facet — so the tags follow that, not the plain data order
+  // (marks/emission-order.ts).
   const seriesSet = new Set(seriesNames);
   const catOf = (r: PreparedRow): string => (r as unknown as Record<string, unknown>)[catField] as string;
-  const rectSeriesOrder: string[] = (
-    sectioned
-      ? band.drawnOrder.flatMap((cat) => data.filter((r) => catOf(r) === cat))
-      : data.filter((r) => categories.includes(catOf(r)))
-  )
+  const rectSeriesOrder: string[] = rowEmissionOrder(data, catOf, band.drawnOrder, sectioned)
     .filter((r) => seriesSet.has(r.series))
     .map((r) => r.series);
 

@@ -23,6 +23,7 @@ import {
   HDUMBBELL_BAND_PADDING,
   HDUMBBELL_MARGIN_BOTTOM,
 } from "./category-band";
+import { rowEmissionOrder } from "./emission-order";
 import type { ChartSpec, ValueFormat } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -231,12 +232,18 @@ export function buildDumbbellMarks(
   for (const s of seriesNames) seriesColors.set(s, markerOf(s) === "ink" ? markerInk("ink", "").fill : seriesColor(s));
 
   // Tag each dot with BOTH its series (legend hover/pin) and its category (so the live hover /
-  // coordinated cursor can resolve which category band the pointer is over, from the dots).
+  // coordinated cursor can resolve which category band the pointer is over, from the dots), in the
+  // order Plot emits them (marks/emission-order.ts): `dotData` order, except that sectioned rows on
+  // `fy` are drawn facet by facet in the band's drawn (section-grouped) order. The category labels
+  // follow the same drawn order.
+  const catOf = (d: PreparedRow): string => (d as unknown as Record<string, string>)[catField] ?? "";
+  const drawnDots = rowEmissionOrder(dotData, catOf, band.drawnOrder, sectioned);
   const dotTagging = {
     selector: 'g[aria-label="dot"] circle',
-    seriesOrder: dotData.map((d) => d.series),
-    categoryOrder: dotData.map((d) => (d as unknown as Record<string, string>)[catField] ?? ""),
+    seriesOrder: drawnDots.map((d) => d.series),
+    categoryOrder: drawnDots.map(catOf),
   };
+  const catLabelTagging = { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: band.drawnOrder };
 
   if (horizontal) {
     const gutter = bandGutter(categories, catFont, sectioned);
@@ -246,23 +253,13 @@ export function buildDumbbellMarks(
       // slot for the dots, value on `x`. Headers + labels, the header lift, the section gap and the
       // margins come from fyCategoryBandLayer, as for the bar builders. The dumbbell ignores
       // `x_axis_ticks` (one bottom tick row), hence `xAxisTicks: undefined` — rowBandGeometry agrees.
-      // KNOWN BUG A6, preserved for phase 5: Plot emits the dots facet by facet in `bandDomain`
-      // (drawn) order, but both tag lists below follow `categories` (encounter) order, so a chart
-      // whose `section_order` differs from its data order tags dots and labels with the wrong
-      // category. bar.ts and stacked.ts tag in `band.drawnOrder`.
-      const tagOrder = categories.flatMap((cat) =>
-        dotData.filter((d) => (d as unknown as Record<string, string>)[catField] === cat),
-      );
       // The section gap is cleared by BREAKING the continuous value gridlines/baseline across it
       // (assemble-plot's collapseFacetChromeY, from the gaps spreadSections opens) — so no mask is
       // needed and the header sits in genuinely empty space.
       return {
         underlay,
         overlay,
-        tagging: [
-          { selector: 'g[aria-label="dot"] circle', seriesOrder: tagOrder.map((d) => d.series), categoryOrder: tagOrder.map((d) => (d as unknown as Record<string, string>)[catField] ?? "") },
-          { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories },
-        ],
+        tagging: [dotTagging, catLabelTagging],
         dashedNames: new Set<string>(),
         yScaleOpts: { type: "band", domain: [SINGLE_SLOT], padding: 0, axis: null },
         ...fyCategoryBandLayer(band, { gutter, catFont, xAxisTicks: undefined }),
@@ -274,10 +271,7 @@ export function buildDumbbellMarks(
     return {
       underlay,
       overlay,
-      tagging: [
-        dotTagging,
-        { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [] as string[], categoryOrder: categories },
-      ],
+      tagging: [dotTagging, catLabelTagging],
       dashedNames: new Set<string>(),
       yScaleOpts: { type: "band", domain: bandDomain, padding: HDUMBBELL_BAND_PADDING, axis: null },
       xAxisMarks: tblBandYAxis(categories, gutter, catFont),
@@ -292,10 +286,7 @@ export function buildDumbbellMarks(
   return {
     underlay,
     overlay,
-    tagging: [
-      dotTagging,
-      { selector: `g.${CAT_LABEL_CLASS} text`, seriesOrder: [], categoryOrder: categories },
-    ],
+    tagging: [dotTagging, catLabelTagging],
     dashedNames: new Set<string>(),
     // Category band on `x`; adapter labels the categories (xAxisMarks left undefined). Slightly
     // larger outer pad so end dots don't kiss the frame.

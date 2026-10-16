@@ -118,6 +118,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the frame, over the title and legend or into the category-label gutter, live and in the PNG. The
   net total and its dot stay unclipped. A stack that fits its domain is unchanged. See
   **Upgrading**.
+- Legend hover and pin, the hover card, and `series_patterns` textures now reach the marks they
+  name in three cases where the `data-series` / `data-category` tags were attached to the wrong
+  elements. Horizontal grouped bars with sections, or with `columns.facet` (drawn as groups), whose
+  rows are drawn in a different order from the data (`section_order` differs from it, or sections
+  interleave in it) and whose categories do not all hold the same series in the same order: rects
+  carried another series' tag, so hover dimmed the wrong bars and a texture was painted on the
+  other series' bars, in the PNG too. A sectioned horizontal dumbbell drawn in a different order
+  from its data: dots and category labels carried another row's category, so hovering one row
+  showed another row's card. A line chart with a series that has no value (in the chart, or in one
+  small-multiples pane), unless it is the last of its dashed or solid group: each line after it
+  took the tag of the series before it. Charts whose tags were already right are unchanged. See
+  **Upgrading**.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
 - CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
@@ -236,6 +248,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   The notes on two of these figures say the child allowance's contributions are small and negative;
   to show them, drop `min: 0` from the three specs in `budget-lab-charts` (to be done there
   separately). No other published stacked figure has a hard bound its data passes.
+- **Hover and legend tags** (see **Fixed**): no `budget-lab-charts` figure moves. Its one dumbbell
+  has its sections in data order, its grouped horizontal bars are unsectioned, and no line has a
+  blank series. Two `budget-lab-interactives` tools change once they re-vendor the engine, live
+  only (no texture is involved, so neither PNG changes): State of Tariffs
+  `default-scenario/consumer-prices` (and the same figure in 38 earlier vintages), a horizontal bar
+  with `columns.series` and `columns.facet` on one column, where 20 of 42 bars carry the other
+  series' tag, so legend hover and pin dim the wrong bars; and the BLSMM `plot_10yr_yield` and
+  `plot_federal_funds` charts, where a scenario that leaves the first variable unchanged blanks its
+  Scenario series and the second variable's Scenario line takes the first's tag.
 
 ## [1.18.0] - 2026-10-14
 
