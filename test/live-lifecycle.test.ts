@@ -857,3 +857,59 @@ describe("the deferred mount onRender reads opts.onRender when it fires", () => 
     });
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// The restack error path reads `opts.onLegendSelect` when it notifies, not when the mount was
+// built: a host that swaps or clears the callback after mountChart() returns is obeyed even when
+// the restack draw's onRender throws. (T4.4 fix round 1: the restack controller had captured it.)
+// ---------------------------------------------------------------------------------------------
+describe("the restack error path reads opts.onLegendSelect when it fires", () => {
+  const pinWithThrowingRestack = (opts: MountOptions, host: HTMLElement): unknown[] => {
+    const caught: unknown[] = [];
+    const onUncaught = (err: unknown): void => { caught.push(err); };
+    process.once("uncaughtException", onUncaught);
+    try {
+      legendItem(host, "C")!.click();
+    } finally {
+      process.removeListener("uncaughtException", onUncaught);
+    }
+    return caught;
+  };
+  const throwOnRestack: MountOptions["onRender"] = (c) => {
+    if (c.phase === "restack") throw new Error("consumer bug in onRender");
+  };
+
+  it("a callback replaced after mount is the one called", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const a: string[][] = [];
+    const b: string[][] = [];
+    const opts: MountOptions = {
+      spec: AREA_SPEC, rows: makeRows(), width: 900,
+      onLegendSelect: (c) => a.push(c.active),
+      onRender: throwOnRestack,
+    };
+    mountChart(host, opts);
+    opts.onLegendSelect = (c) => b.push(c.active);
+    const caught = pinWithThrowingRestack(opts, host);
+    expect(caught.map((e) => (e as Error).message)).toEqual(["consumer bug in onRender"]);
+    expect(a, "the replaced callback was called").toEqual([]);
+    expect(b).toContainEqual(["C"]);
+  });
+
+  it("a callback cleared after mount is not called", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const a: string[][] = [];
+    const opts: MountOptions = {
+      spec: AREA_SPEC, rows: makeRows(), width: 900,
+      onLegendSelect: (c) => a.push(c.active),
+      onRender: throwOnRestack,
+    };
+    mountChart(host, opts);
+    delete opts.onLegendSelect;
+    const caught = pinWithThrowingRestack(opts, host);
+    expect(caught.map((e) => (e as Error).message)).toEqual(["consumer bug in onRender"]);
+    expect(a, "the cleared callback was called").toEqual([]);
+  });
+});

@@ -8,7 +8,7 @@ import { buildTableModel } from "./model.js";
 import { layoutTable, layoutOptionsFromSpec } from "./layout.js";
 import { renderTableHtml, bodyRowOf } from "./render-html.js";
 import { splitPanes, layoutPanes } from "./panes.js";
-import { buildFigureHeader } from "../engine/render-live.js";
+import { buildFigureHeader } from "../engine/live/title-select.js";
 import { renderSourceLine } from "../engine/source-line.js";
 import { rowsToCsv } from "../data/csv-browser.js";
 import { exportTablePng } from "../embed/export-table-png.js";

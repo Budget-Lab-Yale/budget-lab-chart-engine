@@ -4,26 +4,19 @@
 // RE-RENDERED at the container's width (the x-axis compresses; height stays fixed) down to a
 // minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
-import type { ChartSpec, TitleSelector } from "../spec/types.js";
+import type { ChartSpec } from "../spec/types.js";
 import type { RenderHooks } from "../spec/hooks.js";
 import { resolveColumns } from "../spec/columns.js";
 import { rowsInSectionOrder } from "../spec/section-key.js";
-import { ownValue } from "../spec/own-key.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
   LEGEND_RIGHT_MIN_CARD_WIDTH,
   MIN_CHART_WIDTH,
   legendInRightColumn,
-  orderForRightLegend,
   resolveLegendPosition,
 } from "./legend-layout.js";
-import {
-  parseTitleTokens,
-  resolveActiveOptionColor,
-  resolveSelections,
-  resolveTitleText,
-} from "../spec/title.js";
+import { resolveActiveOptionColor, resolveSelections } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
@@ -35,16 +28,18 @@ import { normalizeSpec } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "./figure.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
-import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./hover-classes.js";
 import { resolveColor } from "./palette.js";
 import { resolveTooltipIcons } from "./icon.js";
 import type { HighlightPillsHandle, BandHoverCtx, HoverDetach } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
-import { rowsToCsv } from "../data/csv-browser.js";
-import { LOGO_SVG } from "../embed/assets.js";
-import { exportChartPng } from "../embed/export-png.js";
-import { LiveLifecycle, attachCause, notify } from "./live/lifecycle.js";
+import { LiveLifecycle } from "./live/lifecycle.js";
+import { buildFigureHeader } from "./live/title-select.js";
+import { buildDownloadActions } from "./live/downloads.js";
+import { type OverlayEl, appendAxisTitleEl, appendXAxisTitle, attachYAxisOverlay } from "./live/axis-chrome.js";
+import { CLICK_TO_PIN_SVGS, resolveRugAnnotationAtPoint, rugStripTop, wireClickToPin } from "./live/hit-test.js";
+import { createRestackController } from "./live/area-restack.js";
+import { createLegendSlots } from "./live/legend-layout-dom.js";
 import {
   attachPlanPills,
   attachPrimaryHover,
@@ -57,6 +52,8 @@ import {
 // Moved to live/hover-options.ts with the rest of the hover option building; re-exported so
 // existing importers keep working.
 export { formatValue } from "./live/hover-options.js";
+// Moved to live/title-select.ts; re-exported so existing importers keep working.
+export { buildFigureHeader, type TitleSelectorWiring } from "./live/title-select.js";
 
 export interface MountOptions {
   spec: ChartSpec;
@@ -164,332 +161,6 @@ export function computeChartHeight(spec: ChartSpec, rows: TidyRow[]): number {
 // with a framed PNG export).
 
 
-type OverlayEl = HTMLElement & { _ro?: ResizeObserver };
-
-/**
- * Resolve the `data-series` of the chart mark under a click, hit-testing THROUGH the
- * transparent crosshair hit-overlay that sits on top of the bars/paths.
- *
- * The crosshair appends a full-SVG transparent rect with pointer-events:all, so the click
- * target is that overlay (no data-series). `elementsFromPoint` returns the element stack
- * top→bottom; we skip the overlay (and any other non-mark element) and return the first
- * element carrying a `data-series` attribute. Returns null if none is found.
- *
- * Guarded for jsdom: `elementsFromPoint` may be absent — feature-detect and no-op so SSR
- * and tests don't throw. (The toggle path itself is exercised directly in tests.)
- */
-function resolveAttrAtPoint(
-  svgEl: SVGSVGElement,
-  evt: MouseEvent,
-  attr: string,
-  accept?: (el: Element) => boolean,
-): string | null {
-  const doc = svgEl.ownerDocument as Document & {
-    elementsFromPoint?: (x: number, y: number) => Element[];
-  };
-  if (typeof doc.elementsFromPoint !== "function") return null;
-  for (const el of doc.elementsFromPoint(evt.clientX, evt.clientY)) {
-    const value = el.getAttribute?.(attr);
-    if (value && (!accept || accept(el))) return value;
-    if (el === svgEl) break; // don't search past the chart's own SVG
-  }
-  return null;
-}
-
-function resolveSeriesAtPoint(svgEl: SVGSVGElement, evt: MouseEvent): string | null {
-  return resolveAttrAtPoint(svgEl, evt, "data-series");
-}
-
-/**
- * The annotation key of the RUG BLOCK under the cursor, or null. Hit-tests through the crosshair's
- * transparent overlay exactly like `resolveSeriesAtPoint`, then requires the hit to be inside the
- * rug strip.
- *
- * Deliberately scoped to the rug rather than to every `[data-annotation]` element. The in-frame
- * annotations — band rects and `shading` fills — are large regions sitting right where the reader
- * sweeps the crosshair to read values, so hovering them would dim the very line being read, on and
- * off, as the pointer crossed each region. The rug sits below the axis, its blocks are discrete, and
- * "what is this block?" is the question a reader actually has there — so it is the one place where
- * chart-to-legend hover helps rather than fights.
- */
-function resolveRugAnnotationAtPoint(svgEl: SVGSVGElement, evt: MouseEvent): string | null {
-  return resolveAttrAtPoint(svgEl, evt, "data-annotation", (el) => !!el.closest?.(`g.${RUG_CLASS}`));
-}
-
-/** The y of the rug strip's top edge, or null when this chart has no strip. */
-function rugStripTop(svgEl: SVGSVGElement): number | null {
-  const block = svgEl.querySelector(`g.${RUG_CLASS} rect`);
-  if (!block) return null;
-  const y = Number(block.getAttribute("y"));
-  return Number.isFinite(y) ? y : null;
-}
-
-/**
- * Add transparent FAT "hit" paths for a LINE chart so clicking ON or NEAR a thin line
- * resolves that line's series. The visible lines are ~2px strokes that
- * `document.elementsFromPoint` almost never lands on; these clones are invisible but
- * carry a ~14px stroke with `pointer-events: stroke`, so the cursor is hit-tested
- * within ~7px of the line.
- *
- * Z-order: the crosshair appends its hover overlay LAST (pointer-events:all, topmost) so hover
- * works. We insert each hit-path BELOW that overlay (before the first `CROSSHAIR_HIT_SELECTOR`
- * match, so every family's overlay counts: a categorical-line pane's is `.tbl-catline-hit`, and a
- * list without it appended the hit-paths ABOVE it, where they took the pointer within ~7px of
- * every line and the overlay's pointerleave cleared the hover). The click handler resolves the series
- * via `elementsFromPoint` (the whole stack, not the event target), so it pierces the
- * transparent overlay and finds the fat hit-path's `data-series`. The hover (pointermove
- * on the overlay) is unaffected because the overlay stays on top.
- *
- * Each hit-path clones the visible path's `d` (geometry) and `data-series`. The clone is
- * inserted at the SVG root (just before the crosshair overlay), which is correct here
- * because this engine's Plot output bakes the margins into the path coordinates — the
- * `g[aria-label="line"]` group carries only a 0.5px crispness transform, so a root-level
- * clone lands within ~0.5px of the visible line (well inside the 14px hit stroke). No
- * in-function idempotency guard is needed: `draw()` rebuilds the SVG before each call, so
- * the hit-paths are always fresh.
- */
-function addLineHitPaths(svgEl: SVGSVGElement): void {
-  const NS = "http://www.w3.org/2000/svg";
-  const overlay = svgEl.querySelector(CROSSHAIR_HIT_SELECTOR);
-  // A per-series `method`/`column` overlay on a line chart lands in this same
-  // `g[aria-label="line"]` namespace (marks/overlay.ts): Plot.line wraps it in its own
-  // `g[aria-label="line"]`, nesting the mark's `g.tbl-overlay-line` INSIDE that — so the base
-  // selector below would otherwise also pick up the overlay's path and give it a 14px invisible
-  // hit zone spanning its full `domain: axis` fit. `closest` (rather than a CSS `:not()`) is used
-  // because the class sits on that inner wrapper, not on the path or the aria-label element itself.
-  const linePaths = Array.from(
-    svgEl.querySelectorAll<SVGPathElement>('g[aria-label="line"] path[data-series]'),
-  ).filter((p) => !p.closest(".tbl-overlay-line"));
-  for (const path of linePaths) {
-    const series = path.getAttribute("data-series");
-    const d = path.getAttribute("d");
-    if (!series || !d) continue;
-    const hit = svgEl.ownerDocument.createElementNS(NS, "path");
-    hit.classList.add("tbl-line-hitpath");
-    hit.setAttribute("data-series", series);
-    hit.setAttribute("d", d);
-    hit.setAttribute("fill", "none");
-    // A truncated value axis clips the visible line to the frame, but `d` still carries the
-    // off-frame geometry — an unclipped root-level clone would leave a phantom hit zone over the
-    // title/legend. Plot's frame clip is a userSpaceOnUse rect, so the same reference works here.
-    const clipRef = path.closest("[clip-path]")?.getAttribute("clip-path");
-    if (clipRef) hit.setAttribute("clip-path", clipRef);
-    // Invisible but reliably hit-testable: pointer-events:stroke is geometry-based, but a
-    // painted-with-zero-opacity stroke is the safest cross-browser choice (some engines treat
-    // stroke="transparent" as non-painted). The 14px width gives a ~7px-each-side hit zone.
-    hit.setAttribute("stroke", "#000");
-    hit.setAttribute("stroke-opacity", "0");
-    hit.setAttribute("stroke-width", "14");
-    hit.setAttribute("stroke-linecap", "round");
-    hit.setAttribute("stroke-linejoin", "round");
-    hit.style.pointerEvents = "stroke";
-    hit.style.cursor = "pointer";
-    // Insert below the topmost crosshair overlay so the overlay keeps handling hover and
-    // the click handler (elementsFromPoint, full stack) still pierces down to this path.
-    if (overlay) {
-      svgEl.insertBefore(hit, overlay);
-    } else {
-      svgEl.appendChild(hit);
-    }
-  }
-}
-
-/**
- * Two-way selection: clicking a mark PINS its series through the legend handle. Used by mountChart
- * and by every figure pane in wireFigureSvg; the two paths wired this separately and drifted (a
- * standalone categorical line got no hit-paths, histogram and dumbbell panes got no click at all).
- *
- * The hover overlay (`CROSSHAIR_HIT_SELECTOR`) is a transparent full-SVG rect on top of the marks,
- * so the click lands on it; `resolveSeriesAtPoint` hit-tests through it with `elementsFromPoint`.
- * The overlay sets its cursor inline, which beats the `.is-selectable` CSS rule, so it is
- * overridden to `pointer` here. `lineHitPaths`: add the fat hit-paths for thin line strokes.
- * Live DOM only; renderChart and the PNG export never call this. Records `svg` in
- * `CLICK_TO_PIN_SVGS`, which mountFigure reads to decide `.is-selectable`.
- */
-const CLICK_TO_PIN_SVGS = new WeakSet<SVGSVGElement>();
-function wireClickToPin(
-  svg: SVGSVGElement,
-  handle: LegendHandle,
-  opts: { lineHitPaths: boolean },
-): void {
-  if (opts.lineHitPaths) addLineHitPaths(svg);
-  svg.querySelectorAll<SVGElement>(CROSSHAIR_HIT_SELECTOR).forEach((el) => { el.style.cursor = "pointer"; });
-  svg.addEventListener("click", (evt) => {
-    const series = resolveSeriesAtPoint(svg, evt as MouseEvent);
-    if (series) handle.toggle(series);
-  });
-  CLICK_TO_PIN_SVGS.add(svg);
-}
-
-// Tray-with-down-arrow glyph — inlined so the bundle stays self-contained.
-const DOWNLOAD_ICON =
-  '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">' +
-  '<path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" ' +
-  'stroke-linejoin="round" d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10"/></svg>';
-
-/** Convert a chart title to a kebab-case filename slug. */
-function titleToSlug(title: string | undefined): string {
-  if (!title) return "chart";
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-// Sticky y-axis: the SVG's y-tick labels scroll off-screen when the chart overflows
-// horizontally. Hide them and recreate each as a floating span (with a semi-transparent
-// pill) pinned at the left; the controller translateX's the overlay by scrollLeft so the
-// labels stay put. The gridlines/zero baseline stay in the SVG (visible across the chart),
-// so we get frozen-y-axis behavior without rebuilding any SVG primitive in HTML.
-function attachYAxisOverlay(canvasScroll: HTMLElement, svg: SVGSVGElement): OverlayEl | null {
-  const textEls = Array.from(svg.querySelectorAll<SVGTextElement>("g.tbl-y-tick-label text"));
-  if (!textEls.length) return null;
-
-  const doc = canvasScroll.ownerDocument;
-  const overlay = doc.createElement("div") as OverlayEl;
-  overlay.className = "figure-y-axis-overlay";
-  const pairs = textEls.map((textEl) => {
-    const span = doc.createElement("span");
-    span.textContent = textEl.textContent;
-    overlay.appendChild(span);
-    return { textEl, span };
-  });
-  textEls.forEach((el) => { el.style.visibility = "hidden"; });
-  canvasScroll.appendChild(overlay);
-
-  const reposition = (): void => {
-    const svgRect = svg.getBoundingClientRect();
-    const scrollRect = canvasScroll.getBoundingClientRect();
-    if (!svgRect.height) return;
-    overlay.style.height = `${svgRect.height}px`;
-    for (const { textEl, span } of pairs) {
-      const r = textEl.getBoundingClientRect();
-      span.style.top = `${r.top - scrollRect.top}px`;
-    }
-  };
-  reposition();
-  // ResizeObserver keeps the spans aligned as fonts load / the box re-lays-out. Guard for
-  // environments without it (e.g. jsdom): the one-time reposition above still runs.
-  if (typeof ResizeObserver !== "undefined") {
-    const ro = new ResizeObserver(reposition);
-    ro.observe(svg);
-    overlay._ro = ro;
-  }
-  return overlay;
-}
-
-/** X-axis title below the chart, sized to the visible viewport (sticky + centered in CSS). */
-function appendXAxisTitle(canvasScroll: HTMLElement, axisTitle: string | null): void {
-  if (!axisTitle) return;
-  const el = canvasScroll.ownerDocument.createElement("div");
-  el.className = "figure-x-axis-title";
-  el.textContent = axisTitle;
-  canvasScroll.appendChild(el);
-}
-
-/** Append an axis-title caption (`cls`) to `parent` when `title` is set. Used for the y-axis
- *  caption (above the plot) and the figure-level x-axis title (below the grid). */
-function appendAxisTitleEl(parent: HTMLElement, doc: Document, cls: string, title: string | null): void {
-  if (!title) return;
-  const el = doc.createElement("div");
-  el.className = cls;
-  el.textContent = title;
-  parent.appendChild(el);
-}
-
-/** The chart's folder slug, taken from the page URL (charts are served at `…/<chart-folder>/`).
- *  Used for download filenames — far tidier than a slugified title. Falls back to the title slug
- *  when the last path segment looks like a file (e.g. a local `index.html` preview). */
-function downloadSlug(spec: ChartSpec): string {
-  try {
-    const segs = location.pathname.split("/").filter(Boolean);
-    const last = segs[segs.length - 1];
-    // Served at a folder URL (…/F1_revenue_headline/) → that folder is the slug.
-    if (last && !/\./.test(last)) return last;
-    // Opened as a file (…/F1_revenue_headline/preview.html) → use the PARENT folder as the slug, so
-    // downloads are still named by the chart folder rather than the title.
-    const parent = segs[segs.length - 2];
-    if (parent && !/\./.test(parent)) return parent;
-  } catch {
-    /* no location (SSR/jsdom) — fall through */
-  }
-  // Resolve any title-selector tokens (with the defaults) BEFORE slugifying, so the slug reads
-  // "…-by-sector" rather than "…-by-dimension". (Braces themselves could never leak — the
-  // slugifier strips all non-alphanumerics — but the resolved label is the better name.)
-  return titleToSlug(resolveTitleText(spec));
-}
-
-/** Data (CSV) + Image (PNG) download buttons for the source line. Filenames use the chart's folder
- *  slug (from the URL) rather than the title, which makes for unwieldy filenames.
- *
- *  `selections` is the mount's LIVE title-selector selections object (mutated in place by the
- *  inline-select widget's change handler), so the PNG export always prints the currently-chosen
- *  option labels in its title — not the defaults captured at mount time. */
-function buildDownloadActions(
-  doc: Document,
-  spec: ChartSpec,
-  rows: TidyRow[],
-  slugOverride?: string,
-  selections?: Record<string, string>,
-  hooks?: RenderHooks,
-): HTMLElement {
-  const base = slugOverride || downloadSlug(spec);
-  const downloads = doc.createElement("div");
-  downloads.className = "figure-downloads";
-
-  const dataBtn = doc.createElement("button");
-  dataBtn.type = "button";
-  dataBtn.className = "figure-download-btn";
-  dataBtn.setAttribute("aria-label", "Download data (CSV)");
-  dataBtn.innerHTML = `${DOWNLOAD_ICON}<span>Data</span>`;
-  const dataLabel = dataBtn.querySelector("span") as HTMLSpanElement;
-  dataBtn.addEventListener("click", () => {
-    const original = dataLabel.textContent ?? "Data";
-    dataBtn.disabled = true;
-    try {
-      const csv = rowsToCsv(rows);
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = doc.createElement("a");
-      a.href = url;
-      a.download = `${base}.csv`;
-      doc.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    } catch (err) {
-      console.error("Data download failed:", err);
-      dataLabel.textContent = "Failed";
-      setTimeout(() => { dataLabel.textContent = original; dataBtn.disabled = false; }, 2000);
-      return;
-    }
-    dataBtn.disabled = false;
-  });
-  downloads.appendChild(dataBtn);
-
-  const imgBtn = doc.createElement("button");
-  imgBtn.type = "button";
-  imgBtn.className = "figure-download-btn";
-  imgBtn.setAttribute("aria-label", "Download image (PNG)");
-  imgBtn.innerHTML = `${DOWNLOAD_ICON}<span>Image</span>`;
-  const imgLabel = imgBtn.querySelector("span") as HTMLSpanElement;
-  imgBtn.addEventListener("click", async () => {
-    const original = imgLabel.textContent ?? "Image";
-    imgBtn.disabled = true;
-    imgLabel.textContent = "…";
-    try {
-      await exportChartPng(spec, rows, { filename: `${base}.png`, selections, hooks });
-    } catch (err) {
-      console.error("Image export failed:", err);
-      imgLabel.textContent = "Failed";
-      setTimeout(() => { imgLabel.textContent = original; imgBtn.disabled = false; }, 2000);
-      return;
-    }
-    imgLabel.textContent = original;
-    imgBtn.disabled = false;
-  });
-  downloads.appendChild(imgBtn);
-
-  return downloads;
-}
-
 /**
  * Mount a fully interactive chart card into `container`. Returns a teardown() that
  * disconnects the resize/scroll observers.
@@ -521,73 +192,6 @@ function buildDownloadActions(
  *   there is no resize feedback loop. (Same discipline as the existing canvasScroll
  *   observer for the SVG-widening case.)
  */
-/** Snapshot each area band's data-series → its current `d`, so a restack can morph from it. */
-function captureAreaDs(svg: SVGSVGElement): Map<string, string> {
-  const m = new Map<string, string>();
-  svg.querySelectorAll('g[aria-label="area"] path[data-series]').forEach((p) => {
-    const s = p.getAttribute("data-series");
-    const d = p.getAttribute("d");
-    if (s && d) m.set(s, d);
-  });
-  return m;
-}
-
-// Match the numbers in a path `d` string (handles decimals, signs, exponents).
-const D_NUM_RE = /-?\d*\.?\d+(?:e-?\d+)?/g;
-
-/** Brief restack morph: the stacked total is order-invariant, so only the band paths' geometry
- *  changes. We interpolate each band's `d` from its OLD to its NEW value over ~320ms (the two
- *  share an identical command structure — same x points — so the numbers line up), so the bands
- *  visibly slide into their new stack positions. Snaps if the structures don't match. Pure JS, so
- *  it works regardless of CSS `d`-transition support. */
-function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
-  type Anim = { p: Element; newD: string; from: number[]; to: number[] };
-  const anims: Anim[] = [];
-  for (const p of svg.querySelectorAll('g[aria-label="area"] path[data-series]')) {
-    const s = p.getAttribute("data-series");
-    const newD = p.getAttribute("d");
-    const oldD = s ? oldDs.get(s) : undefined;
-    if (!s || !newD || !oldD || oldD === newD) continue;
-    const from = oldD.match(D_NUM_RE)?.map(Number);
-    const to = newD.match(D_NUM_RE)?.map(Number);
-    if (!from || !to || from.length !== to.length) continue; // structure differs → leave at new (snap)
-    p.setAttribute("d", oldD); // start at the old geometry
-    anims.push({ p, newD, from, to });
-  }
-  if (!anims.length) return;
-  const win = svg.ownerDocument?.defaultView;
-  const raf = win?.requestAnimationFrame?.bind(win);
-  if (!raf) {
-    for (const a of anims) a.p.setAttribute("d", a.newD); // no rAF (SSR) → just apply the new geometry
-    return;
-  }
-  const DUR = 320;
-  const ease = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2);
-  let start = -1;
-  const step = (now: number): void => {
-    if (start < 0) start = now;
-    const t = Math.min(1, (now - start) / DUR);
-    const e = ease(t);
-    for (const a of anims) {
-      if (t >= 1) {
-        a.p.setAttribute("d", a.newD);
-        continue;
-      }
-      let k = 0;
-      a.p.setAttribute(
-        "d",
-        a.newD.replace(D_NUM_RE, () => {
-          const v = a.from[k]! + (a.to[k]! - a.from[k]!) * e;
-          k++;
-          return v.toFixed(2);
-        }),
-      );
-    }
-    if (t < 1) raf(step);
-  };
-  raf(step);
-}
-
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
   const unique = normalizeSpec(opts.spec);
   if (unique !== opts.spec) opts = { ...opts, spec: unique };
@@ -693,28 +297,18 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let lastOuterWidth = 0;
   let currentOverlay: OverlayEl | null = null;
   let xTitleAdded = false;
-  // Right-legend slot — created lazily when the right-legend layout is activated.
-  let rightLegendSlot: HTMLElement | null = null;
   // Track the current effective legendPosition so we can rebuild layout on first call.
   let currentLegendPos: "top" | "right" | null = null;
 
-  // Area click-to-restack: the live visual stack order (selected series to the bottom, in click
-  // order), the full series list, and a re-entrancy guard so re-applying pins after a rebuild
-  // doesn't recurse (the latest legend handle is `life.legend`). Non-area charts never touch any of
-  // this.
-  let restackOrder: string[] | undefined;
-  let suppressRestack = false;
-  let currentSeriesNames: string[] = [];
+  // Area click-to-restack (live/area-restack.ts). Non-area charts never touch any of this.
+  const restack = createRestackController({
+    life,
+    canvas,
+    getOnLegendSelect: () => opts.onLegendSelect,
+  });
 
-
-  /** Take down the right-legend column (its legend with it) and put the canvas back in the card. */
-  const dropRightColumn = (): void => {
-    if (!rightLegendSlot) return;
-    const bodyWrapper = rightLegendSlot.parentElement as HTMLElement;
-    card.insertBefore(canvasScroll, bodyWrapper);
-    bodyWrapper.remove();
-    rightLegendSlot = null;
-  };
+  // The top legend slot and the right-legend column (live/legend-layout-dom.ts).
+  const legendDom = createLegendSlots(doc, card, canvasScroll, legendSlot);
 
   /** The width the chart is drawn at on a card `outerWidth` wide with the legend at `legendPos`. */
   const chartTarget = (outerWidth: number, legendPos: "top" | "right"): number => {
@@ -765,7 +359,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         ...(heightFromModel ? { heightFromModel: true } : {}),
         hooks: opts.hooks,
         ...(timelineOrientation ? { timelineOrientation } : {}),
-        ...(restackOrder ? { stackOrder: restackOrder } : {}),
+        ...(restack.order ? { stackOrder: restack.order } : {}),
         ...(accentColor ? { accentColor } : {}),
       });
     } catch (e) {
@@ -780,7 +374,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         currentOverlay?.remove();
         currentOverlay = null;
         legendSlot.replaceChildren();
-        dropRightColumn();
+        legendDom.dropRightColumn();
       });
       return;
     }
@@ -804,7 +398,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // covers a series the legend suppressed, so EVERY series resolves — which is what lets the
     // channels go away entirely rather than survive as a path only a lone series could reach.
     const seriesIcons = resolveTooltipIcons({ legendItems, keyRows: seriesKeyRows });
-    currentSeriesNames = seriesOrder;
+    restack.setSeries(seriesOrder);
     let pillDriver: HighlightPillsHandle | null = null;
     const onHighlight = (active: Set<string>): void => {
       pillDriver?.setActive(active);
@@ -814,54 +408,12 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // user can read them against zero; unpinning restores the default order. Driven off PINS
       // (not hover), so this only fires on an actual selection change. Re-renders the whole chart
       // via draw(), which carries the pins onto the freshly built legend.
-      if (spec.chartType === "area" && !suppressRestack) {
-        const pins = life.legend?.pinnedSeries() ?? [];
-        const next = pins.length
-          ? [...pins, ...currentSeriesNames.filter((s) => !pins.includes(s))]
-          : undefined;
-        if (JSON.stringify(next) !== JSON.stringify(restackOrder)) {
-          // Capture the current bands' geometry so the re-rendered ones can morph from it.
-          const oldDs = captureAreaDs(svg);
-          restackOrder = next;
-          suppressRestack = true;
-          life.invalidate(); // force draw() past its same-width early return
-          // A stuck `suppressRestack` silently disables every future restack on this mount — a
-          // permanent break, worse than any throw it could come from — so it is reset in a
-          // `finally`. It stays true for the whole draw() on purpose: draw() carries the pins onto
-          // the fresh legend and may hand keyboard focus back to it, and the focus handler re-enters
-          // onHighlight, where the restack branch must skip rather than recurse.
-          //
-          // A throwing onRender (it fires at the tail of draw's "restack" branch, after the legend
-          // is rebuilt and the pins carried) must not cost the host its onLegendSelect for this pin.
-          // So the render error is CARRIED: the notification below still runs, and then the render
-          // error surfaces, unwrapped and identical to what the consumer threw (so `instanceof` and
-          // `.message` still hold at the catch site), with a throw from the notification attached as
-          // its `.cause` when that slot is free. Nothing is swallowed.
-          let renderError: { e: unknown } | null = null;
-          try {
-            draw(card.clientWidth || lastOuterWidth, currentLegendPos ?? legendPos, "restack");
-          } catch (e) {
-            renderError = { e };
-          } finally {
-            suppressRestack = false;
-          }
-          if (renderError) {
-            if (!life.disposed) {
-              try {
-                life.notify("tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
-              } catch (later) {
-                attachCause(renderError.e, later);
-              }
-            }
-            throw renderError.e;
-          }
-          // A consumer may have torn the mount down from that draw's onRender.
-          if (life.disposed) return;
-          // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
-          // Unreachable when draw() threw — the error above propagates past this point.
-          const newSvg = canvas.querySelector("svg");
-          if (newSvg) animateAreaRestack(newSvg, oldDs);
-        }
+      if (spec.chartType === "area") {
+        restack.update(active, svg, () => {
+          draw(card.clientWidth || lastOuterWidth, currentLegendPos ?? legendPos, "restack");
+        });
+        // A consumer may have torn the mount down from the restack draw's onRender.
+        if (life.disposed) return;
       }
       // onLegendSelect: reports the active/dimmed set however it changed — a pin click, a hover,
       // focus/blur, or the reset button (legend.ts's applyHighlight runs onHighlight for all of
@@ -881,7 +433,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       appendXAxisTitle(canvasScroll, xAxisTitle);
     } else if (!xTitleAdded) { appendXAxisTitle(canvasScroll, xAxisTitle); xTitleAdded = true; }
 
-    // --- Legend layout ---
+    // --- Legend layout (live/legend-layout-dom.ts) ---
     // Read before the old legend leaves the DOM: focus falls to <body> once it does.
     const carried = life.carryLegend();
     const shapeOpts = {
@@ -890,67 +442,23 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       shapeTitle: shapeLegendTitle,
       state: carried?.state,
     };
-    let legendHandle: LegendHandle | null = null;
-    // A resize below LEGEND_RIGHT_MIN_CARD_WIDTH moves the legend to the top (and a timeline's can
-    // vanish), so take down a right column this draw does not use; a later right-legend draw
-    // rebuilds it (the guard below). Left standing, the narrow draw kept the chart squeezed beside a
-    // stale column under a second, top legend, and the next wide draw threw NotFoundError: its
-    // rebuild inserts relative to canvasScroll, which was still inside the old wrapper.
-    if (rightLegendSlot) {
-      const hasLegend = !!legendItems || !!(shapeLegendItems && shapeLegendItems.length);
-      if (legendPos !== "right" || !hasLegend) dropRightColumn();
-    }
-    if (legendItems || (shapeLegendItems && shapeLegendItems.length)) {
-      if (legendPos === "right") {
-        // Activate the right-legend layout on first use (or if switching from top).
-        // `!rightLegendSlot` is defensive: a right draw with no legend rows to show takes the top
-        // position instead (specPos below), so none records "right" without building the column.
-        if (currentLegendPos !== "right" || !rightLegendSlot) {
-          // Move canvasScroll into the body wrapper.
-          const bodyWrapper = doc.createElement("div");
-          bodyWrapper.className = "figure-body--legend-right";
-          card.insertBefore(bodyWrapper, canvasScroll);
-          card.removeChild(canvasScroll);
-          bodyWrapper.appendChild(canvasScroll);
-          // Create the right legend slot inside the body wrapper.
-          rightLegendSlot = doc.createElement("div");
-          rightLegendSlot.className = "figure-legend-slot--right";
-          bodyWrapper.appendChild(rightLegendSlot);
-          // Top legend slot stays in the DOM but is now empty (no content added).
-        }
-        // Render the right-side vertical legend with reversed series order.
-        const orderedItems = orderForRightLegend(legendItems ?? [], legendVisualOrder);
-        rightLegendSlot!.replaceChildren();
-        legendHandle = renderLegend(rightLegendSlot!, orderedItems, {
-          svg,
-          onHighlight,
-          hooks: opts.hooks,
-          ...shapeOpts,
-          abandoned: life.isDisposed,
-        });
-        if (life.disposed) return; // legendKey tore the mount down
-        // Add the vertical-layout class to the rendered legend element (use the handle's
-        // element directly rather than re-querying the slot).
-        legendHandle?.element.classList.add("tbl-legend--vertical");
-        // Ensure top legend slot stays empty.
-        legendSlot.replaceChildren();
-      } else {
-        // Top legend (default behavior — unchanged for non-point charts).
-        legendSlot.replaceChildren();
-        legendHandle = renderLegend(legendSlot, legendItems ?? [], {
-          svg,
-          onHighlight,
-          hooks: opts.hooks,
-          ...shapeOpts,
-          abandoned: life.isDisposed,
-        });
-        if (life.disposed) return; // legendKey tore the mount down
-      }
-    } else if (spec.chartType === "timeline") {
-      // Drawn lanes name the categories and a vertical render may draw one track instead, so a
-      // timeline's legend comes and goes on a resize: drop the last draw's.
-      legendSlot.replaceChildren();
-    }
+    const legendHandle = legendDom.place({
+      legendPos,
+      currentLegendPos,
+      legendItems,
+      shapeLegendItems,
+      legendVisualOrder,
+      isTimeline: spec.chartType === "timeline",
+      render: (slot, items) => renderLegend(slot, items, {
+        svg,
+        onHighlight,
+        hooks: opts.hooks,
+        ...shapeOpts,
+        abandoned: life.isDisposed,
+      }),
+      isDisposed: life.isDisposed,
+    });
+    if (life.disposed) return; // legendKey tore the mount down
 
     // Expose the freshly built legend handle for the area-restack re-render path (onHighlight).
     const dropped = life.adoptLegend(legendHandle, carried);
@@ -1226,346 +734,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 const PANE_MIN_WIDTH = 240;
 // Must match the column-gap in `.figure-grid` CSS so the per-pane width math lines up.
 const GRID_GAP = 16;
-
-/** Live wiring for the inline title selector(s): the spec's `title_selectors`, the mount's
- *  SHARED mutable selections object (updated in place on change, so later reads — e.g. the PNG
- *  download button — always see the live state), and the host's optional change callback. The
- *  card root itself (buildFigureHeader's first argument) is the CustomEvent dispatch target. */
-export interface TitleSelectorWiring {
-  selectors: Record<string, TitleSelector>;
-  selections: Record<string, string>;
-  onSelect?: (change: { id: string; value: string }) => void;
-  /** `spec.series_colors` — the fallback source for an option's trigger-label tint when the
-   *  option itself has no explicit `color` (see TitleSelectorOption.color and
-   *  spec/title.ts#resolveActiveOptionColor, which this mirrors at build time). */
-  seriesColors?: Record<string, string>;
-  /** Called after a selection's shared-state update + host callback + CustomEvent have all
-   *  fired — mountChart's hook to re-render the chart body so a single-series chart's line
-   *  adopts the newly-active option's color (see engine/index.ts
-   *  RenderOptions.accentColor). mountFigure (small multiples) omits this: the label still
-   *  tints, but the per-pane grid isn't re-rendered — each pane is one facet's chart body, not a
-   *  single accent target, and this port does not touch figure.ts. */
-  afterChange?: () => void;
-  /** The owning mount's disposal state. Read on every change, because teardown can re-enter the
-   *  widget before it closes the header (its own `onHover(null)` may pick an option). */
-  isDisposed?: () => boolean;
-}
-
-/** One option's DATA for the inline-select widget below: display label + the RAW (unresolved)
- *  color, if any, that tints the trigger label while this option is active. */
-interface InlineSelectItem {
-  id: string;
-  label: string;
-  color?: string;
-}
-
-/**
- * The AI Labor Market Tracker's inline title-selector widget (charts.js `buildInlineSelect`,
- * ported near-verbatim — see also styles.css L392-479 for the paired CSS): a button styled like
- * a boxed piece of title text (`.inline-select`) with a caret, opening a popover `<ul>`
- * (`.inline-select-popover`) of options on click. Behavior: click toggles the popover; a
- * click anywhere outside the button/popover closes it; Escape closes it and refocuses the
- * button; Enter/Space on a focused option selects it; ArrowUp/ArrowDown move focus with
- * wraparound; typing buffers into a 600ms type-ahead match against option labels. The button's
- * label is tinted to the ACTIVE option's resolved color (`palette.resolveColor`) — the caret
- * stays muted; the popover itself carries no per-option tint (the active row is marked navy +
- * semibold only, via `.is-active`).
- *
- * One structural difference from the tracker: the tracker tears down and rebuilds this widget on
- * every selection (as part of a full figure re-render driven by its own state store). The
- * engine's title is built ONCE per mount and never rebuilt (see buildFigureHeader) so the resize
- * draw() loop can't clobber the user's open popover / focus — so this instance updates its own
- * label/aria state in place on selection, rather than relying on a future rebuild.
- */
-function buildInlineSelect(
-  doc: Document,
-  items: InlineSelectItem[],
-  initialActiveId: string,
-  onSelect: (id: string) => void,
-): { el: HTMLElement; destroy: () => void } {
-  const btn = doc.createElement("button");
-  btn.type = "button";
-  btn.className = "inline-select";
-  btn.setAttribute("aria-haspopup", "listbox");
-  btn.setAttribute("aria-expanded", "false");
-
-  const labelEl = doc.createElement("span");
-  labelEl.className = "inline-select-label";
-  const caret = doc.createElement("span");
-  caret.className = "inline-select-caret";
-  caret.textContent = "▾";
-  caret.setAttribute("aria-hidden", "true");
-  btn.appendChild(labelEl);
-  btn.appendChild(caret);
-
-  const popover = doc.createElement("ul");
-  popover.className = "inline-select-popover";
-  popover.setAttribute("role", "listbox");
-  popover.hidden = true;
-
-  let activeId = initialActiveId;
-  const itemById = new Map<string, HTMLLIElement>();
-
-  function refresh(): void {
-    const active = items.find((i) => i.id === activeId) ?? items[0];
-    labelEl.textContent = active?.label ?? "";
-    // Tint the label with the option's resolved color (matches the chart's series color when the
-    // accent feeds back to a single-series chart — see engine/index.ts RenderOptions.accentColor);
-    // the caret stays grey (CSS-only, var(--tbl-text-muted)).
-    labelEl.style.color = (active && resolveColor(active.color)) || "";
-    for (const [id, li] of itemById) {
-      li.setAttribute("aria-selected", String(id === active?.id));
-      li.classList.toggle("is-active", id === active?.id);
-    }
-  }
-
-  function selectItem(id: string): void {
-    activeId = id;
-    refresh();
-    onSelect(id);
-  }
-
-  for (const item of items) {
-    const li = doc.createElement("li");
-    li.setAttribute("role", "option");
-    li.dataset.id = item.id;
-    li.textContent = item.label;
-    li.tabIndex = 0;
-    li.addEventListener("click", () => {
-      selectItem(item.id);
-      closePopover();
-    });
-    li.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        selectItem(item.id);
-        closePopover();
-      }
-    });
-    popover.appendChild(li);
-    itemById.set(item.id, li);
-  }
-  refresh();
-
-  let typeAheadBuffer = "";
-  let typeAheadTimer: ReturnType<typeof setTimeout> | undefined;
-
-  function focusItem(li: HTMLElement | null | undefined): void {
-    li?.focus();
-  }
-
-  // Guards the deferred `addEventListener` below: if closePopover runs in the SAME synchronous
-  // tick as openPopover (e.g. click-then-Escape with no await), the pending setTimeout hasn't
-  // fired yet, so removeEventListener would no-op and the listener would attach anyway a tick
-  // later — permanently, since nothing is listening for it at that point. Capturing the timer id
-  // lets closePopover cancel it before it ever registers.
-  let clickAwayTimer: ReturnType<typeof setTimeout> | undefined;
-  function openPopover(): void {
-    popover.hidden = false;
-    btn.setAttribute("aria-expanded", "true");
-    clickAwayTimer = setTimeout(() => {
-      clickAwayTimer = undefined;
-      doc.addEventListener("click", clickAway);
-    }, 0);
-    setTimeout(() => {
-      const activeLi = itemById.get(activeId) ?? (popover.firstElementChild as HTMLElement | null);
-      focusItem(activeLi);
-    }, 0);
-  }
-  function closePopover(): void {
-    popover.hidden = true;
-    btn.setAttribute("aria-expanded", "false");
-    if (clickAwayTimer !== undefined) {
-      clearTimeout(clickAwayTimer);
-      clickAwayTimer = undefined;
-    }
-    doc.removeEventListener("click", clickAway);
-    typeAheadBuffer = "";
-    clearTimeout(typeAheadTimer);
-    btn.focus();
-  }
-  function clickAway(e: Event): void {
-    const target = e.target as Node;
-    if (!btn.contains(target) && !popover.contains(target)) closePopover();
-  }
-  // Unmount-time teardown: same listener/timer cleanup as closePopover, but without the
-  // onSelect-adjacent focus side effect (the button may be about to leave the DOM).
-  function destroy(): void {
-    if (clickAwayTimer !== undefined) {
-      clearTimeout(clickAwayTimer);
-      clickAwayTimer = undefined;
-    }
-    doc.removeEventListener("click", clickAway);
-    clearTimeout(typeAheadTimer);
-    popover.hidden = true;
-    btn.setAttribute("aria-expanded", "false");
-  }
-
-  function keyHandler(e: KeyboardEvent): void {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closePopover();
-      return;
-    }
-    if (e.key === "Enter" || e.key === " ") {
-      const focused = doc.activeElement;
-      if (focused && focused.parentElement === popover) {
-        e.preventDefault();
-        (focused as HTMLElement).click();
-      }
-      return;
-    }
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      const lis = Array.from(popover.children) as HTMLElement[];
-      const idx = lis.indexOf(doc.activeElement as HTMLElement);
-      const next = e.key === "ArrowDown"
-        ? lis[(idx + 1) % lis.length]
-        : lis[(idx - 1 + lis.length) % lis.length];
-      focusItem(next);
-      return;
-    }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      typeAheadBuffer += e.key.toLowerCase();
-      clearTimeout(typeAheadTimer);
-      typeAheadTimer = setTimeout(() => {
-        typeAheadBuffer = "";
-      }, 600);
-      const match = items.find((i) => i.label.toLowerCase().startsWith(typeAheadBuffer));
-      if (match) {
-        e.preventDefault();
-        focusItem(itemById.get(match.id));
-      }
-    }
-  }
-
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    popover.hidden ? openPopover() : closePopover();
-  });
-
-  const wrap = doc.createElement("span");
-  wrap.className = "inline-select-wrap";
-  wrap.appendChild(btn);
-  wrap.appendChild(popover);
-  wrap.addEventListener("keydown", keyHandler);
-  return { el: wrap, destroy };
-}
-
-/** Render a title with inline-selector tokens into `h`: text segments become text nodes; each
- *  `{key}` token becomes an engine-owned button+popover widget (see buildInlineSelect — options
- *  from its TitleSelector, active = the current selection). On change: the shared selections
- *  object is updated in place, the host callback fires, a bubbling `tbl-title-select` CustomEvent
- *  dispatches from the card root (for standalone bundles with no host callback), and — when
- *  wired (mountChart only) — `afterChange` re-renders the chart body for the color accent. */
-function buildSelectorTitle(
-  h: HTMLElement,
-  doc: Document,
-  title: string,
-  card: HTMLElement,
-  wiring: TitleSelectorWiring,
-): Array<() => void> {
-  // Set by the header's close (every mount's teardown calls it, last): the widget stays on the
-  // page, but a torn-down mount fires no onSelect, no tbl-title-select and no redraw. `off()` also
-  // reads the mount's own disposal, which is set FIRST: teardown's onHover(null) can pick an option
-  // before the header is closed. The close stays last so it still cleans up a popover opened then.
-  let closed = false;
-  const cleanups: Array<() => void> = [() => { closed = true; }];
-  const { selectors, selections, onSelect, seriesColors, afterChange, isDisposed } = wiring;
-  const off = (): boolean => closed || (isDisposed?.() ?? false);
-  for (const seg of parseTitleTokens(title, selectors)) {
-    if (seg.kind === "text") {
-      h.appendChild(doc.createTextNode(seg.text));
-      continue;
-    }
-    const key = seg.key;
-    const selector = selectors[key]!;
-    const items: InlineSelectItem[] = selector.options.map((opt) => ({
-      id: opt.id,
-      label: opt.label ?? opt.id,
-      // Explicit option color wins; else the figure's series color for the option's label (the
-      // shared per-series map) — mirrors spec/title.ts#resolveActiveOptionColor.
-      color: opt.color ?? ownValue(seriesColors, opt.label ?? opt.id),
-    }));
-    // The mounts always pass a resolveSelections() map (every key populated), so the fallback is
-    // defensive only — buildFigureHeader is exported, and an external caller could hand-roll an
-    // incomplete wiring.selections.
-    const initialActiveId = selections[key] ?? selector.options[0]?.id ?? "";
-    const { el, destroy } = buildInlineSelect(doc, items, initialActiveId, (value) => {
-      selections[key] = value;
-      if (off()) return;
-      notify(card, "tbl-title-select", { id: key, value }, onSelect, off);
-      if (off()) return;
-      afterChange?.();
-    });
-    h.appendChild(el);
-    cleanups.push(destroy);
-  }
-  return cleanups;
-}
-
-/** Build the shared card header (eyebrow / title+logo / subtitle) — mirrors mountChart's
- *  header so single-chart and figure cards look identical. The eyebrow (figure number) is an
- *  embed-time value supplied by the caller, not read from the spec.
- *
- *  The spec parameter is typed as `{ title?: string; subtitle?: string }` (a structural subset)
- *  so both ChartSpec and TableSpec can be passed without casting. `titleWiring` (chart mounts
- *  only — tables have no title_selectors and omit it) turns each `{key}` token in the title
- *  into an engine-owned button+popover widget (see buildInlineSelect); absent, the title renders
- *  as plain textContent, DOM-identical to before the selector feature existed. The header is
- *  built ONCE per mount
- *  (the resize draw() loop never rebuilds it), so the control and its selection state survive
- *  the engine's own re-renders naturally.
- *
- *  Returns a cleanup callback: closes any open title-selector popover(s), clears their pending
- *  click-away timers, and removes the document click listener. A no-op when there's no
- *  titleWiring (tables, or a chart with no title_selectors). Callers (mountChart, mountFigure)
- *  MUST invoke this from their own unmount closures — otherwise unmounting with a popover open
- *  leaves its document-level click listener attached forever. */
-export function buildFigureHeader(
-  card: HTMLElement,
-  doc: Document,
-  spec: { title?: string; subtitle?: string },
-  eyebrowText?: string,
-  titleWiring?: TitleSelectorWiring,
-): () => void {
-  const header = doc.createElement("div");
-  header.className = "figure-header";
-  if (eyebrowText) {
-    const eyebrow = doc.createElement("div");
-    eyebrow.className = "figure-supertitle";
-    eyebrow.textContent = eyebrowText;
-    header.appendChild(eyebrow);
-  }
-  const titlebar = doc.createElement("div");
-  titlebar.className = "figure-titlebar";
-  let cleanups: Array<() => void> = [];
-  if (spec.title) {
-    const h = doc.createElement("h3");
-    h.className = "figure-title";
-    if (titleWiring && Object.keys(titleWiring.selectors).length) {
-      cleanups = buildSelectorTitle(h, doc, spec.title, card, titleWiring);
-    } else {
-      h.textContent = spec.title;
-    }
-    titlebar.appendChild(h);
-  }
-  const logoWrapper = doc.createElement("div");
-  logoWrapper.className = "figure-logo";
-  logoWrapper.innerHTML = LOGO_SVG;
-  titlebar.appendChild(logoWrapper);
-  header.appendChild(titlebar);
-  if (spec.subtitle) {
-    const s = doc.createElement("p");
-    s.className = "figure-subtitle";
-    s.textContent = spec.subtitle;
-    header.appendChild(s);
-  }
-  card.appendChild(header);
-  return () => {
-    for (const cleanup of cleanups) cleanup();
-  };
-}
 
 /** Wire the hover + two-way selection onto one figure pane's mini-SVG (both modes draw one per
  *  pane), from the same per-family plan mountChart's draw() builds (live/hover-options.ts; the
