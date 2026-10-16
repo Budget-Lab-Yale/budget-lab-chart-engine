@@ -6,6 +6,7 @@ import { Plot } from "../vendor";
 import { TBL, markerSymbolForSeries, MARK_LINE_POINT_R, MARK_LINE_POINT_PANE_R } from "../theme";
 import { resolveColorOr } from "../palette";
 import { buildShadeRuns } from "../shade";
+import { SHADE_FILL_OPACITY } from "../annotation-paint";
 import { labelMovedToLegend, annotationKey } from "../annotation-legend";
 import type { ShadeXField } from "../shade";
 import { domainBounds } from "../scales";
@@ -19,10 +20,6 @@ import { splitProjectedRuns } from "./projected";
  *  selectors. */
 export const SHADE_CLASS = "tbl-shade";
 
-/** Shading is the subject of the chart, not chrome behind it, so it reads at half opacity rather than
- *  the confidence-band tint (0.18) it originally borrowed. Override per region with `fillOpacity`.
- *  Note two overlapping regions compound — 0.5 over 0.5 renders as 0.75. */
-const SHADE_FILL_OPACITY = 0.5;
 
 export function buildLineMarks(
   data: PreparedRow[],

@@ -14,6 +14,7 @@ import { resolveRugTracks } from "../spec/rug";
 import { valueAxisIsX } from "../spec/dumbbell-orientation";
 import { overlayDashed, overlayKind, overlayPerSeries } from "../spec/overlays";
 import { overlayLineColor } from "./overlays";
+import { BAND_FILL_OPACITY, SHADE_FILL_OPACITY, rugBlockColor } from "./annotation-paint";
 import type { LegendItem } from "./index";
 import type { ChartSpec, ColorRef, Overlay, ShadeRegion, XAxisBand } from "../spec/types";
 
@@ -30,11 +31,6 @@ export function annotationKey(label: string): string {
   return `__annotation:${label}`;
 }
 
-/** Default fill opacity of an `annotations.bands` rect (assemble-plot.ts) — mirrored here so the
- *  swatch tint matches what the band actually paints. */
-const BAND_FILL_OPACITY = 0.1;
-/** Default `shading` fill opacity (marks/line.ts SHADE_FILL_OPACITY). */
-const SHADE_FILL_OPACITY = 0.5;
 
 /** Does this entry want a legend row? `rug: true` implies one (a solid block with no key is
  *  unreadable); `legend: false` always suppresses; a row needs something to say. */
@@ -92,16 +88,10 @@ function shadeSwatchColors(
 ): string[] {
   const explicit = resolveColor(region.color);
   // A rug-flagged region is keyed by its BLOCK, and the strip can only draw ONE color — so the chip
-  // is a single solid swatch resolved exactly as `drawRug` resolves the block (spec/rug.ts
-  // `rugTrackColor`). Without this the chip showed the series tints while the block drew the
+  // is a single solid swatch resolved exactly as `drawRug` resolves the block (annotation-paint.ts
+  // `rugBlockColor`). Without this the chip showed the series tints while the block drew the
   // neutral: a key pointing at a color that is nowhere on the strip.
-  if (region.rug === true) {
-    return [
-      explicit ||
-        (region.series != null ? colors.get(region.series) : undefined) ||
-        TBL.color.annotationDim,
-    ];
-  }
+  if (region.rug === true) return [rugBlockColor(region, colors)];
   const opacity = region.fillOpacity ?? SHADE_FILL_OPACITY;
   const tint = (c: string): string => flattenOverWhite(c, opacity);
   if (explicit) return [tint(explicit)];
@@ -245,7 +235,7 @@ export function buildAnnotationLegendItems(
   resolveRugTracks(spec).forEach((t) => {
     if (t.origin !== "tracks" || !t.legend) return;
     // An explicit track has no fill of its own — its block IS the thing, so it keys solid.
-    rows.push(fillRow(t.label, [resolveColorOr(t.color, TBL.color.annotationDim)]));
+    rows.push(fillRow(t.label, [rugBlockColor(t, colors)]));
   });
 
   // Merge by (label, swatch shape, dashed) — NOT by color, so several same-label entries with

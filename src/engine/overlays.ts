@@ -9,6 +9,7 @@ import { resolveColor } from "./palette";
 import { TBL } from "./theme";
 import { overlayKind, overlayDashed, overlayPerSeries } from "../spec/overlays";
 import { parseExpression, evalExpression } from "../spec/expr";
+import { POLY_DEFAULT_DEGREE } from "../spec/defaults";
 import type { OverlayKind } from "../spec/overlays";
 import type { ChartSpec, Overlay } from "../spec/types";
 import type { PreparedRow } from "./marks/index";
@@ -409,7 +410,7 @@ export function resolveOverlays(
       }
 
       if (kind === "method") {
-        const degree = o.method === "poly" ? (o.degree ?? 2) : 1;
+        const degree = o.method === "poly" ? (o.degree ?? POLY_DEFAULT_DEGREE) : 1;
         const fit = fitPoly(pairs!, degree);
         if (!fit) continue;
         // A straight line needs two points; a curve is sampled. (`n` is rejected on a fit, so the

@@ -12,6 +12,7 @@
 import Ajv from "ajv";
 import type { ErrorObject } from "ajv";
 import { CHART_SPEC_SCHEMA } from "./schema";
+import { POLY_DEFAULT_DEGREE, SHADE_FILL_OPACITY, Y_BOUND_LIMIT } from "./defaults";
 // Imported, deliberately NOT re-exported: a re-export here would hand browser-bundled code a path
 // back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
@@ -63,7 +64,8 @@ function formatAjvError(e: ErrorObject, spec: unknown): string {
     return `${path}: missing required property "${e.params.missingProperty}"`;
   }
   if ((e.keyword === "minimum" || e.keyword === "maximum") && /^\/yAxisPolicy\/(min|max)$/.test(path)) {
-    return `${path}: must be between -1e300 and 1e300`;
+    const bound = Y_BOUND_LIMIT.toExponential().replace("e+", "e"); // "1e300", as authors write it
+    return `${path}: must be between -${bound} and ${bound}`;
   }
   return `${path}: ${e.message ?? "invalid"}`;
 }
@@ -761,7 +763,7 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
     if (!keyed || !s.label || s.color) return;
     // A rug-flagged fill keys SOLID, everything else keys by its tint — different rules, so they
     // can't collide with each other.
-    const scope = `${s.series ?? "*"}|${s.rug === true ? "solid" : (s.fillOpacity ?? 0.5)}`;
+    const scope = `${s.series ?? "*"}|${s.rug === true ? "solid" : (s.fillOpacity ?? SHADE_FILL_OPACITY)}`;
     const labels = derivedChips.get(scope) ?? [];
     if (!labels.includes(s.label)) labels.push(s.label);
     derivedChips.set(scope, labels);
@@ -1551,7 +1553,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       if (!field || !columns.has(field)) continue; // absent column: already reported above
       // What `resolveOverlays` needs from ONE group: fitPoly wants degree + 1 finite pairs, and
       // columnPoints wants 2 real points. Both counted over finite cells of the driving column.
-      const need = kind === "column" ? 2 : (o.method === "poly" ? (o.degree ?? 2) : 1) + 1;
+      const need = kind === "column" ? 2 : (o.method === "poly" ? (o.degree ?? POLY_DEFAULT_DEGREE) : 1) + 1;
       const perSeries = overlayPerSeries(o);
       const counts = new Map<string, number>();
       for (const r of rows) {

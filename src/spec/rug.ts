@@ -67,7 +67,7 @@ function groupByLabel(
 /** The one resolution of a track's block color, shared by the strip and its legend chip so the two
  *  can never disagree. `seriesColor` looks up a series' resolved color; `neutral` is the fallback. */
 export function rugTrackColor(
-  track: ResolvedRugTrack,
+  track: { color?: string | undefined; series?: string | undefined },
   seriesColor: (s: string) => string | undefined,
   resolve: (c: string | undefined) => string | undefined,
   neutral: string,

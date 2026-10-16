@@ -26,7 +26,7 @@ import {
   FACETED_CAT_LABEL_PX,
   CAT_LABEL_CLASS,
 } from "../axes";
-import { categoryBand, fyCategoryBandLayer, bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
+import { categoryBand, encounterCategories, fyCategoryBandLayer, bandGutter, HBAND_PADDING_INNER, HBAND_PADDING_OUTER, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 
@@ -70,17 +70,7 @@ export function buildBarMarks(
   const isMulti = seriesNames.length > 1;
 
   // Category (group) domain in data-encounter order - declaration order is authoritative.
-  const categories: string[] = [];
-  {
-    const seen = new Set<string>();
-    for (const r of data) {
-      const cat = (r as unknown as Record<string, unknown>)[catField] as string | undefined;
-      if (typeof cat === "string" && cat !== "" && !seen.has(cat)) {
-        seen.add(cat);
-        categories.push(cat);
-      }
-    }
-  }
+  const categories = encounterCategories(data, catField);
 
   // Sectioned horizontal category axis (columns.section): categories grouped by section, with a
   // fixed gap for each header (see category-band.ts). Vertical / unsectioned: the plain band.

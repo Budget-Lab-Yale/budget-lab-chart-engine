@@ -8,6 +8,7 @@
 // This must stay in lockstep with spec/types.ts (the TS contract). Both describe the same
 // shape; the type is for authoring, the schema for runtime validation. test/types-schema-sync.test.ts
 // gates the two agreeing, and test/schema-doc-coverage.test.ts gates every field being in CONFIG-SPEC.md.
+import { Y_BOUND_LIMIT } from "./defaults";
 
 // Shared annotation fragments — reused by the legacy axis policies AND the unified `annotations`
 // block, so both accept the same shapes.
@@ -135,10 +136,9 @@ const X_AXIS_POLICY = {
   },
 } as const;
 
-/** The largest |yAxisPolicy.min| / |max| accepted (Ruling 74). A lone bound's open end is placed past
- *  it, clamped to ±Number.MAX_VALUE; this keeps that end strictly past the bound, so the axis ascends.
- *  validate.ts formats the error. */
-export const Y_BOUND_LIMIT = 1e300;
+/** The largest |yAxisPolicy.min| / |max| accepted — see spec/defaults.ts. Re-exported here, where
+ *  it has always been exported from. */
+export { Y_BOUND_LIMIT };
 
 const Y_AXIS_POLICY = {
   type: "object",

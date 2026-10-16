@@ -23,6 +23,7 @@ import { Plot } from "../vendor";
 import { markerInk } from "../marker-ink";
 import { TBL, TBL_VALUE_LABEL } from "../theme";
 import { isReversedDomain } from "../scales";
+import { valueLabelDecimals } from "../value-decimals";
 import {
   tblBandYAxis,
   horizontalValueAxisMargins,
@@ -36,7 +37,7 @@ import type { ChartSpec } from "../../spec/types";
 import { resolveNetMode, drawsNetDots, stackedSegmentLabelsShown } from "../../spec/bar-stack";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { TOTAL_SERIES_KEY } from "../series-keys";
-import { categoryBand, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
+import { categoryBand, encounterCategories, fyCategoryBandLayer, bandGutter, HSTACK_BAND_PADDING, VBAND_PADDING_INNER, VBAND_PADDING_OUTER } from "./category-band";
 
 // The one inner `y` slot of a sectioned stack's fy row (each category row holds one bar).
 const SINGLE_SLOT = "_v";
@@ -92,27 +93,15 @@ function splitBySign(names: string[], rows: readonly PreparedRow[]): { negs: str
  *  decimal precision across the rendered values. `keepMinus` writes a negative value's "-" as
  *  formatValue (the hover card) and the waterfall labels do, outside any prefix ("-$15"); without
  *  it every value prints as its magnitude, which suits a segment label, whose side of zero already
- *  carries the sign. */
-function makeValueFormatter(
+ *  carries the sign. Exported for test/value-decimals.test.ts. */
+export function makeValueFormatter(
   values: number[],
   affixes: ValueAffixes,
   keepMinus: boolean,
   decimals?: number,
 ): (d: number) => string {
-  // Fixed precision when set; else the minimum the data needs, CAPPED at 2 so raw floats don't
-  // print 15 digits (matches bar.ts).
-  const maxFrac =
-    decimals != null
-      ? decimals
-      : Math.min(
-          2,
-          values.reduce((max, v) => {
-            if (!Number.isFinite(v)) return max;
-            const s = String(v);
-            const i = s.indexOf(".");
-            return Math.max(max, i < 0 ? 0 : s.length - i - 1);
-          }, 0),
-        );
+  // Fixed precision when set; else the minimum the data needs, capped (value-decimals.ts).
+  const maxFrac = valueLabelDecimals(values, decimals);
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     return applyValueAffixes((keepMinus ? d : Math.abs(d)).toFixed(maxFrac), affixes);
@@ -134,17 +123,7 @@ export function buildStackedMarks(
   const normalize = spec.barStack?.normalize === true;
 
   // Category domain in data-encounter order (declaration order is authoritative).
-  const categories: string[] = [];
-  {
-    const seen = new Set<string>();
-    for (const r of data) {
-      const cat = (r as unknown as Record<string, unknown>)[catField] as string | undefined;
-      if (typeof cat === "string" && cat !== "" && !seen.has(cat)) {
-        seen.add(cat);
-        categories.push(cat);
-      }
-    }
-  }
+  const categories = encounterCategories(data, catField);
 
   // Visual stack order override (barStack.stackOrder): Plot stacks positives upward from zero in
   // DATA order, so reordering the rows sets the bottom→top order. Stable-sort by the configured

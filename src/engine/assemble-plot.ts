@@ -21,7 +21,7 @@ import {
 import { domainBounds, makeTickFormatter } from "./scales";
 import { placePointCallouts, type CalloutBox } from "./callout-placement";
 import { paintedFill } from "./painted-fill";
-import { resolveColor, resolveColorOr } from "./palette";
+import { resolveColorOr } from "./palette";
 import { resolveHatch, isHatchChar, hatchSvgPattern, type SeriesHatch } from "./hatch";
 import { FILLED_CHART_TYPES } from "../spec/filled-chart-types";
 import { ownValue } from "../spec/own-key";
@@ -34,7 +34,8 @@ import {
   xMarkerLabel,
   yMarkerLabel,
 } from "../spec/annotations";
-import { resolveRugTracks, rugHeight, rugTrackColor } from "../spec/rug";
+import { resolveRugTracks, rugHeight } from "../spec/rug";
+import { BAND_FILL_OPACITY, rugBlockColor } from "./annotation-paint";
 import { labelMovedToLegend, annotationKey } from "./annotation-legend";
 import { drawRug } from "./rug";
 import type { ChartSpec, PointCallout, ValueAffixes, XAxisMarker } from "../spec/types";
@@ -538,7 +539,7 @@ export function assemblePlot({
         y1: "y1",
         y2: "y2",
         fill: resolveColorOr(band.color, TBL.color.annotationDim),
-        fillOpacity: 0.1,
+        fillOpacity: BAND_FILL_OPACITY,
         ...(bandClass ? { className: bandClass } : {}),
       }),
     );
@@ -1362,8 +1363,7 @@ export function assemblePlot({
     // hover-dim in both directions.
     keyFor: (track) => (track.legend ? annotationKey(track.label) : undefined),
     // The SAME resolution the legend chip uses, so a block and its key always match.
-    colorFor: (track) =>
-      rugTrackColor(track, (s) => colors.get(s), resolveColor, TBL.color.annotationDim),
+    colorFor: (track) => rugBlockColor(track, colors),
     parseX: (v: string) => xOpts.markerToX({ x: v }),
   });
 

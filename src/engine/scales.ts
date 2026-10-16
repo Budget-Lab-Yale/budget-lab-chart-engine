@@ -3,6 +3,7 @@ import { d3 } from "./vendor";
 import type { ChartSpec, ChartType, ValueAffixes } from "../spec/types";
 import type { PreparedRow } from "./marks/index";
 import { applyValueAffixes, minMax } from "./util";
+import { fractionDigitsNeeded, valueLabelDecimals } from "./value-decimals";
 
 export interface YAxisResult {
   domain: [number, number];
@@ -485,15 +486,7 @@ export function waterfallValueDecimals(data: PreparedRow[], explicit?: number): 
     if (s.kind === "skip") continue;
     vals.push(s.delta, s.level);
   }
-  return Math.min(
-    2,
-    vals.reduce((max, v) => {
-      if (!Number.isFinite(v)) return max;
-      const str = String(v);
-      const i = str.indexOf(".");
-      return Math.max(max, i < 0 ? 0 : str.length - i - 1);
-    }, 0),
-  );
+  return valueLabelDecimals(vals);
 }
 
 /** A tick formatter that uses the minimum decimal precision needed across the whole
@@ -503,12 +496,7 @@ export function makeTickFormatter(
   ticks: number[],
   affixes: ValueAffixes = { prefix: "", suffix: "" },
 ): (d: number) => string {
-  const maxFrac = ticks.reduce((max, t) => {
-    if (!Number.isFinite(t)) return max;
-    const s = String(t);
-    const i = s.indexOf(".");
-    return Math.max(max, i < 0 ? 0 : s.length - i - 1);
-  }, 0);
+  const maxFrac = fractionDigitsNeeded(ticks);
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     return applyValueAffixes(d.toFixed(maxFrac), affixes);

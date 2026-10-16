@@ -9,7 +9,7 @@ import { renderChart } from "../src/engine/index";
 import { renderLegend } from "../src/engine/legend";
 import { buildAnnotationLegendItems, flattenOverWhite, annotationKey } from "../src/engine/annotation-legend";
 import { SHADE_CLASS } from "../src/engine/marks/line";
-import { ANNOTATION_LINE_CLASS } from "../src/engine/facet-chrome";
+import { ANNOTATION_LINE_CLASS, X_BAND_CLASS } from "../src/engine/facet-chrome";
 import { TBL_COLORS } from "../src/engine/palette";
 import { validateSpec } from "../src/spec/validate";
 import { TBL, swatchWidthFor } from "../src/engine/theme";
@@ -171,6 +171,24 @@ describe("annotation legend swatches", () => {
     } as ChartSpec;
     const [row] = buildAnnotationLegendItems(spec, ["A"], colors);
     expect(row?.color).toBe("#ff0000");
+  });
+
+  it("keys a default-opacity band and fill as the mark's own paint flattened over white", () => {
+    // Reads the opacity off the DOM, so the chip cannot follow a default the mark does not paint
+    // (both now come from engine/annotation-paint.ts).
+    const spec = {
+      ...BASE,
+      annotations: { bands: [{ start: "2001", end: "2003", label: "Band", color: "#336699", legend: true }] },
+      shading: [{ label: "Fill", color: "#cc3300", legend: true }],
+    } as ChartSpec;
+    const { svg, legendItems } = renderChart(spec, DATA, OPTS);
+    const band = svg.querySelector(`g.${X_BAND_CLASS}-0`)!;
+    const shade = svg.querySelector(`g.${SHADE_CLASS}`)!;
+    const chip = (label: string): string | undefined => legendItems?.find((i) => i.label === label)?.color;
+    expect(band.getAttribute("fill-opacity")).toBe("0.1");
+    expect(shade.getAttribute("fill-opacity")).toBe("0.5");
+    expect(chip("Band")).toBe(flattenOverWhite(band.getAttribute("fill")!, Number(band.getAttribute("fill-opacity"))));
+    expect(chip("Fill")).toBe(flattenOverWhite(shade.getAttribute("fill")!, Number(shade.getAttribute("fill-opacity"))));
   });
 
   it("falls back to the first series' color for a fill that names none", () => {
