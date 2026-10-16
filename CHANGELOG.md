@@ -120,11 +120,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   **Upgrading**.
 - Legend hover and pin, the hover card, and `series_patterns` textures now reach the marks they
   name in three cases where the `data-series` / `data-category` tags were attached to the wrong
-  elements. Horizontal grouped bars with sections, or with `columns.facet` (drawn as groups), whose
-  rows are drawn in a different order from the data (`section_order` differs from it, or sections
-  interleave in it) and whose categories do not all hold the same series in the same order: rects
-  carried another series' tag, so hover dimmed the wrong bars and a texture was painted on the
-  other series' bars, in the PNG too. A sectioned horizontal dumbbell drawn in a different order
+  elements. Horizontal grouped bars with sections (the `columns.facet` spelling is now an error;
+  see **Horizontal facets** under **Upgrading**), whose rows are drawn in a different order from the
+  data (`section_order` differs from it, or sections interleave in it) and whose categories do
+  not all hold the same series in the same order: rects carried another series' tag, so hover
+  dimmed the wrong bars and a texture was painted on the other series' bars, in the PNG too. A sectioned horizontal dumbbell drawn in a different order
   from its data: dots and category labels carried another row's category, so hovering one row
   showed another row's card. A line chart with a series that has no value (in the chart, or in one
   small-multiples pane), unless it is the last of its dashed or solid group: each line after it
@@ -282,8 +282,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     `annotations.xAxis` / `annotations.yAxis` entry shapes.
   - Tables: `stub_width` and `column_width` are no longer called fixed. A table narrower than the
     card stretches on screen, and these columns widen with it; a multi-pane table's data columns
-    split the width beside the row labels equally whatever their `column_width`. The PNG export
-    now stretches too (see the narrow-table entry above).
+    split the width beside the row labels equally whatever their `column_width`, so on screen
+    neither a wrapping cell's widest word nor a banner widens them (both still do on a single
+    table and in every PNG). The PNG export now stretches too (see the narrow-table entry above).
 
 ### Changed
 - Validation is stricter, and looser where it rejected figures that render correctly. See
@@ -359,6 +360,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     over-100 value threw at render, and a fraction was truncated; 11 to 100 rendered correctly and is
     rejected for consistency with the chart `decimals` bound of 10); and an `emphasis_column` or
     `footnote_column` naming a column the data lacks (a typo dropped every emphasis or footnote).
+  - Tables: unsupported math (`\frac`, `\sqrt` and the other two-dimensional constructs) in a
+    `footnotes` definition, as CONFIG-SPEC says of every table string. Footnotes were the one
+    rendered table string not checked, so such a footnote drew its command as text (`\frac12`).
+    No table in `budget-lab-charts` or in State of Tariffs (`manifest.json` and every previous
+    vintage) sets `footnotes`.
   - An `overlays[].fun` function name inherited from JavaScript objects (`constructor(x)`); see
     **Fixed**.
   - `highlightSeries` on a line, area, stacked, scatter, dot plot, waterfall or dumbbell chart
@@ -430,8 +436,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   blank series. Two `budget-lab-interactives` tools change once they re-vendor the engine, live
   only (no texture is involved, so neither PNG changes): State of Tariffs
   `default-scenario/consumer-prices` (and the same figure in 38 earlier vintages), a horizontal bar
-  with `columns.series` and `columns.facet` on one column, where 20 of 42 bars carry the other
-  series' tag, so legend hover and pin dim the wrong bars; and the BLSMM `plot_10yr_yield` and
+  with `columns.series` and `columns.facet` on one column (it renders only after the
+  **Horizontal facets** rename, and the change is seen from then), where 20 of 42 bars carry the
+  other series' tag, so legend hover and pin dim the wrong bars; and the BLSMM `plot_10yr_yield` and
   `plot_federal_funds` charts, where a scenario that leaves the first variable unchanged blanks its
   Scenario series and the second variable's Scenario line takes the first's tag.
 - **Table export, line breaks and signed zero** (see **Fixed**). In `budget-lab-charts` only PNG
@@ -457,14 +464,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   that print "-0.0%" or "-0.00 pp" and the two in `alternative-scenarios/etr-by-country` (and
   earlier vintages) lose the minus, on screen and in the PNG; the 2026-02-21 and 2026-03-09
   `summary-statistics` banners with a `\\` (such as "Policy Before\\SCOTUS Ruling") get a
-  taller banner row and measured rules. Its banners without a break were not rendered for this
-  check; any whose rules are drawn backwards today change as above.
+  taller banner row and measured rules. Rendered over every table the tool mounts (each scenario,
+  toggle and selector, in Chromium with Figtree), banner rules also move in 36 more earlier-vintage
+  tables: the "Average Effective Tariff Rate" banner of `etr-by-country` ("by Trading Partner" in
+  26 vintages from 2025-04-10 to 2026-04-08, "by Region" in 2026-02-20) had rules drawn about 9 px
+  backwards, and now has measured rules. No current State of Tariffs banner moves.
 - **Narrow tables in the PNG** (see **Fixed**): no `budget-lab-charts` figure moves. All 13 of its
   tables are wider than the 480 px content width (the narrowest,
-  `articles/2026/07/ai-fiscal/key-parameters`, is 512 px), so their PNGs are unchanged, the five
-  figures named under **Table export, line breaks and signed zero** included. Live tables are
-  unchanged. State of Tariffs tables were not checked. The five table export goldens, all narrow
-  synthetic tables, were re-recorded for this change under an owner waiver.
+  `articles/2026/07/ai-fiscal/key-parameters`, is 512 px as the export lays it out in Chromium with
+  Figtree), so their PNGs are unchanged, the five figures named under **Table export, line breaks
+  and signed zero** included. Live tables are unchanged. State of Tariffs table PNGs do move, when
+  it re-vendors the engine (not at the `budget-lab-charts` repin), counted the same way. Two current
+  tables are narrower than 480 px and are stretched: `default-scenario/summary-statistics` (about
+  307 px) and `default-scenario/etr-by-country` (about 347 px). In earlier vintages, 42 of the 166
+  tables the tool can mount are stretched: "Summary of Results" in every vintage but 2026-02-20,
+  2026-02-21 and 2026-03-09 (36 tables), "Average Effective Tariff Rate by Trading Partner" in the
+  four vintages from 2026-07-16 on, "Summary of Results by Scenario" in 2026-07-16, and
+  "Summary of July 7 & 9 Letters" in 2025-07-10. With the 40 whose banner rules move (see
+  **Table export, line breaks and signed zero**), the stretch and the measured banner rules change
+  82 earlier-vintage table PNGs, in all 33 vintages. The five table export goldens, all narrow
+  synthetic tables, were re-recorded for this change under an owner waiver; `table-wide`, a new
+  golden, pins the unstretched branch every `budget-lab-charts` table takes.
 - **Footnote markers and the footnote list in the PNG** (see **Fixed**): no `budget-lab-charts`
   figure moves. None of its 13 tables sets `footnotes` (the only source of the list) or
   `footnote_column` (the only source of cell markers). Live tables are unchanged. Of the table

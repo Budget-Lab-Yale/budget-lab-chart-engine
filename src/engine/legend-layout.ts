@@ -90,7 +90,8 @@ export function resolveLegendPosition(
     // Only drawn rows count: a section that section_order leaves out and a series series_order leaves
     // out (pane.ts scopeToSeries) are not drawn, so their negatives make nothing diverge.
     // `pane_order` is not consulted: a small_multiples figure has only a top legend slot, so no
-    // result here takes effect on one, and a horizontal faceted stack arrives normalised to sections.
+    // result here takes effect on one, and a horizontal stack with `columns.facet` never arrives here
+    // (normalizeSpec throws on it before any render path lays out a legend).
     const sectionField = cols.section;
     const seriesField = cols.series;
     const seriesOrder = spec.series_order?.length ? new Set(spec.series_order) : null;

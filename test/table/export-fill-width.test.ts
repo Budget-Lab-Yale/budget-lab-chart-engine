@@ -155,6 +155,42 @@ describe("table PNG export stretches a narrow table to the frame content width",
     expect(svg.getAttribute("width")).not.toBe(String(FRAME));
   });
 
+  // CONFIG-SPEC `column_width`: in the PNG of any table, multi-pane included, a wrapping cell's
+  // widest word and a banner wider than its columns raise the column widths past column_width
+  // (on screen a multi-pane table does neither: test/table/fixed-width-stretch.test.ts).
+  // Word floor and banner widening are tested apart, so neither can pass on the other's widening.
+  it("multi-pane: a wrapping cell's widest word widens its column", () => {
+    const WORD = "Underreporting";
+    const spec: TableSpec = { ...PANE, stub_width: 100, column_width: 40, column_wrap: true };
+    const rows = paneRows(rowsOf([
+      { row: "Revenue", per: "2026", value: `${WORD} rises` },
+      { row: "Revenue", per: "2027", value: 1 },
+    ]));
+    const wordW = measureText(WORD, 13) + 16;
+    expect(wordW).toBeGreaterThan(40); // precondition: the word exceeds the set width
+    for (const minWidth of [0, CONTENT]) {
+      for (const lp of layoutPanes(spec, rows, measureText, true, undefined, minWidth)) {
+        expect(lp.layout.colW[0]!).toBeGreaterThanOrEqual(wordW - 1e-9);
+      }
+    }
+  });
+
+  it("multi-pane: a banner wider than its columns widens them", () => {
+    const BANNER = "A banner label much wider than both of its columns";
+    const spec: TableSpec = { ...PANE, header: ["grp", "per"], stub_width: 100, column_width: 40 };
+    const rows = paneRows(rowsOf([
+      { row: "Revenue", grp: BANNER, per: "2026", value: 1 },
+      { row: "Revenue", grp: BANNER, per: "2027", value: 2 },
+    ]));
+    const bannerW = measureText(BANNER, 12) + 16 + 2 * 8;
+    expect(bannerW).toBeGreaterThan(80); // precondition: the banner exceeds both set widths
+    for (const minWidth of [0, CONTENT]) {
+      for (const lp of layoutPanes(spec, rows, measureText, true, undefined, minWidth)) {
+        expect(lp.layout.colW[0]! + lp.layout.colW[1]!).toBeGreaterThanOrEqual(bannerW - 1e-9);
+      }
+    }
+  });
+
   it("multi-pane: author-set column widths stretch in proportion, the stub stays", () => {
     const spec: TableSpec = { ...PANE, stub_width: 100, column_width: { "2026": 60, "2027": 120 } };
     const rows = paneRows(NARROW_ROWS);

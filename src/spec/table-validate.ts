@@ -28,7 +28,7 @@ function richStrings(spec: TableSpec): Array<{ where: string; value: string }> {
   if (typeof spec.stub_header === "string") add("stub_header", spec.stub_header);
   else if (spec.stub_header) for (const [k, v] of Object.entries(spec.stub_header)) add(`stub_header.${k}`, v);
   for (const e of spec.stub ?? []) if (typeof e !== "string") add("stub.label", e.label);
-  for (const rec of ["column_labels", "row_labels", "group_labels", "header_labels", "sublabels", "group_notes", "pane_titles"] as const) {
+  for (const rec of ["column_labels", "row_labels", "group_labels", "header_labels", "sublabels", "group_notes", "pane_titles", "footnotes"] as const) {
     const m = spec[rec];
     if (m) for (const [k, v] of Object.entries(m)) add(`${rec}.${k}`, v);
   }

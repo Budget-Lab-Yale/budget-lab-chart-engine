@@ -12,6 +12,10 @@
 // table-footnotes was re-recorded a third time (U5, owner waiver 2026-10-16) when its footnote
 // markers, in the cells and the list, were drawn at the live size and rise.
 //
+// Those five are narrow, so they take the export's stretched branch. table-wide is at least as wide
+// as the frame's 480 px content width, the unstretched branch every published table takes (natural
+// layout, frame max(560, width + 80)); it was recorded new, not re-recorded.
+//
 // Text measurement: the same fallback the existing table goldens get under jsdom, which has no
 // canvas. `makeMeasureText` (src/table/measure.ts) returns `s.length * fontPx * 0.6`, and the chrome's
 // `measureText` (src/embed/figure-chrome.ts) returns `text.length * 8`, when `getContext("2d")` is
@@ -25,6 +29,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { serializeExportSvg as ser } from "../helpers/export-golden";
 import { buildTableExportSvg } from "../../src/embed/export-table-png";
+import { buildTableModel } from "../../src/table/model";
+import { layoutTable, layoutOptionsFromSpec } from "../../src/table/layout";
+import { makeMeasureText } from "../../src/table/measure";
 import type { TableSpec } from "../../src/spec/table-types";
 import type { TidyRow } from "../../src/data/index";
 
@@ -121,5 +128,28 @@ describe("table export goldens", () => {
     const svg = buildTableExportSvg(spec, rows);
     expect(svg.textContent).not.toContain("-0.0");
     await expect(ser(svg)).toMatchFileSnapshot("../fixtures/export/table-negative-zero.golden.svg");
+  });
+
+  // pins: the unstretched branch. A table at least as wide as the 480 px content width is drawn at
+  // its natural width in a max(560, width + 80) frame, with banners, groups, notes and source.
+  it("a table at least as wide as the frame's content width", async () => {
+    const spec: TableSpec = {
+      title: "Ten-year revenue effects", subtitle: "Billions of dollars, by fiscal year",
+      source: "The Budget Lab", notes: "Positive values are revenue increases.", data: "d.csv",
+      stub: ["grp", { label: "row" }], header: ["window", "year"], value: "value",
+      header_labels: { first: "First five years", second: "Second five years" },
+      format: { default: { decimals: 1 } }, sign_color: true,
+    };
+    const years = Array.from({ length: 10 }, (_, i) => String(2026 + i));
+    const rows = rowsOf(["Individual", "Corporate"].flatMap((grp, g) =>
+      ["Rate changes", "Base broadeners"].flatMap((row, r) =>
+        years.map((year, i) => ({
+          grp, row, window: i < 5 ? "first" : "second", year, value: (g + 1) * (r ? -1 : 1) * (12.5 + i * 3.25),
+        })))));
+    const natural = layoutTable(buildTableModel(spec, rows), { measureText: makeMeasureText(), ...layoutOptionsFromSpec(spec) });
+    expect(natural.totalWidth).toBeGreaterThanOrEqual(480); // precondition: the unstretched branch
+    const svg = buildTableExportSvg(spec, rows);
+    expect(Number(svg.getAttribute("width"))).toBe(Math.max(560, natural.totalWidth + 80));
+    await expect(ser(svg)).toMatchFileSnapshot("../fixtures/export/table-wide.golden.svg");
   });
 });

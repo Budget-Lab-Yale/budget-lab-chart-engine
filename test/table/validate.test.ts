@@ -24,6 +24,17 @@ describe("validateTableSpec", () => {
     expect(r.valid).toBe(true);
   });
 
+  // CONFIG-SPEC "Not supported": 2-D math is rejected at validation, never silently mis-rendered.
+  // Footnote definitions are rendered as rich text (live list and PNG), so they are checked too.
+  it("rejects unsupported math in a footnote definition, naming the footnote", () => {
+    const r = validateTableSpec({ ...ok, footnotes: { a: String.raw`See \(\frac{1}{2}\).` } });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join()).toMatch(/footnotes\.a: unsupported math command\(s\) \\frac/);
+  });
+  it("accepts supported math in a footnote definition", () => {
+    expect(validateTableSpec({ ...ok, footnotes: { a: String.raw`Rate \(r_{t}\), 2024.` } }).valid).toBe(true);
+  });
+
   it("accepts group_order as a flat string[] (first tier) or string[][] (per level)", () => {
     expect(validateTableSpec({ ...ok, group_order: ["A", "B"] }).valid).toBe(true);
     expect(validateTableSpec({ ...ok, group_order: [["A"], ["B", "C"]] }).valid).toBe(true);

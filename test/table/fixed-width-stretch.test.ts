@@ -1,7 +1,8 @@
 // CONFIG-SPEC `stub_width` / `column_width`: the px widths hold when the table is at least as wide
-// as its space, and a narrower table is stretched to fill it. Measured on the live table in real
-// Chromium (table-layout:fixed, width:100% only resolve in a layout engine). The PNG side of the
-// same sentences is test/table/export-fill-width.test.ts.
+// as its space, and a narrower table is stretched to fill it; the widest-word and banner floors hold
+// on a single table and not on a live multi-pane one. Measured on the live table in real Chromium
+// (table-layout:fixed, width:100% only resolve in a layout engine). The PNG side of the same
+// sentences is test/table/export-fill-width.test.ts.
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import type { Browser } from "playwright";
@@ -28,8 +29,16 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(() => closeBrowser(browser), CLOSE_HOOK_TIMEOUT_MS);
 
-/** Rendered widths of the first data row of each pane: [stub, ...data cells]. */
-async function liveWidths(spec: TableSpec, rows: TidyRow[]): Promise<number[][]> {
+/** One rendered table: its width, each data row's cell widths and height, and each banner cell's
+ *  width beside the width of its label text. */
+interface Probed {
+  width: number;
+  rows: Array<{ widths: number[]; height: number }>;
+  banners: Array<{ width: number; label: number }>;
+}
+
+/** Mount `spec` in a CARD-wide container in Chromium and measure every table it draws. */
+async function liveTables(spec: TableSpec, rows: TidyRow[]): Promise<Probed[]> {
   const page = await browser.newPage({ viewport: { width: CARD + 40, height: 800 } });
   try {
     const liveJs = readFileSync(BUNDLE_PATH, "utf8");
@@ -45,13 +54,26 @@ async function liveWidths(spec: TableSpec, rows: TidyRow[]): Promise<number[][]>
     }, { spec, rows, width: CARD });
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     return await page.$$eval("table.tbl-table", (tables) =>
-      tables.map((t) => {
-        const tr = t.querySelector("tbody tr[data-row]")!;
-        return Array.from(tr.children).map((c) => c.getBoundingClientRect().width);
-      }));
+      tables.map((t) => ({
+        width: t.getBoundingClientRect().width,
+        rows: Array.from(t.querySelectorAll("tbody tr[data-row]")).map((tr) => ({
+          widths: Array.from(tr.children).map((c) => c.getBoundingClientRect().width),
+          height: tr.getBoundingClientRect().height,
+        })),
+        banners: Array.from(t.querySelectorAll("thead th.is-spanner > .tbl-table-spanner")).map((span) => {
+          const range = document.createRange();
+          range.selectNodeContents(span);
+          return { width: span.parentElement!.getBoundingClientRect().width, label: range.getBoundingClientRect().width };
+        }),
+      })));
   } finally {
     await page.close();
   }
+}
+
+/** Rendered widths of the first data row of each pane: [stub, ...data cells]. */
+async function liveWidths(spec: TableSpec, rows: TidyRow[]): Promise<number[][]> {
+  return (await liveTables(spec, rows)).map((t) => t.rows[0]!.widths);
 }
 
 describe.skipIf(!HAS_BROWSER)("live table: stub_width / column_width against the card width", () => {
@@ -88,6 +110,52 @@ describe.skipIf(!HAS_BROWSER)("live table: stub_width / column_width against the
       expect(stub!).toBeCloseTo(100, 0);
       for (const c of cells) expect(c).toBeCloseTo(cells[0]!, 0);
       expect(cells[0]!).toBeLessThan(120);
+    }
+  });
+
+  // CONFIG-SPEC `column_width`: the widest-word floor holds on a single table and not on a live
+  // multi-pane one, whose equal shares ignore it. The single table is the control: same spec, no pane.
+  it("a wrapping word wider than its column: a single table widens the column, a multi-pane one breaks the word", async () => {
+    const WORD = "W".repeat(120);
+    const spec: TableSpec = { ...BASE, column_width: 40, column_wrap: true };
+    const withWord = (rows: TidyRow[]) => rows.map((r) => (r.row === "A" && r.col === "c1" ? { ...r, value: WORD } : r));
+
+    // The single table's column is raised from 40 to about the word's width (~1500 px). Its row
+    // height is not asserted: this page has no Figtree, and the canvas measure falls back to a
+    // different face than the CSS stack, so the raised width can miss the drawn word by a few px.
+    const [single] = await liveTables(spec, withWord(rowsFor(["c1", "c2"])));
+    const sa = single!.rows[0]!;
+    expect(sa.widths[1]!).toBeGreaterThan(1000);
+
+    const panes = await liveTables({ ...spec, pane: "pane" }, withWord(rowsFor(["c1", "c2"], ["P", "Q"])));
+    expect(panes).toHaveLength(2);
+    for (const p of panes) {
+      const [a, b] = p.rows;
+      expect(p.width).toBeCloseTo(CARD, 0); // nothing widened past the card
+      expect(a!.widths[1]!).toBeCloseTo(a!.widths[2]!, 0); // equal shares, the word's column included
+      expect(a!.widths[1]!).toBeLessThan(sa.widths[1]! / 3); // far narrower than the word needs...
+      expect(a!.height).toBeGreaterThan(2 * b!.height); // ...so the word breaks across lines
+    }
+  });
+
+  // CONFIG-SPEC `column_width`: a banner wider than its columns widens them on a single table, and
+  // does not on a live multi-pane one.
+  it("a banner wider than its columns: a single table widens them, a multi-pane one does not", async () => {
+    const LABEL = "A banner label wider than its pair";
+    const rows = (panes: string[]): TidyRow[] => panes.flatMap((pane) => ["A", "B"].flatMap((row) =>
+      EIGHT.map((col, i) => ({ pane, row, grp: `${LABEL} ${Math.floor(i / 2) + 1}`, col, value: "1" }) as TidyRow)));
+    const spec: TableSpec = { ...BASE, header: ["grp", "col"], column_width: 40 };
+
+    const [single] = await liveTables(spec, rows([""]));
+    expect(single!.banners).toHaveLength(4);
+    for (const b of single!.banners) expect(b.width).toBeGreaterThan(b.label);
+
+    const panes = await liveTables({ ...spec, pane: "pane" }, rows(["P", "Q"]));
+    expect(panes).toHaveLength(2);
+    for (const p of panes) {
+      expect(p.width).toBeCloseTo(CARD, 0);
+      expect(p.banners).toHaveLength(4);
+      for (const b of p.banners) expect(b.width).toBeLessThan(b.label);
     }
   });
 });

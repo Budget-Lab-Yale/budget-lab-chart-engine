@@ -25,7 +25,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mountTable } from "../../src/table/mount";
 import { buildTableExportSvg, tableExportLayout } from "../../src/embed/export-table-png";
 import { buildTableModel } from "../../src/table/model";
-import type { TableLayout } from "../../src/table/layout";
+import { layoutTable, layoutOptionsFromSpec, type TableLayout } from "../../src/table/layout";
 import { makeMeasureText } from "../../src/table/measure";
 import { richWidth } from "../../src/table/richtext";
 import { tokens } from "../../src/theme/tokens";
@@ -136,10 +136,17 @@ function render(spec: TableSpec, rows: TidyRow[]): Rendered {
   const body = root.querySelector("g.tbl-table-header")!.parentNode as Element;
   // The layout the export drew from, recomputed by the export's own tableExportLayout (same model,
   // measurer and spec; none of these specs collapse a group), so a narrow table's stretch to the
-  // frame is included. Used for column edges and band rects only; the width check below proves it
-  // is the same layout.
-  const layout = tableExportLayout(buildTableModel(spec, rows), spec, makeMeasureText());
-  expect(Number(body.getAttribute("width"))).toBe(layout.totalWidth);
+  // frame is included. Used for column edges and band rects. Its width is checked against an
+  // expectation that does not use it: the natural layout's width, or the 480 px frame content width
+  // when the natural table is narrower (and the frame is max(560, width + 80) either way).
+  const model = buildTableModel(spec, rows);
+  const measure = makeMeasureText();
+  const layout = tableExportLayout(model, spec, measure);
+  const natural = layoutTable(model, { measureText: measure, ...layoutOptionsFromSpec(spec) });
+  const expectedWidth = Math.max(480, natural.totalWidth);
+  expect(Number(root.getAttribute("width"))).toBeCloseTo(Math.max(560, expectedWidth + 80), 6);
+  expect(Number(body.getAttribute("width"))).toBeCloseTo(expectedWidth, 6);
+  expect(layout.totalWidth).toBeCloseTo(expectedWidth, 6);
   expect(Number(body.getAttribute("height"))).toBe(layout.totalHeight);
   return { table, card, body, layout };
 }
