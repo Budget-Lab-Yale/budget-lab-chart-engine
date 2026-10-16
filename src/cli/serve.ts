@@ -11,13 +11,10 @@ import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { validateChart } from "../spec/validate";
-import { validateTableSpec, validateTableData } from "../spec/table-validate";
-import { loadData } from "../data/load";
+import { loadSpecAndRows } from "./load-spec";
 import { buildStandaloneHtml } from "../embed/bundle-standalone";
 import { isTableSpec } from "./table-detect";
 import type { ChartSpec } from "../spec/types";
-import type { TableSpec } from "../spec/table-types";
 
 // ---------------------------------------------------------------------------
 // findSpecs
@@ -419,70 +416,19 @@ function serveChart(
       return;
     }
 
-    const baseDir = path.dirname(absPath);
-
-    // --- Table path: mirrors runRender's table branch in src/cli/index.ts. ---
-    if (isTableSpec(spec)) {
-      const structural = validateTableSpec(spec);
-      if (!structural.valid) {
-        res.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(buildErrorPage(displayRel, structural.errors));
-        return;
-      }
-
-      let tableRows;
-      try {
-        tableRows = await loadData((spec as TableSpec).data, { baseDir });
-      } catch (err) {
-        res.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(buildErrorPage(displayRel, [`data load failed: ${(err as Error).message}`]));
-        return;
-      }
-
-      const dataResult = validateTableData(spec, tableRows);
-      if (!dataResult.valid) {
-        res.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(buildErrorPage(displayRel, dataResult.errors));
-        return;
-      }
-
-      const tableHtml = buildStandaloneHtml({
-        spec: spec as unknown as ChartSpec,
-        rows: tableRows,
-        liveBundleJs,
-        css,
-        mountFn: "mountTable",
-      });
-
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(tableHtml);
-      return;
-    }
-
-    // --- Chart path (unchanged) ---
-    let rows;
-    try {
-      rows = await loadData((spec as ChartSpec).data, { baseDir });
-    } catch (err) {
+    const loaded = await loadSpecAndRows(spec, path.dirname(absPath));
+    if (!loaded.ok) {
       res.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(buildErrorPage(displayRel, [`data load failed: ${(err as Error).message}`]));
+      res.end(buildErrorPage(displayRel, loaded.errors));
       return;
     }
 
-    // Validate
-    const result = validateChart(spec, rows);
-    if (!result.valid) {
-      res.writeHead(422, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(buildErrorPage(displayRel, result.errors));
-      return;
-    }
-
-    // Render
     const html = buildStandaloneHtml({
-      spec: spec as ChartSpec,
-      rows,
+      spec: loaded.spec as ChartSpec,
+      rows: loaded.rows,
       liveBundleJs,
       css,
+      ...(loaded.kind === "table" ? { mountFn: "mountTable" as const } : {}),
     });
 
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });

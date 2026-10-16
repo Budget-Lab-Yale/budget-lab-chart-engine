@@ -502,6 +502,18 @@ describe("GET /chart/<relpath> — validation failure", () => {
     expect(body).toContain("Validation error");
     expect(body).toContain("xAxisType");
   });
+
+  it("reports a chart spec with no data property as a schema error, like the CLI", async () => {
+    const dir = makeTempDir();
+    writeFileSync(join(dir, "chart.yaml"), "chartType: line\ntitle: No Data\nxAxisType: temporal\n");
+
+    const handler = createRequestHandler({ rootDir: dir, liveBundleJs: STUB_BUNDLE, css: STUB_CSS });
+    const { status, body } = await fakeRequest(handler, "/chart/chart.yaml");
+    expect(status).toBe(422);
+    expect(body).toContain("missing required property");
+    expect(body).toContain("data");
+    expect(body).not.toContain("Cannot use");
+  });
 });
 
 // ---------------------------------------------------------------------------
