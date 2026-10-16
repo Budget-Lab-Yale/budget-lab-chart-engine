@@ -126,13 +126,18 @@ export interface RenderOptions {
    *  ticks. Absent → this pane's own x values. */
   xTickValues?: number[];
   /** Inline title-selector color accent: an already-resolved
-   *  CSS color (run through `palette.resolveColor` by the caller) applied as the sole series'
+   *  CSS color (`palette.resolveAccentColor`) applied as the sole series'
    *  color WHEN the chart resolves to exactly one series (after `series_order` filtering). A
    *  multi-series chart ignores this — its distinct palette/`series_colors` stay untouched, because
    *  one accent colour can only stand for one line. render-live.ts recomputes this from the active
    *  title-selector option on every selection change and re-renders; export-png.ts resolves it
-   *  once from `selections` for a static export. Absent (the common case — no title_selectors, or
-   *  a multi-series chart) ⇒ byte-identical to before this field existed. */
+   *  from `selections` for each of its two render passes. Absent (the common case — no
+   *  title_selectors, or a multi-series chart) ⇒ byte-identical to before this field existed.
+   *  Validation treats the accent as painted whenever a title selector colours every option, so it
+   *  accepts a textured single series whose own colour (`series_colors`, a bar's `bar_color`) the
+   *  hatch cannot read, the accent being its only readable ground. Rendering such a spec through
+   *  `renderChart`/`renderFigure` directly needs this field, or the hatch throws; `mountChart`,
+   *  `mountFigure` and `buildExportSvg` supply it. */
   accentColor?: string;
   /** Small multiples: the FIGURE's series order, resolved once over ALL panes' rows. A series takes
    *  its palette colour from its index HERE rather than from its index in this pane's own series

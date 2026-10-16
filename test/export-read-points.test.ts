@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
 // buildExportSvg reads the caller's `opts.selections` and `opts.hooks` at fixed points: the
-// metadata pass's hooks before that pass; the selections (title, accent) after it; the hooks again
-// at each later legend draw and at the final render. Hooks run in between, so a hook that mutates
+// metadata pass's hooks and accent before that pass; the selections (title, final-pass accent)
+// after it; the hooks again at each later legend draw and at the final render. Hooks run in between, so a hook that mutates
 // caller-owned state is seen by every read after it and by none before it. These tests pin those
 // read points: a refactor that resolves a value earlier or later changes what is drawn.
 import { describe, it, expect } from "vitest";
@@ -70,6 +70,26 @@ describe("buildExportSvg — caller state mutated by a hook is read where it alw
     // Every metadata-pass tick goes to the original hook, every final-pass tick to the replacement.
     expect(originalTickCalls).toBe(6);
     expect(replacementTickCalls).toBe(6);
+  });
+
+  it("the metadata pass's accent is read before that pass, so its legend rows take it", () => {
+    // Pins the read point (A1 gave the metadata pass an accent), not a wanted result: a hook that
+    // changes the selections during the metadata pass leaves the legend keyed in the accent read
+    // before it, while the final pass draws the series in the accent read after.
+    const opts: { selections: Record<string, string>; hooks?: RenderHooks } = {
+      selections: { dimension: "sector" },
+      hooks: {
+        tickLabel: () => {
+          opts.selections.dimension = "country";
+          return null;
+        },
+      },
+    };
+    const spec = { ...ACCENT_SPEC, series_styles: { A: { dashed: true } } } as unknown as ChartSpec;
+    const svg = buildExportSvg(spec, SINGLE_ROWS, opts);
+    const swatch = [...svg.querySelectorAll("g.tbl-icon line")].find((l) => !l.closest("svg.tblchart"));
+    expect(swatch?.getAttribute("style")?.toLowerCase()).toContain("stroke:#0072b2"); // blue, before
+    expect(strokeOf(svg)).toBe("#e69f00"); // amber, after
   });
 
   it("a top-legend legendKey that replaces hooks reaches the final pass", () => {

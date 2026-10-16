@@ -27,9 +27,10 @@ interface Ground {
 /** Every colour the title-selector accent can take (spec/title.ts `resolveActiveOptionColor`): the
  *  first selector, in key order, whose active option resolves a colour supplies it, an option's
  *  colour being its own `color`, else its `series_colors` entry by label or id. Once a selector
- *  colours every one of its options, no later selector is ever reached, so collection stops there. */
-function accentGrounds(spec: ChartSpec): Array<{ where: string; value: string }> {
-  const out: Array<{ where: string; value: string }> = [];
+ *  colours every one of its options, no later selector is ever reached, so collection stops there,
+ *  and the accent is present under every selection (`always`). */
+function accentGrounds(spec: ChartSpec): { grounds: Paint[]; always: boolean } {
+  const out: Paint[] = [];
   for (const [key, selector] of Object.entries(spec.title_selectors ?? {})) {
     let everyOptionColoured = (selector.options ?? []).length > 0;
     (selector.options ?? []).forEach((o, i) => {
@@ -42,9 +43,15 @@ function accentGrounds(spec: ChartSpec): Array<{ where: string; value: string }>
       const where = o.color != null ? `title_selectors.${key}.options[${i}].color` : `series_colors[${JSON.stringify(name)}]`;
       out.push({ where, value: color });
     });
-    if (everyOptionColoured) break;
+    if (everyOptionColoured) return { grounds: out, always: true };
   }
-  return out;
+  return { grounds: out, always: false };
+}
+
+/** The colour map of a pane holding one series (engine/pane.ts): the accent when there is one, else
+ *  the series colour. An accent present under every selection leaves the series colour unpainted. */
+function singleSeriesColorMap(accent: { grounds: Paint[]; always: boolean }, seriesColor: Paint): Paint[] {
+  return accent.always ? accent.grounds : [...accent.grounds, seriesColor];
 }
 
 /** The rows each drawn pane holds: one pane for a single chart, one per rendered facet value for
@@ -87,10 +94,10 @@ const overriding = (paint: Paint, colorMap: Paint[]): Paint[] => (paint.value ==
 function waterfallGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns): Ground[] {
   if (ownValue(spec.series_patterns, SINGLE_SERIES_KEY) === undefined) return [];
   const colors = spec.waterfall?.colors;
-  const colorMap: Paint[] = [
-    ...accentGrounds(spec),
-    { where: `series_colors[${JSON.stringify(SINGLE_SERIES_KEY)}]`, value: ownValue(spec.series_colors, SINGLE_SERIES_KEY) },
-  ];
+  const colorMap = singleSeriesColorMap(accentGrounds(spec), {
+    where: `series_colors[${JSON.stringify(SINGLE_SERIES_KEY)}]`,
+    value: ownValue(spec.series_colors, SINGLE_SERIES_KEY),
+  });
   const out: Ground[] = [];
   const push = (paint: Paint): void => {
     for (const g of overriding(paint, colorMap)) out.push({ ...g, series: SINGLE_SERIES_KEY });
@@ -127,10 +134,9 @@ function waterfallGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumn
  *  holding ONE series lets the single-series overrides in; a pane with more paints each series its
  *  own colour. An override set to `"none"` falls back to the colour map (see `overriding`).
  *  - bar (marks/bar.ts): per category, `category_colors` first. Then highlight dimming (a token).
- *    Then, on one series, the accent, else `bar_color`, else the series colour. The PNG export
- *    paints a first pass before it resolves the accent (embed/export-png.ts, the legend metadata
- *    pass), so `bar_color` / the series colour is painted there even when every selector option
- *    has a colour: it stays a ground beside the accent.
+ *    Then, on one series, the accent, else `bar_color`, else the series colour. An accent present
+ *    under every selection leaves neither painted: the PNG export's legend metadata pass takes the
+ *    accent too (embed/export-png.ts; before A1 was fixed it did not, and painted them).
  *  - histogram (marks/histogram.ts): highlight dimming; else, on one series, `bar_color` if set;
  *    else the accent (one series) and the series colour.
  *  - stacked: a `barStack.mono` stack paints tonal tiers, never an authored colour. Otherwise the
@@ -146,7 +152,7 @@ function seriesGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns):
       if (ownValue(spec.series_patterns, series) === undefined) continue;
       const dimmed = !!spec.highlightSeries?.length && !spec.highlightSeries.includes(series);
       const seriesColor: Paint = { where: `series_colors[${JSON.stringify(series)}]`, value: ownValue(spec.series_colors, series) };
-      const colorMap: Paint[] = [...(single ? accent : []), seriesColor];
+      const colorMap: Paint[] = single ? singleSeriesColorMap(accent, seriesColor) : [seriesColor];
       const push = (...gs: Paint[]): void => {
         for (const g of gs) out.push({ ...g, series });
       };
@@ -165,9 +171,11 @@ function seriesGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns):
           }
           const uncovered = cats.some((cat) => ownValue(spec.category_colors, cat) === undefined);
           if (uncovered && !dimmed) {
-            push(...accent);
-            if (spec.bar_color) pushOverride(barColor);
-            else push(seriesColor);
+            push(...accent.grounds);
+            if (!accent.always) {
+              if (spec.bar_color) pushOverride(barColor);
+              else push(seriesColor);
+            }
           }
           break;
         }

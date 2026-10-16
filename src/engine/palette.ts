@@ -6,6 +6,8 @@
 // sync-theme.mjs from each hue's tonal scale — see theme/tokens.ts.
 import { tokens } from "../theme/tokens";
 import { TBL_COLORS, isPaletteName } from "../spec/color-ref";
+import { resolveActiveOptionColor } from "../spec/title";
+import type { ChartSpec } from "../spec/types";
 import { d3 } from "./vendor";
 
 export { TBL_COLORS };
@@ -36,6 +38,20 @@ export function tblColorScale(n: number): string[] {
 export function resolveColor(value: string | undefined): string | undefined {
   if (!value) return value;
   return isPaletteName(value) ? TBL_COLORS[value] : value;
+}
+
+/** The title-selector accent (`RenderOptions.accentColor`) for `selections`: the active option's
+ *  colour (spec/title.ts `resolveActiveOptionColor`), palette-resolved, or `undefined` when no
+ *  selector resolves one. `selections` must be fully resolved (`resolveSelections`). The one
+ *  resolution behind the live chart, the live figure and the PNG export; each caller decides
+ *  WHEN to call it, which is when it reads the selections. */
+export function resolveAccentColor(
+  spec: Pick<ChartSpec, "title_selectors" | "series_colors">,
+  selections: Record<string, string>,
+): string | undefined {
+  if (!spec.title_selectors) return undefined;
+  const raw = resolveActiveOptionColor(spec.title_selectors, selections, spec.series_colors);
+  return raw ? resolveColor(raw) : undefined;
 }
 
 /** `resolveColor` with a default: the shape almost every caller wants, since a color ref is

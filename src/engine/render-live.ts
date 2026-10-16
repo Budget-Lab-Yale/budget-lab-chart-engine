@@ -16,7 +16,7 @@ import {
   legendInRightColumn,
   resolveLegendPosition,
 } from "./legend-layout.js";
-import { resolveActiveOptionColor, resolveSelections } from "../spec/title.js";
+import { resolveSelections } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
@@ -29,7 +29,7 @@ import { renderFigure, horizontalBarChartHeight, figurePaneHeight, growsWithRows
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./hover-classes.js";
-import { resolveColor } from "./palette.js";
+import { resolveAccentColor } from "./palette.js";
 import { resolveTooltipIcons } from "./icon.js";
 import type { HighlightPillsHandle, BandHoverCtx, HoverDetach } from "./crosshair.js";
 import { renderSourceLine } from "./source-line.js";
@@ -240,6 +240,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // assignment has already run); `draw()` itself recomputes the accent color from the live
   // `selections` on every call, so a selection change picks it up on the very next redraw.
   let requestAccentRedraw: (() => void) | undefined;
+  // The accent for the live `selections` (palette.resolveAccentColor). renderChart only applies it
+  // when the chart resolves to exactly one series (engine/index.ts) — a multi-series chart's
+  // palette/series_colors stay untouched.
+  const currentAccent = (): string | undefined => resolveAccentColor(spec, selections);
 
   // Header: eyebrow above a title row (title left, logo baseline-aligned top-right); subtitle
   // below. Shared with the figure card via buildFigureHeader so the two never diverge.
@@ -337,14 +341,8 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // synchronously. Drawing on would wire fresh hover onto a disposed mount.
     if (life.disposed) return;
 
-    // Color accent feed: resolve the active title-selector option's color (raw
-    // ColorRef → engine/palette.resolveColor), fresh on every draw() so a selection change picks
-    // it up immediately. renderChart only applies it when the chart resolves to exactly one
-    // series (engine/index.ts) — a multi-series chart's palette/series_colors stay untouched.
-    const rawAccent = spec.title_selectors
-      ? resolveActiveOptionColor(spec.title_selectors, selections, spec.series_colors)
-      : undefined;
-    const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
+    // Fresh on every draw() so a selection change picks it up immediately.
+    const accentColor = currentAccent();
 
     // Spec §5.4: re-resolved on every width-driven redraw, on the width actually drawn (`target` —
     // beside a right legend that is the chart column, not the card).
@@ -631,11 +629,16 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let prelimShapeRows = 0;
   try {
     const prelimHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
+    // The accent too, as draw() passes it: without it a single series is painted its base colour,
+    // which under a texture can be one the engine cannot read (validation accepts it wherever the
+    // accent is always painted over it), and the throw would leave the legend placed with no rows.
+    const prelimAccent = currentAccent();
     const prelim = renderChart(spec, rows, {
       width: initialCardWidth,
       height,
       ...(heightFromModel ? { heightFromModel: true } : {}),
       hooks: prelimHooks,
+      ...(prelimAccent ? { accentColor: prelimAccent } : {}),
     });
     prelimLegendItems = prelim.legendItems ?? [];
     prelimShapeRows = prelim.shapeLegendItems?.length ?? 0;
@@ -925,10 +928,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     // active option's color. renderFigure forwards accentColor to each pane's renderChart, which
     // applies it to single/no-series bars (category_colors still overrides; multi-series unchanged).
     // Gated on a resolvable colored option → figures without one pass nothing and stay byte-identical.
-    const rawAccent = spec.title_selectors
-      ? resolveActiveOptionColor(spec.title_selectors, selections, spec.series_colors)
-      : undefined;
-    const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
+    const accentColor = resolveAccentColor(spec, selections);
     let fig: FigureRenderResult;
     try {
       fig = useGridWidth

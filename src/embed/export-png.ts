@@ -3,7 +3,7 @@
 
 import type { ChartSpec } from "../spec/types.js";
 import type { RenderHooks } from "../spec/hooks.js";
-import { resolveActiveOptionColor, resolveSelections, resolveTitleText } from "../spec/title.js";
+import { resolveSelections, resolveTitleText } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
 import { renderChart, renderFigure } from "../engine/index.js";
 import { normalizeSpec } from "../engine/util.js";
@@ -11,7 +11,7 @@ import type { FigureRenderResult, LegendItem } from "../engine/index.js";
 import { horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "../engine/figure.js";
 import { timelineHeight, timelineExportFrame } from "../engine/marks/timeline.js";
 import { treemapHeight } from "../engine/marks/treemap.js";
-import { resolveColor } from "../engine/palette.js";
+import { resolveAccentColor } from "../engine/palette.js";
 import { SHAPE_LEGEND_COLOR } from "../engine/theme.js";
 import type { SeriesHatch } from "../engine/hatch.js";
 import { ICON_BOX, iconFromLegendItem, legendRowMarkupSvg, iconSvgGroup, iconWidth } from "../engine/icon.js";
@@ -392,12 +392,14 @@ export interface ExportFrame {
  * What the two render passes of `buildExportSvg` take from the caller, resolved in two stages,
  * each at the point the export has always read it. Both passes derive their options from these
  * (`metaPassOpts`, `finalPassOpts`) rather than assembling them independently at each call, which
- * is how the metadata pass came to miss the accent (A1, below).
+ * is how the metadata pass came to miss the accent (A1, fixed: both now take it).
  *
  * The stages are separate because hooks run during the metadata pass. A formatter that changes the
  * caller's `opts.selections` or replaces `opts.hooks` there is seen by everything read after the
  * pass and by nothing read before it (test/export-read-points.test.ts). Resolving the final pass's
- * inputs early would change what is drawn.
+ * inputs early would change what is drawn. So the accent is resolved once for each pass, from the
+ * selections as they stand at that pass's read point: the same colour, unless a hook changes the
+ * selections during the metadata pass.
  *
  * Geometry that depends on the metadata pass's result (the chart width beside a right-hand legend,
  * a timeline's budget width, a framed treemap's cap, a figure's pane sizes) is in neither: it is
@@ -408,17 +410,33 @@ interface ExportMetaInput {
   width: number;
   /** The caller's hooks without `afterRender` — see `resolveExportMetaInput`. */
   metaHooks: RenderHooks | undefined;
+  /** The accent for the selections as they stand before the pass (`resolveAccent`). The legend
+   *  rows are read from this pass, so without it they key a single series in its palette colour
+   *  while the final pass draws it in the accent (A1). */
+  accentColor: string | undefined;
 }
 
 /** Read BEFORE the metadata pass. */
-function resolveExportMetaInput(opts: { hooks?: RenderHooks }, width: number): ExportMetaInput {
+function resolveExportMetaInput(
+  spec: ChartSpec,
+  opts: { selections?: Record<string, string>; hooks?: RenderHooks },
+  width: number,
+): ExportMetaInput {
   // `afterRender` is stripped for the metadata pass only: its SVG(s) are discarded (only the
   // legend/title metadata is read), so calling a mutating, potentially side-effecting hook against
   // them would double-fire it per export — once on throwaway output, once more on the SVG that's
   // actually returned. Every other hook is a pure formatter (idempotent), so passing them through
   // unchanged there is harmless.
   const metaHooks = opts.hooks?.afterRender ? { ...opts.hooks, afterRender: undefined } : opts.hooks;
-  return { width, metaHooks };
+  return { width, metaHooks, accentColor: resolveAccent(spec, opts.selections) };
+}
+
+/** The accent for the caller's `selections` (`undefined` = spec defaults): the one the live mount
+ *  shows for them, so a downloaded PNG matches what the user sees on screen. `renderFigure` (small
+ *  multiples) takes it too, so a faceted chart's per-pane marks adopt it in the export just as they
+ *  do live (see mountFigure in render-live.ts). */
+function resolveAccent(spec: ChartSpec, selections: Record<string, string> | undefined): string | undefined {
+  return resolveAccentColor(spec, selections ?? resolveSelections(spec));
 }
 
 /**
@@ -439,25 +457,19 @@ function resolveExportFinalInput(
   opts: { selections?: Record<string, string> },
 ): ExportFinalInput {
   const selections = opts.selections;
-  // Color accent feed: resolve the same accent color the live single-chart mount
-  // would show for these `selections`, so a downloaded PNG matches what the user sees on screen.
-  // `renderFigure` (small multiples) also receives it, so a faceted chart's per-pane bars adopt the
-  // active option's accent in the export just as they do live (see mountFigure in render-live.ts).
-  const effectiveSelections = selections ?? resolveSelections(spec);
-  const rawAccent = spec.title_selectors
-    ? resolveActiveOptionColor(spec.title_selectors, effectiveSelections, spec.series_colors)
-    : undefined;
-  const accentColor = rawAccent ? resolveColor(rawAccent) : undefined;
-  return { selections, accentColor };
+  return { selections, accentColor: resolveAccent(spec, selections) };
 }
 
 /** The metadata pass's options: legend items and axis titles are read from its result; its SVG is
  *  discarded. */
-function metaPassOpts(input: ExportMetaInput): { width: number; hooks: RenderHooks | undefined } {
-  // A1 — phase 5: this pass is given no `accentColor`, so the legend it reports keys a series in
-  // its palette colour while the final pass draws the series in the accent. Preserved here, not
-  // fixed: the export goldens pin it (title-selector-accent-dashed.golden.svg).
-  return { width: input.width, hooks: input.metaHooks };
+function metaPassOpts(
+  input: ExportMetaInput,
+): { width: number; hooks: RenderHooks | undefined; accentColor?: string } {
+  return {
+    width: input.width,
+    hooks: input.metaHooks,
+    ...(input.accentColor ? { accentColor: input.accentColor } : {}),
+  };
 }
 
 /** The options every final-pass render shares; the caller adds its geometry. `hooks` is the
@@ -519,7 +531,7 @@ export function buildExportSvg(
   // Pre-render to read legend items + axis title (rendered for real again below at the
   // computed height). For a figure the legend + x-axis title come from renderFigure (the
   // figure-level legend), not from a single chart.
-  const metaInput = resolveExportMetaInput(opts, FIW);
+  const metaInput = resolveExportMetaInput(spec, opts, FIW);
   const meta = isFigure
     ? renderFigure(spec, rows, metaPassOpts(metaInput))
     : renderChart(spec, rows, metaPassOpts(metaInput));

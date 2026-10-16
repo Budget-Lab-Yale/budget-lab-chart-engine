@@ -224,7 +224,7 @@ describe("export goldens — chrome paths", () => {
     await expect(ser(svg)).toMatchFileSnapshot("./fixtures/export/small-multiples.golden.svg");
   });
 
-  // pins A1 (export legend ignores selector accent: amber line, blue swatch) — expected to change in phase 5
+  // pins A1, fixed in phase 5: the legend swatch takes the selector accent the line is drawn in (amber)
   it("title_selectors accent + dashed single series", async () => {
     const spec = {
       chartType: "line", title: "Real GDP by {dimension}", xAxisType: "temporal",

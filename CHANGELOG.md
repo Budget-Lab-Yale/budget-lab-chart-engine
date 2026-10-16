@@ -73,6 +73,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   the one without the hook, as documented. The row was drawn unwrapped (a long label ran off the
   frame) and took a single row in a right-hand legend column. Markup a hook changes is still drawn
   as returned, unwrapped.
+- PNG export of a single-series chart with a colored title selector: a legend row colored from the
+  series (a dashed series' row, for one) now takes the active option's color, which the series is
+  drawn in, on a standalone chart (top or right legend) and a small-multiples figure. It kept the
+  series' own color, so the swatch did not match the line. The export's legend pass now paints a
+  single series in the accent, as its final pass and the live chart do.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
 - CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
@@ -173,6 +178,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     `series_colors` entry that `bar_color` overrides, and `bar_color` on a stacked, area or
     waterfall chart, now pass; a later title selector's color is not checked when an earlier
     selector colors every option. `validateSpec` without the data no longer makes this check.
+  - Under a texture, a single series' `series_colors` entry, and on a bar chart its `bar_color`,
+    when some title selector colors every option: an accent is then painted over it under every
+    selection. The PNG export painted it in its legend pass and threw (see **Fixed**). A
+    histogram's `bar_color` still wins over the accent, so it is still checked.
+- **PNG export legend accent** (see **Fixed**): no published figure moves. No `budget-lab-charts`
+  figure has `title_selectors`; the only specs there that do are two slide fixtures, single-series
+  lines with no legend rows. In State of Tariffs, `default-scenario/gdp-by-category` (and the same
+  figure in 38 earlier vintages) has option colors but no legend rows under either selection, so
+  there is no swatch to recolor.
 
 ## [1.18.0] - 2026-10-14
 

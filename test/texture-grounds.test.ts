@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 import { validateChart } from "../src/spec/validate";
 import { buildExportSvg } from "../src/embed/export-png";
+import { mountChart } from "../src/engine/render-live";
 import type { ChartSpec } from "../src/spec/types";
 import type { TidyRow } from "../src/data/index";
 
@@ -42,6 +43,46 @@ interface Case {
   rows: TidyRow[];
   selections?: Record<string, string>;
 }
+
+const ALWAYS = { title: "t {k}", title_selectors: { k: { options: [{ id: "a", color: "amber" }, { id: "b", color: "red" }] } } };
+/** An unreadable base colour under a selector whose every option has a colour. */
+const ALWAYS_ACCENTED: Case[] = [
+  {
+    name: "bar_color when every title-selector option has a color",
+    spec: spec({ chartType: "bar", columns: SERIES, bar_color: BAD, series_patterns: { Up: "/" }, ...ALWAYS }),
+    rows: UP,
+  },
+  {
+    name: "an unreadable series_colors entry under an always-coloured selector, with no bar_color",
+    spec: spec({ chartType: "bar", series_colors: { "": BAD }, series_patterns: { "": "/" }, ...ALWAYS }),
+    rows: ONE,
+  },
+  {
+    name: "an unreadable series_colors entry under an always-coloured selector, on a single-series stack",
+    spec: spec({ chartType: "stacked", series_colors: { "": BAD }, series_patterns: { "": "/" }, ...ALWAYS }),
+    rows: ONE,
+  },
+  {
+    name: "an unreadable series_colors entry under an always-coloured selector, on a single-series area",
+    spec: spec({ chartType: "area", xAxisType: "numeric", series_colors: { "": BAD }, series_patterns: { "": "/" }, ...ALWAYS }),
+    rows: NUMERIC,
+  },
+  {
+    name: "an unreadable series_colors entry under an always-coloured selector, on a single-series histogram",
+    spec: spec({ chartType: "histogram", xAxisType: "numeric", columns: { x: "time" }, series_colors: { "": BAD }, series_patterns: { "": "/" }, ...ALWAYS }),
+    rows: NUMERIC,
+  },
+  {
+    name: "bar_color under an always-coloured selector, in small-multiples panes that hold one series each",
+    spec: spec({ chartType: "bar", columns: { ...SERIES, facet: "f" }, small_multiples: {}, bar_color: BAD, series_patterns: { Up: "/" }, ...ALWAYS }),
+    rows: PANES,
+  },
+  {
+    name: "category_colors \"none\" over an unreadable series_colors entry, on a waterfall under an always-coloured selector",
+    spec: spec({ chartType: "waterfall", category_colors: { A: "none" }, series_colors: { "": BAD }, series_patterns: { "": "/" }, ...ALWAYS }),
+    rows: ONE,
+  },
+];
 const draw = (c: Case): void => {
   buildExportSvg(c.spec, c.rows, c.selections ? { selections: c.selections } : {});
 };
@@ -114,14 +155,10 @@ const REJECTED: Array<Case & { field: string; series: string }> = [
     rows: PANES, field: 'series_colors["Dn"]', series: "Up",
   },
   {
-    // Live, the accent always wins here. The PNG export still paints bar_color, in the pass that
-    // collects the legend before it resolves the accent, so the download throws.
-    name: "bar_color when every title-selector option has a color",
-    spec: spec({
-      chartType: "bar", columns: SERIES, bar_color: BAD, series_patterns: { Up: "/" },
-      title: "t {k}", title_selectors: { k: { options: [{ id: "a", color: "amber" }, { id: "b", color: "red" }] } },
-    }),
-    rows: UP, field: "bar_color", series: "Up",
+    // A histogram's bar_color wins over the accent, so an always-coloured selector does not cover it.
+    name: "bar_color on a single-series histogram under an always-coloured selector",
+    spec: spec({ chartType: "histogram", xAxisType: "numeric", columns: { x: "time" }, bar_color: BAD, series_patterns: { "": "/" }, ...ALWAYS }),
+    rows: NUMERIC, field: "bar_color", series: "",
   },
   {
     name: "a comma-form rgb() with fractional channels, which CSS paints and d3 cannot read",
@@ -137,13 +174,6 @@ const REJECTED: Array<Case & { field: string; series: string }> = [
     name: "an unreadable series_colors entry on a textured multi-series stack",
     spec: spec({ chartType: "stacked", columns: SERIES, series_colors: { Up: BAD }, series_patterns: { Up: "/" } }),
     rows: UP_DN, field: 'series_colors["Up"]', series: "Up",
-  },
-  {
-    // Live, the accent always wins. The PNG export's legend pass paints before the accent is
-    // resolved, so the series colour is painted there.
-    name: "an unreadable series_colors entry under an always-coloured selector, with no bar_color",
-    spec: spec({ chartType: "bar", ...SELECT("amber"), title_selectors: { k: { options: [{ id: "a", color: "red" }, { id: "b", color: "amber" }] } }, series_colors: { "": BAD }, series_patterns: { "": "/" } }),
-    rows: ONE, field: 'series_colors[""]', series: "",
   },
   {
     // `none` sends the hatch back to the series colour map, so THAT is the ground.
@@ -168,6 +198,10 @@ const REJECTED: Array<Case & { field: string; series: string }> = [
 
 /** Still valid: the unreadable colour is never painted under a texture, so the chart draws. */
 const STILL_VALID: Case[] = [
+  // A selector that colours every option always paints the accent over a single series, in the
+  // PNG export's legend pass as in its final pass and live (A1, fixed in phase 5). Before that fix
+  // the export's legend pass painted the base colour and threw, so both of these were rejected.
+  ...ALWAYS_ACCENTED,
   {
     name: "bar_color on a multi-series bar, where it is not painted",
     spec: spec({ chartType: "bar", columns: SERIES, bar_color: BAD, series_patterns: { Up: "/", Dn: "\\" } }),
@@ -338,6 +372,41 @@ describe("a \"none\" override is textured over the series colour", () => {
     for (const c of STILL_VALID.filter((v) => v.name.includes("\"none\""))) {
       const svg = buildExportSvg(c.spec, c.rows, c.selections ? { selections: c.selections } : {});
       expect(svg.querySelectorAll('pattern[id^="tblhatch-"]').length, c.name).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("an always-coloured selector paints the accent under every selection", () => {
+  const ids = ALWAYS.title_selectors.k.options.map((o) => o.id);
+  for (const c of ALWAYS_ACCENTED) {
+    it(`${c.name}: the export draws under each option (${ids.join(", ")})`, () => {
+      for (const id of ids) {
+        expect(() => buildExportSvg(c.spec, c.rows, { selections: { k: id } }), id).not.toThrow();
+      }
+    });
+  }
+});
+
+describe("an always-coloured selector over an unreadable base colour, live", () => {
+  // The live mount renders once without drawing to read the legend rows its position depends on.
+  // That pass must take the accent as well, or it throws on the unpainted base colour, its error is
+  // swallowed, and the legend is placed as if it had no rows: on top live, on the right in the PNG.
+  it("places the legend where the PNG does", () => {
+    const right = spec({
+      chartType: "bar", bar_color: BAD, series_patterns: { "": "/" }, legendPosition: "right", ...ALWAYS,
+      annotations: { yAxis: [{ y: 3, label: "Threshold", legend: true }] },
+    });
+    expect(validateChart(right, ONE).errors).toEqual([]);
+    const host = document.createElement("div");
+    document.body.append(host);
+    try {
+      mountChart(host, { spec: right, rows: ONE, width: 920 });
+      expect(host.querySelector(".figure-legend-slot--right .tbl-legend-item")?.textContent).toContain("Threshold");
+      const png = buildExportSvg(right, ONE);
+      const plot = png.querySelector("svg.tblchart")!;
+      expect(Number(plot.getAttribute("width"))).toBeLessThan(920);
+    } finally {
+      host.remove();
     }
   });
 });
