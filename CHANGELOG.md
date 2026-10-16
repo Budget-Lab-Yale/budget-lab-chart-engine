@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-10-16
+
 ### Fixed
 - Large data: a histogram of more than about 125,000 observations, or a numeric- or temporal-x
   chart whose rows (with a line chart's CI bounds) pass about 125,000 values, now renders. It threw
