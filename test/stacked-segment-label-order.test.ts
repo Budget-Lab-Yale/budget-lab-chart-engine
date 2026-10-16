@@ -113,3 +113,73 @@ describe("A7: segment labels follow barStack.stackOrder", () => {
     expectEachLabelInItsSegment(svg, false, BY_TEXT_RAW, 2);
   });
 });
+
+// CONFIG-SPEC `series_order` and `barStack.stackOrder`: a stacked bar stacks each category in the
+// order its rows appear in the data, not in `series_order`; `series_order` sets the legend order and
+// colours; `barStack.stackOrder` is the way to set the stack; without it the segment labels assume
+// rows arrive in `series_order`. This pins TODAY's behaviour, the third point a known defect the doc
+// discloses (see stack-order.ts) — fixing it moves output, so this test and CONFIG-SPEC move together.
+describe("CONFIG-SPEC series_order on a stacked bar: the stack follows data order", () => {
+  // series_order says A then B; the category's rows arrive B first.
+  const OUT_OF_ORDER = rowsOf([["2026", "B", 20], ["2026", "A", 10]]);
+  const BY_TEXT_AB: Record<string, string> = { "10": "A", "20": "B" };
+  const rectOf = (svg: Element, series: string) => {
+    const r = svg.querySelector<SVGRectElement>(`g[aria-label="bar"] rect[data-series="${series}"]`)!;
+    const y = Number(r.getAttribute("y"));
+    return { top: y, bottom: y + Number(r.getAttribute("height")) };
+  };
+
+  it("rows in data order B, A: B is drawn at the bottom, A above it, despite series_order [A, B]", () => {
+    const { svg } = renderChart(spec({ series_order: ["A", "B"] }), OUT_OF_ORDER, OPTS);
+    const a = rectOf(svg, "A");
+    const b = rectOf(svg, "B");
+    // Vertical: larger y is nearer the baseline. B sits on the baseline, A on B's top.
+    expect(b.bottom).toBeGreaterThan(a.bottom);
+    expect(a.bottom).toBeCloseTo(b.top, 6);
+  });
+
+  it("series_order still sets the legend order and the colours", () => {
+    const r = renderChart(spec({ series_order: ["A", "B"] }), OUT_OF_ORDER, OPTS);
+    expect(r.legendItems!.map((i) => i.series)).toEqual(["A", "B"]);
+    const swapped = renderChart(spec({ series_order: ["B", "A"] }), OUT_OF_ORDER, OPTS);
+    expect(swapped.legendItems!.map((i) => i.series)).toEqual(["B", "A"]);
+    expect(r.colors.get("A")).toBe(swapped.colors.get("B"));
+    expect(r.colors.get("B")).toBe(swapped.colors.get("A"));
+  });
+
+  it("without stackOrder the segment labels assume series_order: A's label lands in B's segment", () => {
+    const { svg } = renderChart(spec({ series_order: ["A", "B"] }), OUT_OF_ORDER, OPTS);
+    const homes = labelHomes(svg, false);
+    expect(homes.find((h) => h.text === "10")?.home).toEqual(["B"]);
+  });
+
+  it("barStack.stackOrder sets the stack: A at the bottom, every label in its own segment", () => {
+    const s = spec({ series_order: ["A", "B"], barStack: { stackOrder: ["A", "B"] } });
+    const { svg } = renderChart(s, OUT_OF_ORDER, OPTS);
+    const a = rectOf(svg, "A");
+    const b = rectOf(svg, "B");
+    expect(a.bottom).toBeGreaterThan(b.bottom);
+    expectEachLabelInItsSegment(svg, false, BY_TEXT_AB, 2);
+  });
+
+  it("barStack.stackOrder: listed series first, the rest after them in series_order, in every category", () => {
+    // Two categories whose rows arrive in different orders, neither of them series_order.
+    const rows = rowsOf([
+      ["P", "y", 20], ["P", "z", 40], ["P", "x", 10],
+      ["Q", "x", 12], ["Q", "z", 44], ["Q", "y", 22],
+    ]);
+    const s = spec({ series_order: ["x", "y", "z"], barStack: { stackOrder: ["z"] } });
+    const { svg } = renderChart(s, rows, OPTS);
+    const rects = [...svg.querySelectorAll<SVGRectElement>('g[aria-label="bar"] rect')].map((r) => ({
+      series: r.getAttribute("data-series"),
+      x: Number(r.getAttribute("x")),
+      bottom: Number(r.getAttribute("y")) + Number(r.getAttribute("height")),
+    }));
+    const columns = [...new Set(rects.map((r) => r.x))];
+    expect(columns.length).toBe(2);
+    for (const x of columns) {
+      const bottomToTop = rects.filter((r) => r.x === x).sort((a, b) => b.bottom - a.bottom).map((r) => r.series);
+      expect(bottomToTop).toEqual(["z", "x", "y"]);
+    }
+  });
+});

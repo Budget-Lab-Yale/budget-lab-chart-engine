@@ -14,7 +14,6 @@
 // engine/index.ts does not import this file, so nothing new is circular.
 import { resolveColumns } from "../spec/columns.js";
 import { rowsInSectionOrder } from "../spec/section-key.js";
-import { figurePaneValues } from "../spec/panes.js";
 import type { ChartSpec } from "../spec/types.js";
 import type { TidyRow } from "../data/index.js";
 import type { LegendItem } from "./index.js";
@@ -88,18 +87,15 @@ export function resolveLegendPosition(
     if (seriesCount >= 5) return "right";
     const cols = resolveColumns(spec, rows);
     const valueCol = cols.value;
-    // Only drawn rows count: a section that section_order leaves out, a series series_order leaves
-    // out (pane.ts scopeToSeries) and a small-multiples pane that pane_order leaves out are not
-    // drawn, so their negatives make nothing diverge.
+    // Only drawn rows count: a section that section_order leaves out and a series series_order leaves
+    // out (pane.ts scopeToSeries) are not drawn, so their negatives make nothing diverge.
+    // `pane_order` is not consulted: a small_multiples figure has only a top legend slot, so no
+    // result here takes effect on one, and a horizontal faceted stack arrives normalised to sections.
     const sectionField = cols.section;
     const seriesField = cols.series;
-    const facetField = cols.facet;
     const seriesOrder = spec.series_order?.length ? new Set(spec.series_order) : null;
-    const panes = spec.small_multiples && facetField ? new Set(figurePaneValues(spec, rows, facetField)) : null;
     const drawn = rowsInSectionOrder(rows, spec.section_order, sectionField ? (r) => r[sectionField] as string : null).filter(
-      (r) =>
-        (!seriesOrder || !seriesField || seriesOrder.has((r[seriesField] ?? "") as string)) &&
-        (!panes || panes.has(r[facetField!] as string)),
+      (r) => !seriesOrder || !seriesField || seriesOrder.has((r[seriesField] ?? "") as string),
     );
     const isDiverging = drawn.some((r) => {
       const v = typeof r._y === "number" ? r._y : Number(r[valueCol]);

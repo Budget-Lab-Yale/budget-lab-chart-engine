@@ -816,7 +816,7 @@ function legendAndRugErrors(spec: ChartSpec): string[] {
   // silently drop its block; a reversed one would draw a zero-width sliver at the floor width.
   // Indexed BEFORE the rug filter, so `annotations.bands[2]` names the entry the author wrote.
   // On a date axis `dateCoordinateErrors` has already parsed every band and shading bound against the
-  // same grammar, so only the rug's own tracks report a bad bound from here there (`parsedAbove`).
+  // same grammar, so only the rug's own tracks report a bad bound here (`parsedAbove`).
   const parsedAbove = xAxisType === "temporal" || xAxisType === "quarterly";
   const allIntervals: Array<{ where: string; from?: string; to?: string; parsedAbove: boolean }> = [
     ...bands.map((b, i) => ({ where: `annotations.bands[${i}]`, from: b.start, to: b.end, e: b, parsedAbove })),

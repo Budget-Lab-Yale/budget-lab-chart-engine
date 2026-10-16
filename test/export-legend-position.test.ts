@@ -233,10 +233,10 @@ describe("the PNG export honours the live legend position", () => {
 
 // A stacked chart is "diverging", and takes a right-hand legend, when a row it DRAWS is negative.
 // `section_order` was already honoured; `series_order` (which drops the series it does not list,
-// pane.ts scopeToSeries) and a figure's `pane_order` (which drops the panes it does not list) were
-// not, so negatives in rows the chart never draws moved its legend to the right, live and in the PNG.
+// pane.ts scopeToSeries) was not, so negatives in a series the chart never draws moved its legend to
+// the right, live and in the PNG.
 describe("the diverging test reads only the rows the chart draws", () => {
-  /** Three series over two categories; series "neg" (or pane/section "N") holds the only negatives. */
+  /** Three series over two categories; series "neg" (or section "N") holds the only negatives. */
   const rows3 = (extra: (s: string) => Record<string, string> = () => ({})): TidyRow[] =>
     rowsOf(
       ["A", "B"].flatMap((g) =>
@@ -272,16 +272,5 @@ describe("the diverging test reads only the rows the chart draws", () => {
     const spec = stackedSpec({ columns: { x: "g", value: "v", series: "s", section: "sec" }, section_order: ["P"] });
     expect(resolveLegendPosition(spec, 2, rows)).toBe("top");
     expect(resolveLegendPosition(stackedSpec({ columns: { x: "g", value: "v", series: "s", section: "sec" } }), 3, rows)).toBe("right");
-  });
-
-  it("a small-multiples pane that pane_order leaves out does not count", () => {
-    const rows = rows3((s) => ({ f: s === "neg" ? "N" : "P" }));
-    const sm = (pane_order?: string[]) =>
-      stackedSpec({
-        columns: { x: "g", value: "v", series: "s", facet: "f" },
-        small_multiples: { mode: "shared", ...(pane_order ? { pane_order } : {}) },
-      });
-    expect(resolveLegendPosition(sm(["P"]), 2, rows)).toBe("top");
-    expect(resolveLegendPosition(sm(), 3, rows)).toBe("right");
   });
 });

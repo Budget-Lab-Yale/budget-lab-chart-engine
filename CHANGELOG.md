@@ -197,11 +197,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   in the PNG. Only the minimum was anchored, so the axis stopped at the largest value. An axis that
   spans 0 or lies above it is unchanged. No published figure moves: the archive sets the field only
   to `false`.
-- Stacked charts: a negative value in a series that `series_order` leaves out, or in a
-  small-multiples pane that `pane_order` leaves out, no longer makes the chart count as diverging.
-  The chart draws neither, but the test read every row, so a stack with no negative segment on show
-  took a right-hand legend, live and in the PNG. No published figure moves: no stacked spec in the
-  archive drops rows by either field.
+- Stacked charts: a negative value in a series that `series_order` leaves out no longer makes the
+  chart count as diverging. The chart does not draw it, but the test read every row, so a stack with
+  no negative segment on show took a right-hand legend, live and in the PNG. No published figure
+  moves: no stacked spec in the archive drops rows by `series_order`.
 - PNG export of small multiples: a pane title wider than its column wraps at word boundaries
   within the column, as the live title does, and its grid row's title band grows by a line per
   extra line, so every pane in that row starts below it. The title was drawn on one line and ran
@@ -251,6 +250,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   - `columns.category` works on every chart type but `timeline` and `treemap`, not only dumbbells.
   - `MountOptions.height`: honoured by a standalone chart; ignored by timelines, treemaps,
     small-multiples figures and the PNG download.
+  - `series_order` on a stacked bar sets which series draw, the legend order and the colours, not
+    the stack: each category stacks in the order its rows appear in the data, and
+    `barStack.stackOrder` sets the stack. Without `stackOrder`, a category whose rows arrive out of
+    `series_order` can draw a segment label inside a segment it does not name (unchanged).
   - Now documented: the `waterfall` block (`colors.increase`/`decrease`/`total`, `connectors`,
     `connectorColor`), `category_order`, table `collapsible.control`, `category_colors` on
     waterfalls, the dumbbell gap label's default of 1 decimal place, and `legend` in the
@@ -260,13 +263,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - Validation is stricter, and looser where it rejected figures that render correctly. See
   **Upgrading**.
 - `validateSpec` (and `tbl-chart validate`) reports every cross-field rule a spec breaks, not only
-  the first rule's errors. The first error is the one it reported before. A field a timeline or
-  treemap does not support still ends the report there.
+  the first rule's errors, in a fixed rule order. Two cases still end the report early: a schema
+  error reports only the schema errors, and a field a timeline or treemap does not support reports
+  only those errors. Where a rule added in this release fires before an older one, the first error
+  is the new rule's: a temporal histogram with `binWidth: "fortnight"` and an `overlays[].fun`
+  reports the `binWidth` error first, where 1.18.0 reported the `fun` error.
 - CSV data that cannot be read unambiguously is an error naming its line (and, from `loadData`, the
   file or URL): a quoted field with no closing quote, which took the rest of the file as one cell;
   text after a closing quote (`"x"y`), which shifted the row's later cells; two header columns
-  with one non-blank name, of which the last silently won (blank names may repeat); and a non-empty cell past the header's last column,
-  which was dropped. A short row is still padded with empty cells. See **Upgrading**.
+  sharing a non-blank name, of which the last silently won (blank names may repeat); and a
+  non-empty cell past the header's last column, which was dropped. A short row is still padded with
+  empty cells. See **Upgrading**.
+- Requires Node 24: `engines.node` is now `>=24` (it was `>=20`), and CI runs on Node 24. See
+  **Upgrading**.
 - `tbl-chart serve` listens on `127.0.0.1` by default. It listened on every interface while
   printing a `localhost` URL, so another machine on the same network could open every spec under
   the root, data included. `--host <addr>` opts in to another address, and the printed URL is the
@@ -284,9 +293,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   on 1.18.0. No figure needs a change. The one failure, the slide pipeline's deliberate bad-input
   fixture `scripts/slides/fixtures/unknown-field/chart.yaml`, already failed.
   `budget-lab-interactives` has no specs this engine validates.
-- **Newly rejected** by `tbl-chart validate` (and `validateChart`). Each of these rendered wrongly,
-  blank, or not at all, so a spec that now fails needs fixing, not waiving. The validation changes
-  below alter no rendered output.
+- **Newly rejected** by `tbl-chart validate` (and `validateChart`). Except for table `decimals`
+  from 11 to 100 (below), each of these rendered wrongly, blank, or not at all, so a spec that now
+  fails needs fixing, not waiving. The validation changes below alter no rendered output.
   - A spec key that names a value in the data and is not in the data, on every chart type,
     histograms included, wherever the chart reads the field: the `series_*` maps,
     `highlightSeries` (bar, histogram, stacked), `series_marker` and `gap_annotation.series_a`/`series_b`
@@ -318,7 +327,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     whose one series is named, or beside a `series_colors[""]`; `category_colors`;
     `waterfall.colors`; a title-selector option's color. These threw at render.
   - Tables: a `format` `decimals` that is not an integer from 0 to 10, in any scope (a negative or
-    over-100 value threw at render, a fraction was truncated); and an `emphasis_column` or
+    over-100 value threw at render, and a fraction was truncated; 11 to 100 rendered correctly and is
+    rejected for consistency with the chart `decimals` bound of 10); and an `emphasis_column` or
     `footnote_column` naming a column the data lacks (a typo dropped every emphasis or footnote).
   - An `overlays[].fun` function name inherited from JavaScript objects (`constructor(x)`); see
     **Fixed**.
@@ -333,6 +343,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     when some title selector colors every option: an accent is then painted over it under every
     selection. The PNG export painted it in its legend pass and threw (see **Fixed**). A
     histogram's `bar_color` still wins over the accent, so it is still checked.
+- **Node 24** (see **Changed**): `budget-lab-charts` installs the engine from its git tag and builds
+  it (`prepare`) under its CI runner's default Node, and its CI and `package.json` assume `>=20`.
+  Its CI must run Node 24 or later before it repins. Under an older Node, npm warns `EBADENGINE`
+  (an error under `engine-strict`).
 - **Stricter CSV parsing** (see **Changed**): every CSV in `budget-lab-charts` (165 files) and in
   `budget-lab-interactives` (473, of which 431 are State of Tariffs data) parses, row for row, to
   the same rows as on 1.18.0. A data file that now fails was being read wrongly; fix the file.

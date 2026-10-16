@@ -119,6 +119,20 @@ describe("A10 header_max_lines clamp", () => {
       else expect((leaf.textContent ?? "").endsWith("…")).toBe(true);
     });
   }
+
+  // CONFIG-SPEC `header_max_lines`: below 1 is "as if the field were not set", live and in the PNG.
+  it("below 1 renders exactly as the field left out", () => {
+    const { header_max_lines: _n, ...unset } = spec(LONG, 0);
+    for (const n of [0, 0.5, -3]) {
+      const s = spec(LONG, n);
+      expect(buildTableExportSvg(s, rows).outerHTML).toBe(buildTableExportSvg(unset, rows).outerHTML);
+      const a = document.createElement("div");
+      const b = document.createElement("div");
+      mountTable(a, { spec: s, rows });
+      mountTable(b, { spec: unset, rows });
+      expect(a.innerHTML).toBe(b.innerHTML);
+    }
+  });
 });
 
 describe("A10 header cells carry their leaf column", () => {

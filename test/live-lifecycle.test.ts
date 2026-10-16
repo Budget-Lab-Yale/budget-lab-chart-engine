@@ -811,6 +811,43 @@ describe("T2.8 item 5: a card at width 0 is not redrawn", () => {
     expect(host.querySelector(".figure-legend-slot .tbl-legend:not(.tbl-legend--vertical)")).toBeNull();
   });
 
+  // CHANGELOG "a hidden container (width 0, such as a collapsed tab)": a chart MOUNTED hidden, not only
+  // one hidden after it renders. jsdom's clientWidth is 0, so the mount draws at its fallback width;
+  // the observer's report of 0 must redraw nothing, and the first non-zero width must draw.
+  for (const [path, spec, rowsFor] of PATHS) {
+    it(`${path}: mounted at width 0, nothing redraws until the first non-zero width`, async () => {
+      useFakeRO();
+      const host = document.createElement("div");
+      document.body.append(host);
+      const phases: string[] = [];
+      mountChart(host, { spec, rows: rowsFor(), onRender: (c) => phases.push(c.phase) });
+      expect(host.querySelector<HTMLElement>(".figure-card")!.clientWidth, "precondition: hidden").toBe(0);
+      await Promise.resolve(); // the deferred "mount" onRender
+      const svgs = svgsOf(host);
+      const widths = svgs.map((s) => s.getAttribute("width"));
+      const before = phases.length;
+      await resizeTo(host, 0); // the observer's first report, still hidden
+      expect(phases.slice(before), "a zero-width card was redrawn").toEqual([]);
+      expect(svgsOf(host)).toEqual(svgs);
+      await resizeTo(host, 500); // shown
+      expect(phases.slice(before)).toEqual(["resize", ...(path === "standalone" ? [] : ["resize"])]);
+      expect(svgsOf(host).map((s) => s.getAttribute("width"))).not.toEqual(widths);
+      for (const s of svgsOf(host)) expect(Number(s.getAttribute("width"))).toBeLessThanOrEqual(500);
+    });
+  }
+
+  it("standalone: mounted hidden, a right legend stays on the right until shown", async () => {
+    useFakeRO();
+    const host = document.createElement("div");
+    document.body.append(host);
+    mountChart(host, { spec: { ...LINE_SPEC, legendPosition: "right" } as ChartSpec, rows: makeRows() });
+    await resizeTo(host, 0);
+    expect(host.querySelector(".figure-legend-slot--right .tbl-legend")).not.toBeNull();
+    expect(host.querySelector(".figure-legend-slot .tbl-legend:not(.tbl-legend--vertical)")).toBeNull();
+    await resizeTo(host, 900);
+    expect(host.querySelector(".figure-legend-slot--right .tbl-legend")).not.toBeNull();
+  });
+
   // Review probe P3: with no layout (clientWidth 0), the restack passed the CHART width where the
   // OUTER width belongs, and the legend column was subtracted twice.
   it("area with a right legend: a pin restacks at the same width", () => {
