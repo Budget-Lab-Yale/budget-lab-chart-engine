@@ -602,9 +602,9 @@ export interface ChartSpec {
    *  rather than a granularity auto-detect deliberately: a repin re-renders the whole archive, so
    *  changing the default would move the tooltips of every published temporal figure at once.
    *
-   *  Reaches the CARD and the coordinated cursor alike: render-live.ts passes it as `xFormat` into
-   *  `attachSecondaryLineCursor` (with `xFormatExplicit`, which is what distinguishes an author's
-   *  pattern from the adapter's axis-matching default), and the cursor draws its x echo with it on
+   *  Reaches the CARD and the coordinated cursor alike: engine/live/hover-options.ts passes it as
+   *  `xFormat` into `attachSecondaryLineCursor` (with `xFormatExplicit`, which is what distinguishes
+   *  an author's pattern from the adapter's axis-matching default), and the cursor draws its x echo with it on
    *  one line — including on a DAILY multi-pane line, where the axis ticks on whole months, no tick
    *  row exists to annotate, and the echo would otherwise be skipped. See CONFIG-SPEC.md and
    *  test/hover-claims-defaults.test.ts, which gates set-and-absent on monthly and daily panes. */

@@ -153,9 +153,9 @@ export function stackedSegmentLabelsShown(
  * on exactly the charts an author would set it on, which trades one uncoordinated behaviour for a
  * switch that ignores what it was set to.
  *
- * Called at BOTH render-live.ts pill sites (the standalone `mountChart` one and `wireFigureSvg`'s
- * per-pane one) with that site's own `pane` value. Same rule, different context — a pane really does
- * paint no segment labels, so it really does keep its pills.
+ * Called once per hover plan (engine/live/hover-options.ts buildHoverPlan, which both the standalone
+ * `mountChart` and each `wireFigureSvg` pane build) with that mount's own `pane` value. Same rule,
+ * different context — a pane really does paint no segment labels, so it really does keep its pills.
  *
  * INVARIANT: a reader must never be left with no number for a segment.
  *

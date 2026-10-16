@@ -4,14 +4,11 @@
 // RE-RENDERED at the container's width (the x-axis compresses; height stays fixed) down to a
 // minimum width, below which a horizontal scroll wrapper takes over and a sticky y-axis
 // overlay keeps the value labels pinned at the left. No viewBox/CSS scaling.
-import type { ChartSpec, TitleSelector, ValueAffixes } from "../spec/types.js";
+import type { ChartSpec, TitleSelector } from "../spec/types.js";
 import type { RenderHooks } from "../spec/hooks.js";
-import type { NetMode } from "../spec/bar-stack.js";
-import { resolveHoverMode, resolveTotalRow, hasNetDots, resolveValuePills } from "../spec/bar-stack.js";
 import { resolveColumns } from "../spec/columns.js";
 import { rowsInSectionOrder } from "../spec/section-key.js";
 import { ownValue } from "../spec/own-key.js";
-import { isHorizontalDumbbell } from "../spec/dumbbell-orientation.js";
 import {
   LEGEND_COLUMN_WIDTH,
   LEGEND_GAP,
@@ -28,129 +25,38 @@ import {
   resolveTitleText,
 } from "../spec/title.js";
 import type { TidyRow } from "../data/index.js";
-import type { PreparedRow } from "./marks/index.js";
-import { pointDodgeOffsets } from "./marks/point.js";
 import type { FigureRenderResult } from "./figure.js";
 import { renderChart } from "./index.js";
 import { resolveTimelineOrientation, timelineHeight, timelineLegendRowCount } from "./marks/timeline.js";
 import { TL_GEOM } from "./timeline-layout.js";
 import { treemapHeight } from "./marks/treemap.js";
 import { TM_GEOM } from "./treemap-layout.js";
-import { attachTreemapHover } from "./treemap-hover.js";
-import { waterfallValueDecimals } from "./scales.js";
-import { applyValueAffixes, formatNumericX, normalizeSpec } from "./util.js";
+import { normalizeSpec } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "./figure.js";
-import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
 import type { LegendHandle } from "./legend.js";
 import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./hover-classes.js";
 import { resolveColor } from "./palette.js";
-import { resolveTooltipIcons, type IconSpec } from "./icon.js";
-import {
-  attachCrosshair,
-  attachBandCrosshair,
-  attachHistogramHover,
-  attachSecondaryHistogramCursor,
-  attachSecondaryLineCursor,
-  attachSecondaryBandCursor,
-  attachCategoricalLineCrosshair,
-  attachSecondaryCategoricalLineCursor,
-  attachPointHover,
-  attachHighlightPills,
-} from "./crosshair.js";
+import { resolveTooltipIcons } from "./icon.js";
 import type { HighlightPillsHandle, BandHoverCtx, HoverDetach } from "./crosshair.js";
-import type { OverlayTooltipLine } from "./overlays.js";
-import type { BinLabelOpts, CalendarInterval } from "./histogram-label.js";
 import { renderSourceLine } from "./source-line.js";
 import { rowsToCsv } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
-import { TBL, markerSymbolForSeries } from "./theme.js";
 import { LiveLifecycle, attachCause, notify } from "./live/lifecycle.js";
+import {
+  attachPlanPills,
+  attachPrimaryHover,
+  attachSecondaryHover,
+  buildHoverPlan,
+  type CursorDriver,
+  type HoverInputs,
+} from "./live/hover-options.js";
 
-const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
-
-/** Resolve the friendly bin-label options for a histogram from its spec: the x kind, the calendar
- *  interval (only when `binWidth` is a calendar-interval NAME — count/day-count bins → null), and
- *  the optional `bin_label` unit/rounding config. */
-/** Everything the scatter card needs, derived ONCE from what the render resolved.
- *
- *  Standalone and faceted scatter used to build this twice, and the two copies disagreed about both
- *  halves: whether to name the shape (one asked the legend, which `legend: false` nulls) and which
- *  symbol a value gets (one indexed raw `spec.shape_order`, which is optional and gets filtered per
- *  pane before it becomes the domain). Each divergence was a live defect. One builder, two callers,
- *  so there is exactly one expression of each rule.
- *
- *  `symbolScale` is the domain/range handed to Plot — not the legend's view of it — and `pointOrder`
- *  is the rows that actually produced markers, which is what index-pairing requires. */
-function scatterPointHoverOptions(a: {
-  spec: ChartSpec;
-  pointOrder: PreparedRow[];
-  colors: Map<string, string>;
-  seriesLabels: Record<string, string>;
-  icons?: Map<string, IconSpec>;
-  valueAffixes: ValueAffixes;
-  symbolScale?: { domain: string[]; range: string[] } | undefined;
-  shapeIsSeries?: boolean;
-  overlayTooltips?: OverlayTooltipLine[];
-  tooltipContainer: HTMLElement;
-  chromeTooltip: boolean;
-}): Parameters<typeof attachPointHover>[1] {
-  const { spec, symbolScale } = a;
-  const hasShape = !!spec.columns?.shape;
-  return {
-    tooltipContainer: a.tooltipContainer,
-    ...(a.icons ? { icons: a.icons } : {}),
-    points: a.pointOrder.map((r) => ({
-      series: r.series,
-      shape: r._shape,
-      x: r._xn ?? 0,
-      y: r._y,
-      ...(r._pointLabel ? { pointLabel: r._pointLabel } : {}),
-    })),
-    selector: hasShape ? 'g[aria-label="dot"] path' : 'g[aria-label="dot"] circle',
-    colors: a.colors,
-    seriesLabels: a.seriesLabels,
-    shapeLabels: spec.shape_labels,
-    // The shape token names a SECOND encoding; a redundant shape===series channel is already named
-    // by the series itself. The marker still keys off `symbolScale` either way.
-    showShape: !!symbolScale?.domain.length && !a.shapeIsSeries,
-    showSeriesName: spec.tooltip_series_name !== false,
-    symbols: new Map((symbolScale?.domain ?? []).map((d, i) => [d, symbolScale!.range[i]!] as const)),
-    xLabel: spec.tooltip_x_label ?? spec.x_axis_title ?? "x",
-    yLabel: spec.tooltip_y_label ?? spec.y_axis_title ?? "Value",
-    xFormat: formatNumericX,
-    yFormat: (v: number) => formatValue(v, a.valueAffixes, spec.tooltip_decimals),
-    ...(a.overlayTooltips ? { overlays: a.overlayTooltips } : {}),
-    showTooltip: a.chromeTooltip,
-  };
-}
-
-/** `tooltip_section: true` → the card-header options every sectioned hover card takes (stack card,
- *  dumbbell; standalone and panes; a bar or stack pane under `coordinated_cursor: false`). Card
- *  only: the pills and the coordinated echo never get them. */
-function tooltipSectionOpts(spec: ChartSpec): { tooltipSection?: boolean; sectionLabels?: Record<string, string> } {
-  if (spec.tooltip_section !== true) return {};
-  return { tooltipSection: true, ...(spec.section_labels ? { sectionLabels: spec.section_labels } : {}) };
-}
-
-function histogramBinLabelOpts(spec: ChartSpec): BinLabelOpts {
-  const xType = spec.xAxisType === "temporal" ? "temporal" : "numeric";
-  const bw = spec.histogram?.binWidth;
-  const interval: CalendarInterval | null =
-    xType === "temporal" && typeof bw === "string" && (CALENDAR_INTERVALS as readonly string[]).includes(bw)
-      ? (bw as CalendarInterval)
-      : null;
-  const cfg = spec.histogram?.bin_label;
-  return {
-    xType,
-    interval,
-    ...(cfg?.unit != null ? { unit: cfg.unit } : {}),
-    ...(cfg?.unit_position != null ? { unitPosition: cfg.unit_position } : {}),
-    ...(cfg?.decimals != null ? { decimals: cfg.decimals } : {}),
-  };
-}
+// Moved to live/hover-options.ts with the rest of the hover option building; re-exported so
+// existing importers keep working.
+export { formatValue } from "./live/hover-options.js";
 
 export interface MountOptions {
   spec: ChartSpec;
@@ -413,13 +319,6 @@ function wireClickToPin(
     if (series) handle.toggle(series);
   });
   CLICK_TO_PIN_SVGS.add(svg);
-}
-
-/** Format a numeric value for tooltip display. `decimals` (default 2) lets a tooltip be more
- *  precise than the axis — e.g. 4 for small magnitudes that round to 0.00 on a 2-decimal axis. */
-export function formatValue(v: number, affixes: ValueAffixes, decimals = 2): string {
-  if (!Number.isFinite(v)) return "—";
-  return applyValueAffixes(v.toFixed(decimals), affixes);
 }
 
 // Tray-with-down-arrow glyph — inlined so the bundle stays self-contained.
@@ -689,43 +588,6 @@ function animateAreaRestack(svg: Element, oldDs: Map<string, string>): void {
   raf(step);
 }
 
-// Bar charts facet their category band whenever bar.ts puts it on fx (vertical grouped) or fy
-// (horizontal grouped, OR horizontal sectioned — any series count, since Task 16 unified single-
-// and multi-series sectioned bars onto one fy topology; see bar.ts). A stack facets only when
-// sectioned (stacked.ts: one bar per fy row; never grouped). The category-band crosshair
-// (attachBandCrosshair) reads rect geometry differently in each case: faceted charts wrap each
-// category in its own translated `<g>` (readCategoryBands/H's `isFaceted` branch); unfaceted charts
-// read raw rect x/y directly. Passing the wrong branch reads a facet-LOCAL coordinate as if it were
-// absolute, misresolving every hover past the first facet.
-function isBarCategoryFaceted(spec: ChartSpec, rows: PreparedRow[], seriesCount: number): boolean {
-  if (spec.chartType !== "bar" && spec.chartType !== "stacked") return false;
-  if (spec.chartType === "bar" && seriesCount > 1) return true;
-  return spec.orientation === "horizontal" && rows.some((r) => r._section != null);
-}
-
-// Sectioned horizontal bars render categories grouped by section (bar.ts's `bandDomain`), so the
-// bands' rendered VISUAL (fy facet) order can differ from data-encounter order. The category-band
-// crosshair maps facet rows -> categories BY INDEX, so callers must reorder their category list to
-// match before passing it in. Stable sort keeps within-section order. No-op (returns `cats`
-// unchanged, same array reference) when the chart has no section column.
-function sectionOrderedCategories(spec: ChartSpec, rows: PreparedRow[], cats: string[]): string[] {
-  const sectionCol = spec.columns?.section;
-  if (!sectionCol) return cats;
-  const sectionOf = new Map<string, string>();
-  for (const r of rows) {
-    if (r._xc && r._section != null && !sectionOf.has(r._xc)) sectionOf.set(r._xc, r._section);
-  }
-  const secOrder =
-    spec.section_order && spec.section_order.length
-      ? spec.section_order
-      : [...new Set(cats.map((c) => sectionOf.get(c) ?? ""))];
-  const rankOf = (c: string): number => {
-    const i = secOrder.indexOf(sectionOf.get(c) ?? "");
-    return i < 0 ? secOrder.length : i;
-  };
-  return [...cats].sort((a, b) => rankOf(a) - rankOf(b));
-}
-
 export function mountChart(container: HTMLElement, opts: MountOptions): () => void {
   const unique = normalizeSpec(opts.spec);
   if (unique !== opts.spec) opts = { ...opts, spec: unique };
@@ -943,20 +805,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // channels go away entirely rather than survive as a path only a lone series could reach.
     const seriesIcons = resolveTooltipIcons({ legendItems, keyRows: seriesKeyRows });
     currentSeriesNames = seriesOrder;
-    let pillDriver: ReturnType<typeof attachHighlightPills> | null = null;
-    // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
-    // so a PNG export (which re-renders from the spec) agrees with the screen. Default true (today's
-    // behaviour) when `chrome` or the key is absent.
-    const chromeTooltip = spec.chrome?.tooltip ?? true;
-    // `valueLabels.show` moves the pill DEFAULT (the numbers are already in the bars); an explicit
-    // `chrome.valuePills` still wins. `pane: false` — this is the standalone chart. See
-    // spec/bar-stack.ts resolveValuePills; wireFigureSvg's site calls the SAME helper.
-    //
-    // `segmentLabelsDropped` is the label builder's report that some segment was too thin for its
-    // in-bar number, so the pills must stay to carry it (the crosshair here is `emitOnly` — there is
-    // no tooltip behind them). It rides on `built`, i.e. THIS draw's geometry: a resize that shrinks
-    // the frame past the fit threshold re-decides it, because draw() re-runs this whole block.
-    const chromePills = resolveValuePills(spec, netMode, false, segmentLabelsDropped ?? false);
+    let pillDriver: HighlightPillsHandle | null = null;
     const onHighlight = (active: Set<string>): void => {
       pillDriver?.setActive(active);
       // teardown() leaves the legend on the page; a disposed mount restacks and reports nothing.
@@ -1020,10 +869,6 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // click, so a consumer wiring this up will likely want to debounce.
       life.notify("tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
     };
-    // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
-    // legend (the color legend still drives hover-dim, which is independent of the crosshair).
-    const isPoint = spec.chartType === "scatter" || spec.chartType === "dotplot";
-
     // Native px — no makeResponsive/viewBox: the SVG keeps its exact pixel width so it
     // overflows into the scroll wrapper below the floor instead of being CSS-scaled down.
     canvas.replaceChildren(svg);
@@ -1112,267 +957,44 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     currentLegendPos = legendPos;
 
-    if (spec.chartType === "timeline") {
-      // Static by design: every label is on the page, so screen and PNG agree. Legend pin/dim
-      // still works through the data-series attributes.
-    } else if (spec.chartType === "treemap") {
-      // Per-tile hover: outline + dim, and the card unless chrome.tooltip is false. That flag
-      // suppresses only the card, as on every chart type (CONFIG-SPEC `chrome.tooltip`).
-      life.addDetach(attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer }));
-    } else if (spec.chartType === "scatter") {
-      // Scatter: per-point hover (no shared-x guide — points aren't aligned on x).
-      life.addDetach(attachPointHover(svg, scatterPointHoverOptions({
-        spec,
-        pointOrder: pointOrder ?? dataInScope,
-        colors,
-        seriesLabels,
-        icons: seriesIcons,
-        valueAffixes,
-        symbolScale,
-        shapeIsSeries,
-        overlayTooltips,
-        tooltipContainer,
-        chromeTooltip,
-      })));
-    } else if (spec.chartType === "dotplot") {
-      // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
-      // value). Reuses the categorical-line crosshair — no bars required.
-      life.addDetach(attachCategoricalLineCrosshair(svg, {
-        tooltipContainer,
-        icons: seriesIcons,
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        colors,
-        seriesLabels,
-        seriesOrder,
-        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
-        categoryLabels: spec.x_labels,
-        bandHighlight: true,
-        centersFromMarks: true,
-        showTooltip: chromeTooltip,
-        tooltipHook: opts.hooks?.tooltip,
-      }));
-      if (chromePills) {
-        pillDriver = attachHighlightPills(svg, {
-          rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-          chartType: "dotplot",
-          colors,
-          seriesOrder,
-          yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
-          dodge: seriesOrder.length > 1 ? pointDodgeOffsets(seriesOrder, false) : undefined,
-        });
-      }
-    } else if (spec.chartType === "dumbbell") {
-      // Dumbbell: per-category band hover (resolve the category from the dot marks; the tooltip
-      // lists each series' value with a DOT swatch that matches the legend/chart marker — hollow
-      // ring / ink / filled). Reuses the categorical crosshair with orientation.
-      const dbMarkers = new Map(seriesOrder.map((s) => [s, ownValue(spec.series_marker, s) ?? "filled"] as const));
-      const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
-      life.addDetach(attachCategoricalLineCrosshair(svg, {
-        tooltipContainer,
-        icons: seriesIcons,
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
-        colors,
-        seriesLabels,
-        seriesOrder,
-        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
-        categoryLabels: spec.x_labels,
-        ...tooltipSectionOpts(spec),
-        bandHighlight: true,
-        centersFromMarks: true,
-        orientation: isHorizontalDumbbell(spec) ? "horizontal" : "vertical",
-        renderedFills: dbFills,
-        showTooltip: chromeTooltip,
-        tooltipHook: opts.hooks?.tooltip,
-        // Horizontal: the row strip runs under the label, which accents — as on a horizontal bar.
-        ...(isHorizontalDumbbell(spec) ? { regionFromLeftEdge: true, accentLabel: true } : {}),
-      }));
-    } else if (spec.xAxisType === "categorical" && (spec.chartType === "line" || spec.chartType === "area")) {
-      // Categorical-x LINE or AREA: resolve the category from the x-axis labels (no bars) and show
-      // a guide + tooltip. Area takes this path, not the band crosshair below, because the band
-      // crosshair resolves the category from bar rects an area chart does not draw.
-      life.addDetach(attachCategoricalLineCrosshair(svg, {
-        tooltipContainer,
-        icons: seriesIcons,
-        rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        colors,
-        seriesLabels,
-        seriesOrder,
-        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
-        categoryLabels: spec.x_labels,
-        showTooltip: chromeTooltip,
-        tooltipHook: opts.hooks?.tooltip,
-        // Stacked area: a Total row, as the temporal attachCrosshair call below.
-        ...(spec.chartType === "area" ? { showTotal: true } : {}),
-      }));
-    } else if (spec.xAxisType === "categorical") {
-      // Determine if this is a stacked chart (needs Total row) and if it uses a faceted category
-      // band (xScaleField === "fx" for vertical grouped, or `fy` for horizontal grouped/sectioned
-      // — see bar.ts / isBarCategoryFaceted above).
-      const isStacked = spec.chartType === "stacked";
-      const isFaceted = isBarCategoryFaceted(spec, dataInScope, seriesOrder.length);
-      // Waterfall: `delta` steps get a signed value pill CENTERED in the bar on hover; `total`/`skip`
-      // steps shade only (their value is the always-on running-total label). deltaCats drives that
-      // (empty for non-waterfall charts). `skip` steps render a zero-height rect in the builder, so
-      // every category still has a rect and the rect-index→category mapping stays 1:1.
-      const waterfallCursor =
-        spec.chartType === "waterfall"
-          ? {
-              deltaCats: new Set(
-                dataInScope
-                  .filter((r) => {
-                    const k = ((r._kind as string | undefined) ?? "").trim();
-                    return k !== "total" && k !== "skip";
-                  })
-                  .map((r) => r._xc as string),
-              ),
-            }
-          : undefined;
-      // Derive the ordered category list from the data rows (declaration order).
-      const catsSeen = new Set<string>();
-      const cats: string[] = [];
-      for (const r of dataInScope) {
-        const cat = r._xc;
-        if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); cats.push(cat); }
-      }
-      const orderedCats = sectionOrderedCategories(spec, dataInScope, cats);
-      const bandRows = dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) }));
-      const horizontalBar = spec.orientation === "horizontal";
-      // Waterfall: the hover delta uses the SAME precision as the always-on running-total labels
-      // (valueLabels.decimals, else the min the data needs) so the two never disagree.
-      const wfDecimals =
-        spec.chartType === "waterfall"
-          ? waterfallValueDecimals(dataInScope, spec.valueLabels?.decimals)
-          : undefined;
-      const bandYFormat = (v: number): string =>
-        formatValue(v, valueAffixes, wfDecimals ?? spec.tooltip_decimals);
-
-      // Task 17: standalone bar/stacked charts now drive the SAME coordinated-cursor primitive
-      // faceted panes use (attachSecondaryBandCursor) — full-band hover (horizontal: into the left
-      // label gutter; vertical: stopping at the baseline, matching faceted), a one-row highlight
-      // that never covers a section gap, a bolded hovered label (horizontal) / frosted category pill
-      // (vertical), and a bar-end value pill — instead of the old tooltip. `attachBandCrosshair` runs
-      // hit-test-only (emitOnly), and a locally-captured driver plays the SAME role the figure bus
-      // plays for faceted panes, minus the bus. Attach order mirrors wireFigureSvg (crosshair →
-      // highlightPills → secondaryBandCursor) so `.tbl-coord` paints above the bars.
-      // Total-dot stacks hover with the floating band tooltip (with its dot-swatch Total row),
-      // NOT the per-segment value pills — the net is what matters and pills can't show it. Every
-      // other bar/stacked chart keeps the coordinated-cursor pills (task 17). Legend-highlight
-      // pills stay in BOTH modes (a legend gesture, independent of band hover).
-      // Derived here rather than forwarded: see spec/bar-stack.ts on why only `netMode` crosses the
-      // MarkLayers → FigurePane chain. `netMode` is passed UN-DEFAULTED — undefined means "not a
-      // stacked chart", and this site also serves plain bar charts.
-      const hoverMode = resolveHoverMode(spec, netMode);
-      const useTooltip = hoverMode === "tooltip";
-      const totalRow = resolveTotalRow(spec, netMode, hoverMode);
-      let secondaryDriver: ((key: unknown, active?: boolean) => void) | null = null;
-      life.addDetach(attachBandCrosshair(svg, {
-        tooltipContainer,
-        rows: bandRows,
-        isStacked,
-        totalRow,
-        totalPosition: spec.barStack?.total?.position,
-        totalBold: spec.barStack?.total?.bold,
-        totalDivider: spec.barStack?.total?.divider,
-        isFaceted,
-        categories: orderedCats,
-        seriesLabels,
-        seriesOrder,
-        yFormat: bandYFormat,
-        categoryLabels: spec.x_labels,
-        ...tooltipSectionOpts(spec),
-        icons: seriesIcons,
-        orientation: horizontalBar ? "horizontal" : "vertical",
-        // Horizontal card hover: the same row strip + label accent as the pill hover below.
-        ...(horizontalBar ? { regionFromLeftEdge: true, accentLabel: true } : {}),
-        showTooltip: chromeTooltip,
-        tooltipHook: opts.hooks?.tooltip,
-        onHover: hoverNotifier,
-        ...(useTooltip
-          ? {}
-          : {
-              emitOnly: true,
-              onResolve: (cat: string | null) => {
-                pillDriver?.setSuppressedCategory(cat);
-                secondaryDriver?.(cat, true);
-              },
-            }),
-      }));
-      if (chromePills) {
-        pillDriver = attachHighlightPills(svg, {
-          rows: bandRows,
-          chartType: isStacked ? "stacked" : "bar",
-          isStacked,
-          isFaceted,
-          categories: orderedCats,
-          colors,
-          seriesOrder,
-          yFormat: bandYFormat,
-          horizontal: horizontalBar,
-          hasNetDots: hasNetDots(netMode),
-        });
-      }
-      if (!useTooltip) {
-        secondaryDriver = attachSecondaryBandCursor(svg, {
-          rows: bandRows,
-          isStacked,
-          isFaceted,
-          categories: orderedCats,
-          colors,
-          seriesLabels,
-          seriesOrder,
-          yFormat: bandYFormat,
-          horizontal: horizontalBar,
-          showPills: chromePills,
-          // Horizontal: shade into the left label gutter + bold the hovered row label (no pill).
-          // Vertical: shade stops at the baseline (matching faceted vertical); the x-axis category
-          // name gets its own frosted pill from attachSecondaryBandCursor's addCoordCategoryHighlight.
-          ...(horizontalBar
-            ? { regionFromLeftEdge: true, accentLabel: { font: FACETED_CAT_LABEL_PX } }
-            : {}),
-          ...(waterfallCursor ? { waterfall: waterfallCursor } : {}),
-        }) as (key: unknown, active?: boolean) => void;
-      }
-    } else if (spec.chartType === "histogram") {
-      // Histogram: continuous numeric/temporal x, but BINNED bars — resolve the bin under the
-      // cursor by x-extent (not a snapped point) and show a per-bin tooltip headed by the bin range.
-      life.addDetach(attachHistogramHover(svg, {
-        tooltipContainer,
-        rows: dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y })),
-        colors,
-        seriesLabels,
-        seriesOrder,
-        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
-        label: histogramBinLabelOpts(spec),
-        // A single-series histogram has NO legend row, so `seriesIcons`' fallback supplies the icon.
-        // Its COLOUR is not settled here: `attachHistogramHover` reads the rendered bars and
-        // recolours through `recolourIcons`, which also re-grounds a texture. Reading the palette
-        // for it gave a blue key over `bar_color: violet` bins.
-        icons: seriesIcons,
-        showTooltip: chromeTooltip,
-      }));
-    } else {
-      life.addDetach(attachCrosshair(svg, {
-        tooltipContainer,
-        rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
-        xField: "time",
-        yField: "value",
-        seriesField: "series",
-        // Set by every continuous x-adapter; a categorical chart took a branch above.
-        xParse: tooltipXParse as (v: unknown) => number,
-        xFormat: tooltipXFormat,
-        yFormat: (v) => formatValue(v, valueAffixes, spec.tooltip_decimals),
-        // ONE resolved icon per series, from the legend's own rows — which is what carries the point
-        // MARKER a line chart's key shows. Handing over channels instead is why the marker reached the
-        // legend and not the tooltip.
-        icons: seriesIcons,
-        seriesLabels,
-        seriesOrder,
-        // Stacked area: the cumulative stack height is the meaningful aggregate — show a Total row.
-        showTotal: spec.chartType === "area",
-        overlays: overlayTooltips,
-        showTooltip: chromeTooltip,
-      }));
-    }
+    // --- Hover: one plan per chart family, shared with every figure pane (live/hover-options.ts).
+    // A band chart in pills hover mode drives its own coordinated cursor: `attachBandCrosshair` runs
+    // hit-test-only (emitOnly), and the locally captured drivers below play the role the figure bus
+    // plays for panes, minus the bus — full-band hover (horizontal: into the left label gutter;
+    // vertical: stopping at the baseline), a one-row highlight that never covers a section gap, a
+    // bolded hovered label (horizontal) / frosted category pill (vertical), and a bar-end value
+    // pill. Attach order mirrors wireFigureSvg (crosshair → highlightPills → secondary cursor) so
+    // `.tbl-coord` paints above the bars. The legend's onHighlight above calls through `pillDriver`,
+    // so the pill renderer just needs to exist by the time the user interacts.
+    let secondaryDriver: CursorDriver | null = null;
+    const hover = buildHoverPlan("standalone", {
+      spec,
+      dataInScope,
+      colors,
+      seriesLabels,
+      seriesOrder,
+      valueAffixes,
+      icons: seriesIcons,
+      tooltipContainer,
+      hooks: opts.hooks,
+      tooltipXParse,
+      tooltipXFormat,
+      overlayTooltips,
+      symbolScale,
+      shapeIsSeries,
+      pointOrder,
+      netMode,
+      segmentLabelsDropped: segmentLabelsDropped ?? false,
+      treemapTiles: built.treemapTiles,
+      onHover: hoverNotifier,
+      onResolve: (cat) => {
+        pillDriver?.setSuppressedCategory(cat as string | null);
+        secondaryDriver?.(cat, true);
+      },
+    });
+    if (hover.primary) life.addDetach(attachPrimaryHover(svg, hover.primary));
+    pillDriver = attachPlanPills(svg, hover);
+    if (hover.secondary) secondaryDriver = attachSecondaryHover(svg, hover.secondary);
 
     currentOverlay?._ro?.disconnect();
     currentOverlay?.remove();
@@ -1412,14 +1034,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // TRANSPARENT full-SVG hit rect on top of the marks (pointer-events:all), so a plain
     // click lands on that overlay, not the bar — hit-test THROUGH it with
     // elementsFromPoint and find the first [data-series] mark beneath the cursor.
-    if (legendHandle && !isPoint) {
+    // Point charts (scatter / dotplot) take no click (`clickToPin: null`) — just markers + legend
+    // (the color legend still drives hover-dim, which is independent of the crosshair).
+    if (legendHandle && hover.clickToPin) {
       card.classList.add("is-selectable");
-      // Line strokes are thin: fat hit-paths on a continuous-x chart and on a categorical line or
-      // area (the pane path's rule). Bars resolve directly off the rect geometry.
-      wireClickToPin(svg, legendHandle, {
-        lineHitPaths:
-          spec.xAxisType !== "categorical" || spec.chartType === "line" || spec.chartType === "area",
-      });
+      wireClickToPin(svg, legendHandle, hover.clickToPin);
     } else {
       card.classList.remove("is-selectable");
     }
@@ -1948,480 +1567,32 @@ export function buildFigureHeader(
   };
 }
 
-/** Wire the crosshair + two-way selection onto one figure pane's mini-SVG (both modes draw one
- *  per pane). Dispatches the crosshair by `spec.xAxisType`:
- *   - continuous (line): `attachCrosshair` + the fat line hit-paths (thin strokes are hard to
- *     hit), and `resolveSeriesAtPoint` for clicks.
- *   - categorical (bar/stacked panes): `attachBandCrosshair` (mirrors mountChart's categorical
- *     branch — `isStacked`/`isFaceted`/`netMode`/`categories`/`orientation`); bar rects
- *     carry `data-series`, so clicks resolve directly with no fat hit-paths.
- *  Both modes support all chart types, so the band branch is reached for any categorical pane.
- *  When `ctx.onResolve` is set (coordinated cursor), the primary crosshair emits its resolved
- *  x-key and a secondary-cursor driver is attached + returned for the figure-level bus.
- *  `dataInScope`/tooltip/bar-metadata come from the pane (or figure) metadata. */
+/** Wire the hover + two-way selection onto one figure pane's mini-SVG (both modes draw one per
+ *  pane), from the same per-family plan mountChart's draw() builds (live/hover-options.ts; the
+ *  pane differences are listed there). Attach order: primary crosshair → click-to-pin (gated on
+ *  `handle`: nothing to pin without an interactive legend) → legend-highlight pills → coordinated
+ *  cursor. When `inputs.onResolve` is set (coordinated cursor), the primary emits its resolved key
+ *  and the secondary-cursor driver is returned for the figure-level bus. */
 function wireFigureSvg(
   svg: SVGSVGElement,
   handle: LegendHandle | null,
-  ctx: {
-    spec: ChartSpec;
-    dataInScope: PreparedRow[];
-    colors: Map<string, string>;
-    seriesLabels: Record<string, string>;
-    seriesOrder: string[];
-    valueAffixes: ValueAffixes;
-    tooltipXParse?: (v: string) => number;
-    tooltipXFormat?: (v: number) => string;
-    /** This pane's `overlays[].tooltip: true` lines (FigurePane.overlayTooltips) — forwarded into the
-     *  two attach sites below that resolve a single x (attachCrosshair, attachPointHover). Per-pane,
-     *  because `overlays[].facet` and the pane's own x-domain both decide what draws here. */
-    overlayTooltips?: OverlayTooltipLine[];
-    /** Scatter panes: THIS pane's resolved symbol scale and marker-order rows. Per-pane, because a
-     *  pane filters its shape domain to its own scope — a figure-level scale would give one value
-     *  different symbols in different panes. */
-    symbolScale?: { domain: string[]; range: string[] } | undefined;
-    shapeIsSeries?: boolean;
-    pointOrder?: PreparedRow[];
-    netMode?: NetMode;
-    /** The FIGURE's series list (FigureRenderResult.seriesOrder): the coordinated cursor's
-     *  per-series hover-dot symbols index it, as the panes' marks and the figure legend do. */
-    symbolSeries?: string[];
-    /** Series → its resolved icon, from the figure's legend rows. */
-    icons?: Map<string, IconSpec>;
-    /** Coordinated cursor: when set, this pane's crosshair emits its resolved x-key here, and a
-     *  coordinated-cursor driver is attached + returned so the figure bus can render every pane. */
-    onResolve?: (key: unknown) => void;
-    /** Legend-highlight pills: when set, the pane's value-pill handle is registered here so the
-     *  figure-level legend can fire every pane's pills on highlight, and the coordinated cursor
-     *  can suppress the hovered category's pills. */
+  inputs: HoverInputs,
+  sinks: {
+    /** Legend-highlight pills: the pane's value-pill handle is registered here so the figure-level
+     *  legend can fire every pane's pills on highlight, and the coordinated cursor can suppress the
+     *  hovered category's pills. */
     onPillDriver?: (handle: HighlightPillsHandle) => void;
-    /** Programmatic render hooks (mountFigure's `opts.hooks`) — only `tooltip` is read here,
-     *  forwarded into each pane's attachBandCrosshair/attachCategoricalLineCrosshair call so a
-     *  small-multiples figure's hook coverage matches a standalone chart's (see mountChart's
-     *  identical `tooltipHook: opts.hooks?.tooltip` forwards). */
-    hooks?: RenderHooks;
-    /** This pane facet value (FigurePane.value — the same value paneFacetValue threads into
-     *  MarkContext for the static hooks, e.g. Task 4 valueLabel). Forwarded into
-     *  TooltipHookCtx.facet at all four attach sites below (band/dumbbell/dotplot/categorical-line)
-     *  so a consumer tooltip hook can tell which pane a hover came from, on any small-multiples
-     *  chart type -- not just bar/stacked. undefined on the standalone mountChart path -- there is
-     *  no facet there. */
-    facet?: string;
-    /** MountOptions.onHover's notifier (mountFigure's closure over `card` + `opts.onHover`) —
-     *  forwarded into this pane's attachBandCrosshair call only (see BandCrosshairOptions.onHover;
-     *  render-live's `onHover` doc for the chart-type scope). undefined on chart types that don't
-     *  reach it. */
-    onHover?: (ctx: BandHoverCtx | null) => void;
-    /** MountOptions.tooltipContainer, resolved to its default in mountFigure — forwarded into
-     *  every pane's tooltip-creating attach call below (mirrors mountChart's identical
-     *  `tooltipContainer` const). */
-    tooltipContainer: HTMLElement;
     /** Receives this pane's hover detach handle (crosshair.ts `HoverDetach`); mountFigure runs every
      *  pane's before each redraw and on teardown, as mountChart does its own. */
     onHoverDetach: (detach: HoverDetach) => void;
   },
-): ((key: unknown, active?: boolean) => void) | undefined {
-  // chrome: declarative switches (spec.chrome) that turn hover chrome OFF from the spec itself —
-  // so a PNG export (which re-renders from the spec) agrees with the screen. Default true (today's
-  // behaviour) when `chrome` or the key is absent. Mirrors mountChart's identical consts.
-  const chromeTooltip = ctx.spec.chrome?.tooltip ?? true;
-  // Mirrors mountChart's site through the SAME helper, with `pane: true` — a small-multiples pane
-  // paints no segment labels, so `valueLabels.show` leaves its pills alone. Two sites computing this
-  // separately is how the faceted-histogram and faceted-line pill gaps happened.
-  //
-  // `segmentLabelsDropped: false` because a pane's label builder never runs, so it refused nothing.
-  // `pane: true` already forces the pills on by itself; this argument is not what decides it here,
-  // and it is passed explicitly (rather than defaulted) so a future pane that DID paint labels would
-  // have to come back and answer the question instead of silently inheriting "nothing was dropped".
-  const chromePills = resolveValuePills(ctx.spec, ctx.netMode, true, false);
-  // Dumbbell panes: a coordinated category cursor. Hovering a category shades that column and
-  // echoes it on every pane; the hovered pane shows the tooltip. Resolves the category from the dot
-  // marks (data-category). Only a vertical dumbbell reaches a figure: a horizontal one draws its
-  // facets as groups in one chart (facetsAsGroups).
-  if (ctx.spec.chartType === "dumbbell") {
-    const dbUseCoord = ctx.onResolve != null;
-    const dbRows = ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) }));
-    const dbMarkers = new Map(ctx.seriesOrder.map((s) => [s, ownValue(ctx.spec.series_marker, s) ?? "filled"] as const));
-    const dbFills = new Map(ctx.seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (ctx.colors.get(s) || TBL.color.blue)] as const));
-    const dbOpts = {
-      rows: dbRows,
-      colors: ctx.colors,
-      seriesLabels: ctx.seriesLabels,
-      seriesOrder: ctx.seriesOrder,
-      yFormat: (v: number) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-      categoryLabels: ctx.spec.x_labels,
-      bandHighlight: true,
-      centersFromMarks: true,
-      orientation: "vertical" as const,
-      renderedFills: dbFills,
-      markerless: true,
-    };
-    // NOT emitOnly: every pane shows its own hover TOOLTIP (dot swatches matching the legend) — the
-    // dumbbell reads values via the tooltip, not in-place pills. `onResolve` still fires (it runs
-    // before the emitOnly gate), so hovering one pane drives the coordinated band echo on the others.
-    ctx.onHoverDetach(attachCategoricalLineCrosshair(svg, {
-      tooltipContainer: ctx.tooltipContainer,
-      ...(ctx.icons ? { icons: ctx.icons } : {}),
-      ...dbOpts,
-      ...tooltipSectionOpts(ctx.spec),
-      showTooltip: chromeTooltip,
-      tooltipHook: ctx.hooks?.tooltip,
-      facet: ctx.facet,
-      ...(dbUseCoord ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
-    }));
-    // The dots carry data-series: no hit-paths.
-    if (handle) wireClickToPin(svg, handle, { lineHitPaths: false });
-    if (dbUseCoord) {
-      return attachSecondaryCategoricalLineCursor(svg, dbOpts) as (key: unknown, active?: boolean) => void;
-    }
-    return undefined;
-  }
-  // Dot-plot panes behave like the other faceted charts: a coordinated category cursor. Hovering
-  // a category shades that band + shows per-series value pills on EVERY pane (and highlights the
-  // category on the hovered pane). Mirrors the bar/line coordinated path; resolves the category
-  // from axis-label centers (points have no rects). The marker dots take each series' symbol.
-  if (ctx.spec.chartType === "dotplot") {
-    const dotUseCoord = ctx.onResolve != null;
-    // Each hover dot draws the marker of the point it sits on: that point's own shape through this
-    // pane's symbol scale. A series-keyed map was wrong whenever shape is its own column (and a
-    // shape can change between categories within one series). No shape channel: every point is a
-    // circle, and so is every dot.
-    let pointSymbols: Map<string, Map<string, string>> | undefined;
-    if (ctx.symbolScale) {
-      const scale = ctx.symbolScale;
-      const symbolOf = new Map(scale.domain.map((d, i) => [d, scale.range[i]!] as const));
-      pointSymbols = new Map();
-      for (const r of ctx.pointOrder ?? []) {
-        const sym = symbolOf.get(r._shape ?? "");
-        if (sym == null || !r._xc) continue;
-        if (!pointSymbols.has(r._xc)) pointSymbols.set(r._xc, new Map());
-        pointSymbols.get(r._xc)!.set(r.series, sym);
-      }
-    }
-    // Multi-series dot plots dodge horizontally; the coordinated dots/labels must use the same
-    // offsets so they land over the actual points (panes dodge at the pane gap).
-    const dodge = ctx.seriesOrder.length > 1 ? pointDodgeOffsets(ctx.seriesOrder, true) : undefined;
-    ctx.onHoverDetach(attachCategoricalLineCrosshair(svg, {
-      tooltipContainer: ctx.tooltipContainer,
-      ...(ctx.icons ? { icons: ctx.icons } : {}),
-      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-      colors: ctx.colors,
-      seriesLabels: ctx.seriesLabels,
-      seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-      categoryLabels: ctx.spec.x_labels,
-      bandHighlight: true,
-      centersFromMarks: true,
-      showTooltip: chromeTooltip,
-      tooltipHook: ctx.hooks?.tooltip,
-      facet: ctx.facet,
-      ...(dotUseCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
-    }));
-    if (chromePills) {
-      ctx.onPillDriver?.(
-        attachHighlightPills(svg, {
-          rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-          chartType: "dotplot",
-          colors: ctx.colors,
-          seriesOrder: ctx.seriesOrder,
-          yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-          dodge,
-        }),
-      );
-    }
-    if (dotUseCoord) {
-      return attachSecondaryCategoricalLineCursor(svg, {
-        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        colors: ctx.colors,
-        seriesLabels: ctx.seriesLabels,
-        seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        ...(pointSymbols ? { pointSymbols } : {}),
-        bandHighlight: true,
-        centersFromMarks: true,
-        dodge,
-        showPills: chromePills,
-      }) as (key: unknown, active?: boolean) => void;
-    }
-    return undefined;
-  }
-  if (ctx.spec.chartType === "scatter") {
-    ctx.onHoverDetach(attachPointHover(svg, scatterPointHoverOptions({
-      spec: ctx.spec,
-      pointOrder: ctx.pointOrder ?? ctx.dataInScope,
-      colors: ctx.colors,
-      seriesLabels: ctx.seriesLabels,
-      ...(ctx.icons ? { icons: ctx.icons } : {}),
-      valueAffixes: ctx.valueAffixes,
-      symbolScale: ctx.symbolScale,
-      shapeIsSeries: ctx.shapeIsSeries,
-      ...(ctx.overlayTooltips ? { overlayTooltips: ctx.overlayTooltips } : {}),
-      tooltipContainer: ctx.tooltipContainer,
-      chromeTooltip,
-    })));
-    return undefined;
-  }
-
-  const categorical = ctx.spec.xAxisType === "categorical";
-  // Coordinated cursor: the band crosshair resolves a CATEGORY. Every figure pane is vertical: a
-  // horizontal bar or stack draws its facets as groups in one chart (facetsAsGroups). `useCoord`
-  // gates the no-tooltip emitOnly + coordinated-renderer path.
-  const useCoord = ctx.onResolve != null;
-  // Line charts with point markers: per-series marker shape, so the coordinated hover dot can
-  // match the static marker. Keyed by the series' position in the figure's list, as the pane's
-  // symbol scale (marks/line.ts) and the figure legend are.
-  const markerSymbols = ctx.spec.points && ctx.spec.chartType === "line"
-    ? new Map(ctx.seriesOrder.map((s, i) => [s, markerSymbolForSeries(s, i, ctx.symbolSeries)] as const))
-    : undefined;
-  // The crosshair/tooltip is attached for EVERY pane regardless of whether a legend exists
-  // (single-series bar panes have no legend but still need hover tooltips). Selection (the
-  // click → legend.toggle wiring) is gated on `handle`, since there's nothing to pin without
-  // an interactive legend.
-  if (categorical && (ctx.spec.chartType === "line" || ctx.spec.chartType === "area")) {
-    // Categorical-x LINE or AREA pane: resolve the category from the x-axis labels (no bars — the
-    // band branch below reads bar rects, so an area pane there drew no card). Coordinated panes
-    // hit-test + emit only; the secondary renderer draws guide + per-series dot + value pill.
-    ctx.onHoverDetach(attachCategoricalLineCrosshair(svg, {
-      tooltipContainer: ctx.tooltipContainer,
-      ...(ctx.icons ? { icons: ctx.icons } : {}),
-      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-      colors: ctx.colors,
-      seriesLabels: ctx.seriesLabels,
-      seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-      categoryLabels: ctx.spec.x_labels,
-      showTooltip: chromeTooltip,
-      tooltipHook: ctx.hooks?.tooltip,
-      facet: ctx.facet,
-      // As mountChart's call. Reaches only a pane that hovers with a card (emitOnly builds none).
-      ...(ctx.spec.chartType === "area" ? { showTotal: true } : {}),
-      ...(useCoord ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) } : {}),
-    }));
-    // Lines are thin; fat hit-paths + tagged dots let clicks resolve the series.
-    if (handle) wireClickToPin(svg, handle, { lineHitPaths: true });
-    if (useCoord) {
-      return attachSecondaryCategoricalLineCursor(svg, {
-        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        colors: ctx.colors,
-        seriesLabels: ctx.seriesLabels,
-        seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        symbols: markerSymbols,
-        showPills: chromePills,
-      }) as (key: unknown, active?: boolean) => void;
-    }
-    return undefined;
-  }
-
-  if (categorical) {
-    // Categorical pane: band crosshair, mirroring mountChart's categorical branch.
-    const isStacked = ctx.spec.chartType === "stacked";
-    // A grouped per-pane bar IS fx-faceted within its own frame (xScaleField === "fx" in
-    // bar.ts) — see isBarCategoryFaceted above.
-    const isFaceted = isBarCategoryFaceted(ctx.spec, ctx.dataInScope, ctx.seriesOrder.length);
-    const catsSeen = new Set<string>();
-    const catsRaw: string[] = [];
-    for (const r of ctx.dataInScope) {
-      const cat = r._xc;
-      if (cat && !catsSeen.has(cat)) { catsSeen.add(cat); catsRaw.push(cat); }
-    }
-    // Sectioned horizontal bars render categories grouped by section, so the bands' VISUAL order
-    // differs from data-encounter order. The crosshair maps facet rows → categories by index, so
-    // reorder to match the rendered (section) order.
-    const cats = sectionOrderedCategories(ctx.spec, ctx.dataInScope, catsRaw);
-    // Total-dot stacks hover with the tooltip (dot-swatch Total row), never per-segment pills —
-    // matching the standalone rule. So the PILLS half of coordination is dropped for these panes,
-    // and pills never appear anywhere in a total-dot figure. The cross-pane band ECHO is
-    // independent of both, and a faceted stack exists to show the same category across panes, so
-    // these panes keep it: mirror the dumbbell branch above and pass `onResolve` WITHOUT `emitOnly`
-    // (the card survives, and the emit still fires), then give every pane an echo-only secondary
-    // cursor. `coord` keeps the pills path for every other pane kind. Issue #32: dropping
-    // coordination wholesale left a two-pane stack echoing nothing.
-    const hoverMode = resolveHoverMode(ctx.spec, ctx.netMode);
-    const useTooltip = hoverMode === "tooltip";
-    const totalRow = resolveTotalRow(ctx.spec, ctx.netMode, hoverMode);
-    const coord = useCoord && !useTooltip;
-    const echoWithCard = useCoord && useTooltip;
-    ctx.onHoverDetach(attachBandCrosshair(svg, {
-      tooltipContainer: ctx.tooltipContainer,
-      ...(ctx.icons ? { icons: ctx.icons } : {}),
-      rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
-      isStacked,
-      totalRow,
-      totalPosition: ctx.spec.barStack?.total?.position,
-      totalBold: ctx.spec.barStack?.total?.bold,
-      totalDivider: ctx.spec.barStack?.total?.divider,
-      isFaceted,
-      categories: cats,
-      seriesLabels: ctx.seriesLabels,
-      seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-      categoryLabels: ctx.spec.x_labels,
-      ...tooltipSectionOpts(ctx.spec),
-      orientation: "vertical",
-      showTooltip: chromeTooltip,
-      tooltipHook: ctx.hooks?.tooltip,
-      facet: ctx.facet,
-      onHover: ctx.onHover,
-      // Coordinated: hit-test + emit only (no tooltip/highlight); the coordinated renderer draws.
-      // `echoWithCard` emits WITHOUT `emitOnly` (`onResolve` fires before that gate), so this pane
-      // keeps its card + highlight and still drives the other panes' echo.
-      ...(coord
-        ? { emitOnly: true, onResolve: (cat: string | null) => ctx.onResolve!(cat) }
-        : echoWithCard
-          ? { onResolve: (cat: string | null) => ctx.onResolve!(cat) }
-          : {}),
-    }));
-    // Bars carry data-series on their rects → click resolves directly (no fat hit-paths).
-    if (handle) wireClickToPin(svg, handle, { lineHitPaths: false });
-    if (chromePills) {
-      const pills = attachHighlightPills(svg, {
-        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        chartType: isStacked ? "stacked" : "bar",
-        isStacked,
-        isFaceted,
-        categories: cats,
-        colors: ctx.colors,
-        seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        hasNetDots: hasNetDots(ctx.netMode),
-      });
-      // The bus suppresses the hovered category in the legend-highlight pills so they don't double
-      // up with the coordinated cursor's own per-category pill. An `echoWithCard` pane draws no
-      // such pill (the echo is a bare shade, the read-out is the card), so there is nothing to
-      // double up with and the suppression would just delete the pinned series' only value for
-      // that category — on the siblings outright, and on the hovered pane too. Register a
-      // suppression-deaf handle for these panes, matching mountChart's standalone tooltip mode,
-      // which passes no `onResolve` at all: legend-highlight pills stay in BOTH hover modes.
-      ctx.onPillDriver?.(
-        echoWithCard ? { setActive: (a) => pills.setActive(a), setSuppressedCategory: () => {} } : pills,
-      );
-    }
-    if (coord) {
-      // Waterfall (per pane): delta steps get a centered signed value pill on hover; total/skip
-      // shade only. Computed from this pane's rows so a step that is a delta in one facet and a
-      // skip in another is handled correctly (e.g. the April 2 decomposition's "Apply ηs").
-      const wfCursor =
-        ctx.spec.chartType === "waterfall"
-          ? {
-              deltaCats: new Set(
-                ctx.dataInScope
-                  .filter((r) => {
-                    const k = ((r._kind as string | undefined) ?? "").trim();
-                    return k !== "total" && k !== "skip";
-                  })
-                  .map((r) => r._xc as string),
-              ),
-            }
-          : undefined;
-      const wfDecimals = wfCursor
-        ? waterfallValueDecimals(ctx.dataInScope, ctx.spec.valueLabels?.decimals)
-        : undefined;
-      return attachSecondaryBandCursor(svg, {
-        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        isStacked,
-        isFaceted,
-        categories: cats,
-        colors: ctx.colors,
-        seriesLabels: ctx.seriesLabels,
-        seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.valueAffixes, wfDecimals ?? ctx.spec.tooltip_decimals),
-        showPills: chromePills,
-        ...(wfCursor ? { waterfall: wfCursor } : {}),
-      }) as (key: unknown, active?: boolean) => void;
-    }
-    if (echoWithCard) {
-      // Echo only: no colors/labels/formatter, because it draws no pills — just the band geometry
-      // inputs (`readCategoryBands` reads rows + the category list).
-      return attachSecondaryBandCursor(svg, {
-        rows: ctx.dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
-        isFaceted,
-        categories: cats,
-        echoOnly: true,
-      }) as (key: unknown, active?: boolean) => void;
-    }
-    return undefined;
-  }
-
-  // Histogram panes: per-bin hover (numeric/temporal x, binned bars). In SHARED small-multiples
-  // mode every pane bins to ONE set of thresholds, so hovering one pane can echo the same bin on
-  // every other pane (coordinated cursor). Per-pane mode bins each pane independently, so it stays
-  // a plain per-pane tooltip; a non-faceted histogram also has no `onResolve`.
-  if (ctx.spec.chartType === "histogram") {
-    const histCoord =
-      ctx.onResolve != null && (ctx.spec.small_multiples?.mode ?? "shared") !== "per-pane";
-    const histRows = ctx.dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y }));
-    ctx.onHoverDetach(attachHistogramHover(svg, {
-      tooltipContainer: ctx.tooltipContainer,
-      ...(ctx.icons ? { icons: ctx.icons } : {}),
-      rows: histRows,
-      colors: ctx.colors,
-      seriesLabels: ctx.seriesLabels,
-      seriesOrder: ctx.seriesOrder,
-      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-      label: histogramBinLabelOpts(ctx.spec),
-      showTooltip: chromeTooltip,
-      ...(histCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
-    }));
-    // Bins carry data-series, as bars do: no hit-paths.
-    if (handle) wireClickToPin(svg, handle, { lineHitPaths: false });
-    if (histCoord) {
-      return attachSecondaryHistogramCursor(svg, {
-        rows: histRows,
-        colors: ctx.colors,
-        seriesLabels: ctx.seriesLabels,
-        seriesOrder: ctx.seriesOrder,
-        yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-        label: histogramBinLabelOpts(ctx.spec),
-        showPills: chromePills,
-      }) as (key: unknown, active?: boolean) => void;
-    }
-    return undefined;
-  }
-
-  ctx.onHoverDetach(attachCrosshair(svg, {
-    tooltipContainer: ctx.tooltipContainer,
-    rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
-    xField: "time",
-    yField: "value",
-    seriesField: "series",
-    // Set by every continuous x-adapter; a categorical pane returned above.
-    xParse: ctx.tooltipXParse as (v: unknown) => number,
-    xFormat: ctx.tooltipXFormat,
-    yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-    ...(ctx.icons ? { icons: ctx.icons } : {}),
-    seriesLabels: ctx.seriesLabels,
-    seriesOrder: ctx.seriesOrder,
-    // As mountChart's standalone call. A coordinated pane (`emitOnly`) never builds the card, so
-    // this reaches only a pane that hovers with one: a lone pane, or `coordinated_cursor: false`.
-    showTotal: ctx.spec.chartType === "area",
-    ...(ctx.overlayTooltips ? { overlays: ctx.overlayTooltips } : {}),
-    showTooltip: chromeTooltip,
-    ...(useCoord ? { emitOnly: true, onResolve: (x: number | null) => ctx.onResolve!(x) } : {}),
-  }));
-  // Line strokes are thin; add transparent fat hit-paths so clicks near a line resolve it.
-  if (handle) wireClickToPin(svg, handle, { lineHitPaths: true });
-  if (useCoord) {
-    return attachSecondaryLineCursor(svg, {
-      rows: ctx.dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
-      xField: "time",
-      yField: "value",
-      seriesField: "series",
-      xParse: ctx.tooltipXParse as (v: unknown) => number,
-      xFormat: ctx.tooltipXFormat,
-      // `tooltipXFormat` is always a function on a temporal axis (the x-adapter defaults it to the
-      // axis-matching "%b %Y"), so the cursor cannot tell an author's format from the default and
-      // would otherwise collapse its two-line echo on every figure. The spec field is the signal.
-      xFormatExplicit: ctx.spec.tooltip_x_format != null,
-      xAxisType: ctx.spec.xAxisType,
-      yFormat: (v) => formatValue(v, ctx.valueAffixes, ctx.spec.tooltip_decimals),
-      colors: ctx.colors,
-      seriesLabels: ctx.seriesLabels,
-      seriesOrder: ctx.seriesOrder,
-      symbols: markerSymbols,
-      showPills: chromePills,
-    }) as (key: unknown, active?: boolean) => void;
-  }
-  return undefined;
+): CursorDriver | undefined {
+  const hover = buildHoverPlan("pane", inputs);
+  if (hover.primary) sinks.onHoverDetach(attachPrimaryHover(svg, hover.primary));
+  if (handle && hover.clickToPin) wireClickToPin(svg, handle, hover.clickToPin);
+  const pills = attachPlanPills(svg, hover);
+  if (pills) sinks.onPillDriver?.(pills);
+  return hover.secondary ? attachSecondaryHover(svg, hover.secondary) : undefined;
 }
 
 /**
@@ -2719,12 +1890,13 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           legendItems: fig.legendItems,
           keyRows: pane.seriesKeyRows,
         }),
-        onPillDriver: (d) => pillDrivers.push(d),
         hooks: opts.hooks,
         facet: pane.value,
         onHover: hoverNotifier,
-        onHoverDetach: (d) => life.addDetach(d),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
+      }, {
+        onPillDriver: (d) => pillDrivers.push(d),
+        onHoverDetach: (d) => life.addDetach(d),
       });
       drivers.push(driver ?? (() => {}));
     });

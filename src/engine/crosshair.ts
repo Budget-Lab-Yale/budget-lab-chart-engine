@@ -757,8 +757,8 @@ export function buildBandTooltipHtml(
     /** Where the Total row sits: "last" (default, after the series rows) or "first". */
     totalPosition?: "first" | "last";
     /** Bold the Total row. Default ON (opt-out: pass `false`) — this builder is the single
-     *  source of that default; callers (attachBandCrosshair's forward, render-live.ts's two
-     *  attachBandCrosshair call sites) pass the spec value straight through un-defaulted. */
+     *  source of that default; callers (attachBandCrosshair's forward, live/hover-options.ts's
+     *  band plan) pass the spec value straight through un-defaulted. */
     totalBold?: boolean;
     /** Rule separating the Total row from the series rows; side flips with `totalPosition` —
      *  "last" (row sits below the series rows) draws the rule ABOVE it (border-top), "first" (row
@@ -831,7 +831,7 @@ export function buildBandTooltipHtml(
       "tbl-tooltip-row",
       "tbl-tooltip-row--total",
       // Default ON (opt-out): (opts.totalBold ?? true). The builder is the single source of
-      // this default — render-live.ts passes spec.barStack?.total?.bold/.divider straight
+      // this default — live/hover-options.ts passes spec.barStack?.total?.bold/.divider straight
       // through undefined-when-unset, and an explicit `false` in the spec still wins here.
       ...((opts.totalBold ?? true) ? ["tbl-tooltip-row--total-bold"] : []),
       ...((opts.totalDivider ?? true)
