@@ -172,6 +172,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   line was drawn into the next row or the tier below with no room reserved. A banner centres its
   lines; the corner grows upward from the leaf-label baseline, as the leaf labels do. Text without
   a `\\` lays out as before. See **Upgrading**.
+- Table PNG export, banner flanking rules: a rule never runs backwards or into its label. The rules
+  were placed by a 7 px-per-character estimate over the whole label (a `\\` label included), which
+  in Figtree overshoots, so where a banner's cell is about as wide as its label the rules were drawn
+  backwards (x1 > x2), out past the cell or across the label. Where that estimate leaves no room,
+  or falls short of the label, or the label has a `\\`, the rules now flank the label's measured
+  width (its widest line), and a banner with no room beside its label has no rules. Every other
+  banner keeps exactly the rules it had. See **Upgrading**.
 - Tables with both `stub_wrap` and `stub_nowrap`: `stub_nowrap` wins in the layout as it did in the
   live cell, so the stub is sized to its longest label and the PNG keeps each label on one line.
   The layout wrapped the stub, so the PNG wrapped labels the live table kept on one line, overrunning
@@ -405,12 +412,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `plot_federal_funds` charts, where a scenario that leaves the first variable unchanged blanks its
   Scenario series and the second variable's Scenario line takes the first's tag.
 - **Table export, line breaks and signed zero** (see **Fixed**). In `budget-lab-charts` only PNG
-  downloads change; no archive table uses what the live-table fixes touch. One published figure
-  moves: `articles/2026/10/revenue-potential-top-taxes/income-above-top-thresholds`, whose banners
-  "Income above \\ threshold" and "After-tax income \\ above threshold" have a line break. The
-  banner row is 15 px taller, so the figure is 15 px taller and both banner lines sit above the
-  "$ billions" / "% of GDP" row (the second line was drawn 13 px above it, inside that row). The
-  banner rules are placed as before, moved down with the taller row.
+  downloads change; no archive table uses what the live-table fixes touch. Five published figures
+  move:
+  - `articles/2026/10/revenue-potential-top-taxes/income-above-top-thresholds`: its banners
+    "Income above \\ threshold" and "After-tax income \\ above threshold" have a line break. The
+    banner row is 15 px taller, so the figure is 15 px taller and both banner lines sit above the
+    "$ billions" / "% of GDP" row (the second line was drawn 13 px above it, inside that row).
+    Their rules ran backwards across the first line: "Income above threshold" now has short rules
+    beside its wider line, and "After-tax income above threshold", whose cell is exactly as wide
+    as its label, has none.
+  - `articles/2026/07/ai-fiscal/key-parameters` and `key-parameters-symbols`: the banner "AI
+    Adoption Scenarios via Karger et al. (2026)" fills its cell, and its rules were drawn backwards,
+    sticking out past the cell into the stub column and the right margin. It has no rules now.
+  - `articles/2026/07/tariff-model-update-july2026/headline-results` and `update-decomposition`:
+    the "10-year revenue ($B)" banner's rules were drawn backwards (about 9 px); they are now about
+    3 px long, beside the label. Their other banners are unchanged.
   No other `budget-lab-charts` table changes: none has `footnote_column` or `footnotes`, a
   `stub_wrap`/`stub_nowrap` pair, a header longer than its `header_max_lines`, a value that rounds
   to zero under `sign_color`, a `\\` outside its banners, or an upper header tier that the fix
@@ -418,7 +434,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   that print "-0.0%" or "-0.00 pp" and the two in `alternative-scenarios/etr-by-country` (and
   earlier vintages) lose the minus, on screen and in the PNG; the 2026-02-21 and 2026-03-09
   `summary-statistics` banners with a `\\` (such as "Policy Before\\SCOTUS Ruling") get a
-  taller banner row.
+  taller banner row and measured rules. Its banners without a break were not rendered for this
+  check; any whose rules are drawn backwards today change as above.
 
 ## [1.18.0] - 2026-10-14
 

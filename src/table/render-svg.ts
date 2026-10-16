@@ -278,9 +278,13 @@ export function renderTableSvg(
         // to the cell's edges, to show the columns they govern. Disabled when spanner_rules:false.
         if (cell.colSpan > 1 && spannerRules) {
           const ruleY = rect.y + rect.h / 2;
-          const halfText = measureish(richToPlain(cell.text)) / 2 + PAD_X;
-          headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
-          headerG.appendChild(spannerLine(cx + halfText, ruleY, rect.x + rect.w - PAD_X, ruleY));
+          const { half: halfText, minRule } = bannerRuleHalf(cell.text, rect, measure);
+          // Never inverted: with no room beside the label (the banner fit can size a cell to exactly
+          // label + gaps) there is no rule; a live flex rule with no room shrinks to nothing too.
+          if (rect.w / 2 - halfText - PAD_X >= minRule) {
+            headerG.appendChild(spannerLine(rect.x + PAD_X, ruleY, cx - halfText, ruleY));
+            headerG.appendChild(spannerLine(cx + halfText, ruleY, rect.x + rect.w - PAD_X, ruleY));
+          }
         }
       }
     }
@@ -496,8 +500,21 @@ function alignedX(r: CellRect, align: ColumnAlign): { x: number; anchor: "start"
   return { x: r.x + r.w / 2, anchor: "middle" };
 }
 
-// Deterministic rough text width for placing the flanking rules on a banner cell (no canvas
-// needed; matches the test's measureText heuristic of ~7px/char).
-function measureish(s: string): number {
-  return s.length * 7;
+// Shortest flanking rule worth drawing (px); anything shorter is dropped rather than drawn as a dot.
+const MIN_RULE = 1;
+
+/** Half the width the flanking rules leave clear around a banner label (label half-width + gap).
+ *
+ *  The rules were placed by a 7 px/char estimate over the raw string. That estimate is kept where it
+ *  draws a sound rule, so those banners are unchanged; the label's measured width is used instead
+ *  when the label has a `\\` break (the estimate counted every line, and the break token), or
+ *  when the estimate is wrong enough to break the rule: it leaves the rule no room (the rule would
+ *  run backwards, x1 > x2) or it puts the rule's inner end inside the label (it would cross the text). */
+function bannerRuleHalf(label: string, rect: CellRect, measure: Measure): { half: number; minRule: number } {
+  const measured = richWidth(label, HEADER_FONT, 700, measure);
+  const estimatedHalf = (richToPlain(label).length * 7) / 2 + PAD_X;
+  const room = rect.w / 2 - PAD_X; // from the cell centre to the rule's outer end
+  const estimateSound = !hasBreak(label) && estimatedHalf <= room && estimatedHalf >= measured / 2;
+  // A sound estimate draws exactly the rule it always drew; a measured one drops a sub-pixel rule.
+  return estimateSound ? { half: estimatedHalf, minRule: 0 } : { half: measured / 2 + PAD_X, minRule: MIN_RULE };
 }

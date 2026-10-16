@@ -2,10 +2,11 @@
 //
 // Finding A10 (2026-10-15 debt review): table PNG-export geometry. Each block here pins one fix with
 // a check that fails on the pre-fix code. The live/PNG comparison itself is test/table/parity.test.ts;
-// these are the unit-level facts behind it (layout heights, clamp lines, header columns).
+// these are the unit-level facts behind it (layout heights, clamp lines, header columns, rule ends).
 import { describe, it, expect } from "vitest";
 import { buildTableModel } from "../../src/table/model";
 import { layoutTable, layoutOptionsFromSpec } from "../../src/table/layout";
+import { renderTableSvg } from "../../src/table/render-svg";
 import { mountTable } from "../../src/table/mount";
 import { buildTableExportSvg } from "../../src/embed/export-table-png";
 import type { TableSpec } from "../../src/spec/table-types";
@@ -25,6 +26,75 @@ function bannerTable(banner: string, extra: Partial<TableSpec> = {}) {
     ["2026", "2027"].map((per, j) => ({ row, opt: "Option", per, value: 10 + i + j }))));
   return { spec: { ...spec, header_labels: { Option: banner, ...(extra.header_labels ?? {}) } }, rows };
 }
+
+/** The flanking rules of the (only) banner, plus the banner's rect. */
+function bannerRules(spec: TableSpec, rows: TidyRow[], perChar: number) {
+  const measure = (s: string) => s.length * perChar;
+  const model = buildTableModel(spec, rows);
+  const layout = layoutTable(model, { measureText: measure, ...layoutOptionsFromSpec(spec) });
+  const svg = renderTableSvg(model, layout, { document, spec, measure });
+  const rect = layout.header[0]![0]!.rect;
+  const lines = Array.from(svg.querySelectorAll("g.tbl-table-header > line"))
+    .filter((l) => l.getAttribute("y1") === String(rect.y + rect.h / 2))
+    .map((l) => ({ x1: Number(l.getAttribute("x1")), x2: Number(l.getAttribute("x2")) }));
+  return { rect, lines, layout };
+}
+
+describe("A10 banner flanking rules", () => {
+  it("the estimate leaves no room (a narrow font): the rules are measured and run forwards", () => {
+    // At 5 px/char a 38-char label is 190 px in a 240 px banner. The old 7 px/char estimate (266 px)
+    // put each rule's inner end past its outer end (x1 > x2), across the label.
+    const label = "Policy option with a long banner label";
+    const t = bannerTable(label);
+    const { rect, lines } = bannerRules({ ...t.spec, column_width: 120 }, t.rows, 5);
+    expect(lines).toHaveLength(2);
+    for (const l of lines) expect(l.x2).toBeGreaterThan(l.x1);
+    const cx = rect.x + rect.w / 2;
+    for (const l of lines) {
+      // Clear of the measured label (half-width 2.5 px/char) by the 8 px gap.
+      const nearEnd = l.x2 <= cx ? l.x2 : l.x1;
+      expect(Math.abs(nearEnd - cx)).toBeGreaterThanOrEqual(label.length * 2.5 + 8 - 1e-9);
+    }
+  });
+
+  it("with no room beside the label at all, no rule is drawn rather than an inverted one", () => {
+    const label = "Policy option with a long banner label";
+    const t = bannerTable(label);
+    const { lines } = bannerRules(t.spec, t.rows, 5);
+    // The banner fit made the cell exactly label + gaps + padding: nothing is left for a rule.
+    expect(lines).toEqual([]);
+  });
+
+  it("a wide font (the estimate is narrower than the label): the rules stop short of the text", () => {
+    const label = "WIDE BANNER";
+    const t = bannerTable(label);
+    // Widen the columns so there is room for rules, then measure at 10 px/char (> the 7 px estimate).
+    const { rect, lines } = bannerRules({ ...t.spec, column_width: 150 }, t.rows, 10);
+    expect(lines).toHaveLength(2);
+    const cx = rect.x + rect.w / 2;
+    expect(lines[0]!.x2).toBeCloseTo(cx - (label.length * 10) / 2 - 8);
+    expect(lines[1]!.x1).toBeCloseTo(cx + (label.length * 10) / 2 + 8);
+  });
+
+  it("a `\\\\` label: the rules flank its widest line, not the whole string", () => {
+    const label = `Income above ${BS2} threshold`; // widest line "Income above " (13 chars)
+    const t = bannerTable(label);
+    const { rect, lines } = bannerRules({ ...t.spec, column_width: 150 }, t.rows, 7);
+    expect(lines).toHaveLength(2);
+    const cx = rect.x + rect.w / 2;
+    expect(lines[0]!.x2).toBeCloseTo(cx - (13 * 7) / 2 - 8);
+    for (const l of lines) expect(l.x2).toBeGreaterThan(l.x1);
+  });
+
+  it("where the estimate draws a sound rule it is kept exactly (byte-identical banners)", () => {
+    const label = "Option";
+    const t = bannerTable(label);
+    // 7.2 px/char measured (the jsdom fallback) against the 7 px/char estimate: sound.
+    const { rect, lines } = bannerRules({ ...t.spec, column_width: 150 }, t.rows, 7.2);
+    const cx = rect.x + rect.w / 2;
+    expect(lines[0]!.x2).toBe(cx - (label.length * 7) / 2 - 8);
+  });
+});
 
 describe("A10 `\\\\` heights", () => {
   it("a broken banner grows its tier by one header line per extra line (income-above-top-thresholds: ~15 px)", () => {
