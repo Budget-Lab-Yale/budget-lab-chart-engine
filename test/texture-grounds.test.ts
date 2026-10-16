@@ -305,6 +305,11 @@ const STILL_VALID: Case[] = [
     rows: UP_DN,
   },
   {
+    name: "an unreadable series_colors entry on a dimmed series of a multi-series stack",
+    spec: spec({ chartType: "stacked", columns: SERIES, highlightSeries: ["Dn"], series_colors: { Up: BAD }, series_patterns: { Up: "/" } }),
+    rows: UP_DN,
+  },
+  {
     name: "an unreadable series_colors entry on a mono stack, which paints tonal tiers",
     spec: spec({ chartType: "stacked", barStack: { mono: { base: "blue" } }, series_colors: { "": BAD }, series_patterns: { "": "/" } }),
     rows: ONE,

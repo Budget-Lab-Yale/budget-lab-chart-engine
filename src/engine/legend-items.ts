@@ -97,8 +97,9 @@ export function buildSeriesKeyRows(
   paintedHatches: Map<string, SeriesHatch>,
   /** Series → the flat colour its FILLED marks were painted (`PaneResult.seriesPainted`). Preferred
    *  over any colour map for the same reason the hatch ground is: `highlightSeries` dims through a
-   *  literal per-mark fill, so a dimmed series' chip read its palette colour beside grey bars. Absent
-   *  for a series whose marks are not filled, where the colour map is correct.
+   *  literal per-mark fill (bar, stacked bar, histogram), so a dimmed series' chip read its palette
+   *  colour beside grey bars. Absent for a series whose marks are not filled, where the colour map
+   *  is correct.
    *
    *  REQUIRED, like `paintedHatches` and for the same reason: a default would let a new call site
    *  silently fall back to the colour map, which is the bug. */

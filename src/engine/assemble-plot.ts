@@ -294,10 +294,10 @@ export interface AssembleOptions {
  *  DOM knows the result — while the legend used to resolve its own hatch from the series COLOUR MAP.
  *  That was called safe because the overrides which miss the map are single-series (so those charts
  *  draw no legend rows) and the accent is folded into the map. Dimming is neither: on a MULTI-series
- *  bar or histogram `highlightSeries` paints every unhighlighted series `annotationDim` through a
- *  per-<rect> channel the map never sees, so a dimmed textured series was already keyed over its
- *  palette colour while its bars were drawn grey — silently, with no test failing. Handing the
- *  RESOLVED objects back makes the key and the mark the same `SeriesHatch` rather than two
+ *  bar, stacked bar or histogram `highlightSeries` paints every unhighlighted series `annotationDim`
+ *  through a per-<rect> channel the map never sees, so a dimmed textured series was already keyed
+ *  over its palette colour while its bars were drawn grey — silently, with no test failing. Handing
+ *  the RESOLVED objects back makes the key and the mark the same `SeriesHatch` rather than two
  *  derivations that have to match. Gated by test/key-agreement.test.ts. */
 export interface AssembleResult {
   svg: SVGSVGElement;

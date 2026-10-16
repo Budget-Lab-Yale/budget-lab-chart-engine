@@ -49,6 +49,7 @@ import {
 import type { OverlayTooltipLine } from "./overlays";
 import { buildOverlayMarks, buildOverlayLabelMarks } from "./marks/overlay";
 import { netDotsDrawn } from "./marks/stacked";
+import { stackRank, drawnStackOrder } from "./marks/stack-order";
 
 export interface RenderOptions {
   width?: number;
@@ -714,8 +715,16 @@ function assemblePaneResult(
   // Otherwise resolve a y for any callout that gives a `series` but omits `y` — snap to that
   // series' value at x. For a stacked chart (area/stacked) that's the cumulative TOP of the series'
   // band; otherwise the series' own value. Rows are matched at x by the raw time / numeric key.
+  // A8: ranked in the order the builder stacks under an override (`barStack.stackOrder`, or the live
+  // area restack), else series_order (a stacked bar's rows are assumed to arrive in it: see
+  // stack-order.ts), and summed over the target's own sign only, since Plot stacks positives up and
+  // negatives down from zero separately.
   const stackedChart = spec.chartType === "area" || spec.chartType === "stacked";
-  const seriesRank = new Map<string, number>(seriesNames.map((s, i) => [s, i]));
+  const seriesSet = new Set(seriesNames);
+  const seriesRank = stackRank(
+    seriesNames,
+    drawnStackOrder(spec, opts.stackOrder)?.filter((s) => seriesSet.has(s)),
+  );
   const resolvedPoints: PointCallout[] = [];
   // The single row each entry of `resolvedPoints` came from, by index — undefined for an explicit
   // x+y callout and for the stacked cumulative snap (a sum has no row). Read by the row-token
@@ -744,12 +753,16 @@ function assemblePaneResult(
     if (targetRank == null) {
       // unknown series: the callout stays as written (no y ⇒ assemblePlot draws nothing)
     } else if (stackedChart) {
+      // Plot stacks a zero or missing value at the positive stack's top, so only a negative value
+      // takes the negative side.
+      const own = atX.find((r) => r.series === p.series && Number.isFinite(r._y as number));
+      const negativeSide = own != null && (own._y as number) < 0;
       let sum = 0;
       let found = false;
       for (const r of atX) {
         const rr = seriesRank.get(r.series);
         if (rr != null && rr <= targetRank && Number.isFinite(r._y as number)) {
-          sum += r._y as number;
+          if (((r._y as number) < 0) === negativeSide) sum += r._y as number;
           found = true;
         }
       }

@@ -7,6 +7,7 @@ import { Plot } from "../vendor";
 import type { ChartSpec } from "../../spec/types";
 import type { MarkContext, MarkLayers, PreparedRow } from "./index";
 import { splitProjectedRuns } from "./projected";
+import { stackSequence } from "./stack-order";
 
 export function buildAreaMarks(
   data: PreparedRow[],
@@ -18,11 +19,9 @@ export function buildAreaMarks(
   const seriesNames = ctx.seriesNames ?? [];
   // Stacking order (bottom→top): the dynamic stackOrder when the live layer supplies one
   // (selected-to-bottom restacking), else series_order. Any series missing from stackOrder keeps
-  // its series_order position after the listed ones.
-  const stackSeq =
-    ctx.stackOrder && ctx.stackOrder.length
-      ? [...ctx.stackOrder, ...seriesNames.filter((s) => !ctx.stackOrder!.includes(s))]
-      : seriesNames;
+  // its series_order position after the listed ones. A series-snapped callout reads the same order
+  // (pane.ts, via stack-order.ts).
+  const stackSeq = stackSequence(seriesNames, ctx.stackOrder);
   const rank = new Map<string, number>(stackSeq.map((s, i) => [s, i]));
 
   // Stable-sort the rows by stack rank so the bottom series is encountered first and stacks at the

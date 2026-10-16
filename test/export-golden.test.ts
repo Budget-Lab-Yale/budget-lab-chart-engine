@@ -260,7 +260,8 @@ describe("export goldens — chrome paths", () => {
     await expect(ser(buildExportSvg(spec, rows))).toMatchFileSnapshot("./fixtures/export/right-legend-long-label.golden.svg");
   });
 
-  // pins A7 (stackOrder + value labels: both labels land in the Gains segment) — expected to change in phase 5
+  // pins A7 (stackOrder + value labels): each label sits in its own segment. Re-recorded in phase 5
+  // when the fix moved the two labels out of the Gains segment; nothing else in the file changed.
   it("stacked with barStack.stackOrder + value labels", async () => {
     const spec = {
       chartType: "stacked", title: "Revenue by source", xAxisType: "categorical",

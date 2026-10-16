@@ -127,7 +127,7 @@ const CASES: Case[] = [
     message: /^series_styles names series \["Nope"\] not found in the data/,
   },
   {
-    field: "highlightSeries", on: [bar, histogram],
+    field: "highlightSeries", on: [bar, histogram, stacked],
     ok: () => ({ highlightSeries: ["a"] }), bad: () => ({ highlightSeries: ["Nope"] }),
     message: /^highlightSeries names series \["Nope"\] not found in the data \(data series: \["a","b"\]\)$/,
   },
@@ -318,7 +318,6 @@ describe("data cross-references: edges", () => {
     ["category_order on a temporal axis", LINE, LINE_ROWS, { category_order: ["Nope"] }],
     ["category_colors on a temporal axis", LINE, LINE_ROWS, { category_colors: { Nope: "blue" } }],
     ["highlightSeries on a line", LINE, LINE_ROWS, { highlightSeries: ["Nope"] }],
-    ["highlightSeries on a stacked bar", STACKED, BAR_ROWS, { highlightSeries: ["Nope"] }],
     ["series_marker on a line", LINE, LINE_ROWS, { series_marker: { Nope: "hollow" } }],
     ["gap_annotation on a line", LINE, LINE_ROWS, { gap_annotation: { series_a: "a", series_b: "Nope" } }],
     ["barStack.stackOrder on a bar", BAR, BAR_ROWS, { barStack: { stackOrder: ["Nope"] } }],

@@ -251,11 +251,11 @@ export function resolveHatch(char: HatchChar, ground: string): SeriesHatch {
 // were PAINTED, and the legend resolved its own from the series colour map. That was called safe
 // because the fills which miss the map — `bar_color`, `category_colors` — are single-series, so
 // those charts draw no legend rows, and the selector accent is folded into the map. It was not:
-// `highlightSeries` dims every unhighlighted series through a per-mark fill on a MULTI-series chart,
-// so a dimmed textured series was keyed over its palette colour while its bars were drawn grey. The
-// legend, the tooltip and the export now take the SeriesHatch objects `assemblePlot` actually
-// painted (`AssembleResult.seriesHatches`), so a key's ground is not a second derivation that has
-// to match — it is the same object.
+// `highlightSeries` dims every unhighlighted series through a per-mark fill on a MULTI-series chart
+// (bar, stacked bar, histogram), so a dimmed textured series was keyed over its palette colour while
+// its bars were drawn grey. The legend, the tooltip and the export now take the SeriesHatch objects
+// `assemblePlot` actually painted (`AssembleResult.seriesHatches`), so a key's ground is not a
+// second derivation that has to match — it is the same object.
 
 /** How far the hatch band sits from its ground, in TIERS of the ground's own hue ramp.
  *

@@ -130,6 +130,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   small-multiples pane), unless it is the last of its dashed or solid group: each line after it
   took the tag of the series before it. Charts whose tags were already right are unchanged. See
   **Upgrading**.
+- Stacked bars with `barStack.stackOrder` and `valueLabels.show`: each segment label now sits in
+  its own segment. The labels walked the stack in `series_order`, so they were placed at the
+  midpoints of segments they do not name, live and in the PNG. Stacks without `stackOrder` are
+  unchanged. No published figure moves: the archive's two `stackOrder` stacks draw no segment labels.
+- Callouts that give `series` and no `y` on a stacked bar or area chart: under
+  `barStack.stackOrder`, or after pinning a series on a live area chart (which moves it to the
+  bottom of the stack), the callout now follows that order. It ranked series by `series_order`
+  whatever the stack order, and added every lower series' value, negatives included, so it named
+  one segment and pointed at another. Positive and negative values now sum separately, as the bars
+  stack: a negative series' callout points at its outer end below zero. No published figure moves: every
+  archive point callout is on a line chart.
+- `highlightSeries` on a stacked bar now dims every series it does not list, as on a bar chart
+  (mono tiers included); it was ignored. The legend and the PNG key show the dim, and a segment
+  label on a dimmed segment is drawn in dark text. A key the data lacks is now a validation
+  error on a stacked chart too. No published figure sets the field.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
 - CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
@@ -190,7 +205,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   below alter no rendered output.
   - A spec key that names a value in the data and is not in the data, on every chart type,
     histograms included, wherever the chart reads the field: the `series_*` maps,
-    `highlightSeries` (bar, histogram), `series_marker` and `gap_annotation.series_a`/`series_b`
+    `highlightSeries` (bar, histogram, stacked), `series_marker` and `gap_annotation.series_a`/`series_b`
     (dumbbell), `barStack.stackOrder` (stacked), `x_labels` (where a hover card or a callout's `{x}`
     is sure to read it), `section_order`, `section_labels`,
     `small_multiples.pane_order`/`pane_titles`/`pane_widths`, `overlays[].facet`,
