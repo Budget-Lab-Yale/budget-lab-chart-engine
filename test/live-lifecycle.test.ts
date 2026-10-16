@@ -822,3 +822,38 @@ describe("T2.8 item 5: a card at width 0 is not redrawn", () => {
     expect(host.querySelector(".figure-canvas svg")!.getAttribute("width")).toBe(w0);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// The deferred "mount" onRender reads `opts.onRender` when its microtask runs, not when it was
+// scheduled: a host that swaps or clears the callback right after mountChart() returns is obeyed.
+// (T4.2 fix round 1: the lifecycle controller had captured the callback at schedule time.)
+// ---------------------------------------------------------------------------------------------
+describe("the deferred mount onRender reads opts.onRender when it fires", () => {
+  for (const [path, spec, rows] of PATHS) {
+    it(`${path}: a callback replaced right after mount is the one called`, async () => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const a: string[] = [];
+      const b: string[] = [];
+      const opts: MountOptions = { spec, rows: rows(), onRender: (ctx) => a.push(ctx.phase) };
+      mountChart(host, opts);
+      opts.onRender = (ctx) => b.push(ctx.phase);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(a).toEqual([]);
+      expect(b).toEqual(path === "standalone" ? ["mount"] : ["mount", "mount"]);
+    });
+
+    it(`${path}: a callback cleared right after mount is not called`, async () => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const a: string[] = [];
+      const opts: MountOptions = { spec, rows: rows(), onRender: (ctx) => a.push(ctx.phase) };
+      mountChart(host, opts);
+      delete opts.onRender;
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(a).toEqual([]);
+    });
+  }
+});

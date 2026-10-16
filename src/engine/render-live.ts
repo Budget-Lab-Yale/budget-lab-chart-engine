@@ -42,7 +42,7 @@ import { applyValueAffixes, formatNumericX, normalizeSpec } from "./util.js";
 import { renderFigure, horizontalBarChartHeight, figurePaneHeight, growsWithRows } from "./figure.js";
 import { FACETED_CAT_LABEL_PX } from "./axes.js";
 import { renderLegend } from "./legend.js";
-import type { LegendFocus, LegendHandle, LegendPins, LegendState } from "./legend.js";
+import type { LegendHandle } from "./legend.js";
 import { RUG_CLASS } from "./rug.js";
 import { CROSSHAIR_HIT_SELECTOR } from "./hover-classes.js";
 import { resolveColor } from "./palette.js";
@@ -67,6 +67,7 @@ import { rowsToCsv } from "../data/csv-browser.js";
 import { LOGO_SVG } from "../embed/assets.js";
 import { exportChartPng } from "../embed/export-png.js";
 import { TBL, markerSymbolForSeries } from "./theme.js";
+import { LiveLifecycle, attachCause, notify } from "./live/lifecycle.js";
 
 const CALENDAR_INTERVALS = ["day", "week", "month", "quarter", "year"] as const;
 
@@ -218,138 +219,6 @@ export interface MountOptions {
    *  mount's lifetime — a fresh element passed in on every re-render leaves the previous one's
    *  empty `.tbl-tooltip` div behind, since `getSharedTooltip` keys its cache by this reference. */
   tooltipContainer?: HTMLElement;
-}
-
-/** Fire `type`'s host callback (if any) then a bubbling CustomEvent of the same name from `card`,
- *  with the same `detail` — the `tbl-title-select` pattern (below), generalised for `onHover` /
- *  `onRender` / `onLegendSelect`, each of which needs the identical callback-then-bubbling-event
- *  shape at more than one call site.
- *
- *  A disposed mount notifies nothing: `isDisposed` is read before the callback, and again between
- *  the callback and the event, since the callback itself may tear the mount down (the two are ONE
- *  notification). The single exception is `allowDisposed`, which only the teardown's own
- *  hover-ending null passes (hoverNotifierFor); it is delivered whole, callback and event. */
-function notify<T>(
-  card: HTMLElement,
-  type: string,
-  detail: T,
-  cb: ((detail: T) => void) | undefined,
-  isDisposed: () => boolean,
-  allowDisposed = false,
-): void {
-  const gate = allowDisposed ? () => false : isDisposed;
-  if (gate()) return;
-  cb?.(detail);
-  if (gate()) return;
-  card.dispatchEvent(new CustomEvent(type, { detail, bubbles: true }));
-}
-
-/** The mount's `onHover` / `tbl-hover` notifier. Unchanged while the mount is live. Once it is
- *  disposed, the only thing it passes on is ONE null ending a hover the host was told about: the
- *  teardown's own. runHoverDetaches runs the detaches one at a time, so while the first sends that
- *  null a sibling pane's hover is still wired, and a hover the consumer starts there from inside
- *  the callback (and the null its own detach then sends) must not reach the host. */
-function hoverNotifierFor(
-  card: HTMLElement,
-  onHover: ((ctx: BandHoverCtx | null) => void) | undefined,
-  isDisposed: () => boolean,
-): (ctx: BandHoverCtx | null) => void {
-  let hostHovering = false;
-  return (ctx) => {
-    const teardownEnd = isDisposed() && ctx === null && hostHovering;
-    if (isDisposed() && !teardownEnd) return;
-    hostHovering = ctx !== null;
-    notify(card, "tbl-hover", ctx, onHover, isDisposed, teardownEnd);
-  };
-}
-
-/** Run, then forget, every hover detach handle a draw collected (crosshair.ts `HoverDetach`) — before
- *  each redraw and on teardown. A detach can reach a consumer's `onHover` (its `null`), and a throw
- *  there must not abort the redraw or teardown that called this: it is re-thrown on its own
- *  microtask, surfaced rather than swallowed, as the deferred "mount" onRender is. */
-function runHoverDetaches(detaches: HoverDetach[]): void {
-  for (const detach of detaches.splice(0)) {
-    try {
-      detach();
-    } catch (e) {
-      queueMicrotask(() => { throw e; });
-    }
-  }
-}
-
-/** What a redraw carries from the legend it is about to replace. Every draw() / drawGrid() rebuilds
- *  the legend from scratch, so without this a resize or a title-selector change silently unpinned
- *  everything (B5). */
-interface CarriedLegend {
-  state: LegendState;
-  focus: LegendFocus | null;
-}
-function carryLegend(handle: LegendHandle | null): CarriedLegend | null {
-  return handle ? { state: handle.state(), focus: handle.focused() } : null;
-}
-/** Anything to re-apply: a pin or a hover in any dimension. */
-function hasSelection({ pins, hovered }: LegendState): boolean {
-  return pinCount(pins) > 0 || hovered.series != null || hovered.annotation != null || hovered.shape != null;
-}
-/** True when the rebuilt legend holds fewer pins than were carried into it: a pinned key the new
- *  render no longer has was dropped, and the host must be told. */
-function pinsDropped(carried: CarriedLegend | null, handle: LegendHandle | null): boolean {
-  if (!carried) return false;
-  return pinCount(carried.state.pins) > (handle ? pinCount(handle.state().pins) : 0);
-}
-/** A failed draw's message, as text: it can carry a data cell or a host hook's words, and a
- *  non-Error throw has no `.message`. */
-function drawErrorNode(doc: Document, e: unknown): HTMLElement {
-  const el = doc.createElement("div");
-  el.className = "figure-error";
-  const message = (e as { message?: unknown } | null)?.message;
-  el.textContent = typeof message === "string" ? message : String(e);
-  return el;
-}
-function pinCount(p: LegendPins): number {
-  return p.series.length + p.annotations.length + p.shapes.length;
-}
-/** Attach `later` as `err.cause` when that slot is free. Best-effort only: never let annotating an
- *  error replace the error itself. */
-function attachCause(err: unknown, later: unknown): void {
-  if (typeof err !== "object" || err === null) return;
-  try {
-    const withCause = err as { cause?: unknown };
-    if (withCause.cause === undefined) withCause.cause = later;
-  } catch { /* frozen/exotic error object — the first error still surfaces */ }
-}
-/** The tail of every redraw that rebuilt a legend: fire onRender, then report a dropped pin, then
- *  hand keyboard focus back. A throwing onRender must not cost the host its drop notification, so its
- *  error is CARRIED past the other two steps and rethrown unwrapped, with a throw from the
- *  notification attached as its `.cause`. A host that tore the mount down from onRender gets
- *  neither of the other two; one that tore it down from the drop report gets no focus hand-back. */
-function finishRedraw(
-  fireRender: () => void,
-  reportDrop: (() => void) | null,
-  restoreFocus: () => void,
-  isDisposed: () => boolean,
-): void {
-  let first: { e: unknown } | null = null;
-  try {
-    fireRender();
-  } catch (e) {
-    first = { e };
-  }
-  if (isDisposed()) {
-    if (first) throw first.e;
-    return;
-  }
-  if (reportDrop) {
-    try {
-      reportDrop();
-    } catch (e) {
-      if (first) attachCause(first.e, e);
-      else first = { e };
-    }
-  }
-  // The drop report reaches onLegendSelect, which may tear the mount down too.
-  if (!isDisposed()) restoreFocus();
-  if (first) throw first.e;
 }
 
 // MIN_CHART_WIDTH (legend-layout.ts): below it the chart stops shrinking and the scroll wrapper
@@ -882,14 +751,15 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   // onHover: forwarded into attachBandCrosshair below as the crosshair's own notifier — see
   // BandCrosshairOptions.onHover. Fires the host callback then the bubbling `tbl-hover` event,
   // from whatever the crosshair already resolved (never re-derived here).
-  const hoverNotifier = hoverNotifierFor(card, opts.onHover, () => disposed);
-  // Set by the returned teardown, checked by the deferred "mount" onRender dispatch below — a
-  // synchronous mount-then-teardown (React StrictMode's dev double-invoke, or any fast unmount)
-  // would otherwise fire onRender for a chart that has already been disposed. "Disposed" is a
-  // logical contract state, not DOM detachment: teardown disconnects observers and listeners but
-  // never removes the card from its container, so the svg the consumer would be handed is still
-  // sitting exactly where it was mounted — the problem is that its owner considers it torn down.
-  let disposed = false;
+  // Its disposed flag is set by the returned teardown and checked by the deferred "mount" onRender
+  // dispatch below — a synchronous mount-then-teardown (React StrictMode's dev double-invoke, or any
+  // fast unmount) would otherwise fire onRender for a chart that has already been disposed.
+  // "Disposed" is a logical contract state, not DOM detachment: teardown disconnects observers and
+  // listeners but never removes the card from its container, so the svg the consumer would be
+  // handed is still sitting exactly where it was mounted — the problem is that its owner considers
+  // it torn down. Commit key: the chart width of the last successful draw.
+  const life = new LiveLifecycle<number>(card);
+  const hoverNotifier = life.hoverNotifier(opts.onHover);
 
   // Inline title selectors: the mount owns ONE selections object for its whole life. The
   // header's widget change handler mutates it in place, so the PNG download (below) and any
@@ -916,7 +786,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           onSelect: opts.onSelect,
           seriesColors: spec.series_colors,
           afterChange: () => requestAccentRedraw?.(),
-          isDisposed: () => disposed,
+          isDisposed: life.isDisposed,
         }
       : undefined,
   );
@@ -948,19 +818,18 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   container.appendChild(card);
 
   // --- chart controller: re-render at the container width on resize ---
-  let lastWidth = -1;
+  // The chart width of the last successful draw is `life`'s commit key. The hover attachments of the
+  // current draw (treemap's included) are `life`'s detach handles: the card sits outside the svg,
+  // so a redraw or unmount under a still pointer would otherwise strand it (Ruling 21; B2). The svg
+  // CURRENTLY in the canvas is `life`'s svg 0, re-read (not captured) by the deferred "mount"
+  // onRender dispatch below — see it for why. None between a failed render and the next successful
+  // one: draw()'s catch replaces the canvas with a .figure-error and there is no live svg to report.
+  //
   // The card width the last successful draw was given: where a redraw falls back to when the card
-  // reports no width of its own (no layout, or a hidden tab). Not `lastWidth`, which is the CHART
+  // reports no width of its own (no layout, or a hidden tab). Not the commit key, which is the CHART
   // width — beside a right legend, the legend column narrower.
   let lastOuterWidth = 0;
   let currentOverlay: OverlayEl | null = null;
-  // Every hover attachment of the current draw (treemap's included). The card sits outside the svg,
-  // so a redraw or unmount under a still pointer would otherwise strand it (Ruling 21; B2).
-  const hoverDetaches: HoverDetach[] = [];
-  // The svg CURRENTLY in the canvas, re-read (not captured) by the deferred "mount" onRender
-  // dispatch below — see it for why. Null between a failed render and the next successful one:
-  // draw()'s catch replaces the canvas with a .figure-error and there is no live svg to report.
-  let currentSvg: SVGSVGElement | null = null;
   let xTitleAdded = false;
   // Right-legend slot — created lazily when the right-legend layout is activated.
   let rightLegendSlot: HTMLElement | null = null;
@@ -968,11 +837,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   let currentLegendPos: "top" | "right" | null = null;
 
   // Area click-to-restack: the live visual stack order (selected series to the bottom, in click
-  // order), the latest legend handle + full series list, and a re-entrancy guard so re-applying
-  // pins after a rebuild doesn't recurse. Non-area charts never touch any of this.
+  // order), the full series list, and a re-entrancy guard so re-applying pins after a rebuild
+  // doesn't recurse (the latest legend handle is `life.legend`). Non-area charts never touch any of
+  // this.
   let restackOrder: string[] | undefined;
   let suppressRestack = false;
-  let currentLegendHandle: LegendHandle | null = null;
   let currentSeriesNames: string[] = [];
 
 
@@ -1006,11 +875,11 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     renderPhase?: "mount" | "resize" | "reselect" | "restack",
   ): void => {
     const target = chartTarget(outerWidth, legendPos);
-    if (target === lastWidth && legendPos === currentLegendPos) return;
-    runHoverDetaches(hoverDetaches);
+    if (life.isCommitted(target) && legendPos === currentLegendPos) return;
+    life.runDetaches();
     // The detach can end a hover, and a consumer may unmount from that onHover(null) / tbl-hover,
     // synchronously. Drawing on would wire fresh hover onto a disposed mount.
-    if (disposed) return;
+    if (life.disposed) return;
 
     // Color accent feed: resolve the active title-selector option's color (raw
     // ColorRef → engine/palette.resolveColor), fresh on every draw() so a selection change picks
@@ -1038,28 +907,26 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         ...(accentColor ? { accentColor } : {}),
       });
     } catch (e) {
-      if (disposed) return; // a hook (tickLabel, valueLabel, afterRender) tore the mount down
-      canvas.replaceChildren(drawErrorNode(doc, e));
-      currentSvg = null;
-      // The last good draw's y-axis labels and legend describe a chart that is gone; left up, the
-      // labels float over the message and the legend still pins against a detached svg. Its pins
-      // are kept (currentLegendHandle) so a recovered draw carries them.
-      currentOverlay?._ro?.disconnect();
-      currentOverlay?.remove();
-      currentOverlay = null;
-      legendSlot.replaceChildren();
-      dropRightColumn();
-      card.classList.remove("is-selectable");
-      // Invalidated, not merely left uncommitted: a resize back to the last GOOD width must not be
+      // Skipped when a hook (tickLabel, valueLabel, afterRender) tore the mount down. The commit is
+      // invalidated, not merely left uncommitted: a resize back to the last GOOD width must not be
       // skipped as unchanged while the error is on screen. Any next width retries.
-      lastWidth = -1;
+      life.failDraw(canvas, e, () => {
+        // The last good draw's y-axis labels and legend describe a chart that is gone; left up, the
+        // labels float over the message and the legend still pins against a detached svg. Its pins
+        // are kept (life.legend) so a recovered draw carries them.
+        currentOverlay?._ro?.disconnect();
+        currentOverlay?.remove();
+        currentOverlay = null;
+        legendSlot.replaceChildren();
+        dropRightColumn();
+      });
       return;
     }
     // renderChart runs the user's hooks (tickLabel, valueLabel, afterRender) synchronously; one may
     // have torn the mount down. Stop before touching the card again. Same after renderLegend below
     // (legendKey).
-    if (disposed) return;
-    lastWidth = target;
+    if (life.disposed) return;
+    life.commit(target);
     lastOuterWidth = outerWidth;
     const {
       svg, legendItems, seriesKeyRows, seriesLabels, seriesOrder, colors, valueAffixes,
@@ -1093,13 +960,13 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     const onHighlight = (active: Set<string>): void => {
       pillDriver?.setActive(active);
       // teardown() leaves the legend on the page; a disposed mount restacks and reports nothing.
-      if (disposed) return;
+      if (life.disposed) return;
       // Area click-to-restack: pinned series move to the BOTTOM of the stack (in click order) so a
       // user can read them against zero; unpinning restores the default order. Driven off PINS
       // (not hover), so this only fires on an actual selection change. Re-renders the whole chart
       // via draw(), which carries the pins onto the freshly built legend.
       if (spec.chartType === "area" && !suppressRestack) {
-        const pins = currentLegendHandle?.pinnedSeries() ?? [];
+        const pins = life.legend?.pinnedSeries() ?? [];
         const next = pins.length
           ? [...pins, ...currentSeriesNames.filter((s) => !pins.includes(s))]
           : undefined;
@@ -1108,7 +975,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           const oldDs = captureAreaDs(svg);
           restackOrder = next;
           suppressRestack = true;
-          lastWidth = -1; // force draw() past its same-width early return
+          life.invalidate(); // force draw() past its same-width early return
           // A stuck `suppressRestack` silently disables every future restack on this mount — a
           // permanent break, worse than any throw it could come from — so it is reset in a
           // `finally`. It stays true for the whole draw() on purpose: draw() carries the pins onto
@@ -1130,9 +997,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
             suppressRestack = false;
           }
           if (renderError) {
-            if (!disposed) {
+            if (!life.disposed) {
               try {
-                notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect, () => disposed);
+                life.notify("tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
               } catch (later) {
                 attachCause(renderError.e, later);
               }
@@ -1140,7 +1007,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
             throw renderError.e;
           }
           // A consumer may have torn the mount down from that draw's onRender.
-          if (disposed) return;
+          if (life.disposed) return;
           // Brief morph: the stacked total is order-invariant, so only the band paths' `d` change.
           // Unreachable when draw() threw — the error above propagates past this point.
           const newSvg = canvas.querySelector("svg");
@@ -1151,7 +1018,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // focus/blur, or the reset button (legend.ts's applyHighlight runs onHighlight for all of
       // them; see its own comment). High-frequency: a bare mouse hover fires this, not only a
       // click, so a consumer wiring this up will likely want to debounce.
-      notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect, () => disposed);
+      life.notify("tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
     };
     // Point charts (scatter / dotplot): no crosshair / click-to-select in v1 — just markers +
     // legend (the color legend still drives hover-dim, which is independent of the crosshair).
@@ -1160,7 +1027,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     // Native px — no makeResponsive/viewBox: the SVG keeps its exact pixel width so it
     // overflows into the scroll wrapper below the floor instead of being CSS-scaled down.
     canvas.replaceChildren(svg);
-    currentSvg = svg;
+    life.setSvgs([svg]);
 
     if (spec.chartType === "timeline") {
       // A timeline's title follows its ticks, which a resize can remove (a narrow vertical render
@@ -1171,7 +1038,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     // --- Legend layout ---
     // Read before the old legend leaves the DOM: focus falls to <body> once it does.
-    const carried = carryLegend(currentLegendHandle);
+    const carried = life.carryLegend();
     const shapeOpts = {
       shapeItems: shapeLegendItems ?? undefined,
       colorTitle: colorLegendTitle,
@@ -1214,9 +1081,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           onHighlight,
           hooks: opts.hooks,
           ...shapeOpts,
-          abandoned: () => disposed,
+          abandoned: life.isDisposed,
         });
-        if (disposed) return; // legendKey tore the mount down
+        if (life.disposed) return; // legendKey tore the mount down
         // Add the vertical-layout class to the rendered legend element (use the handle's
         // element directly rather than re-querying the slot).
         legendHandle?.element.classList.add("tbl-legend--vertical");
@@ -1230,9 +1097,9 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           onHighlight,
           hooks: opts.hooks,
           ...shapeOpts,
-          abandoned: () => disposed,
+          abandoned: life.isDisposed,
         });
-        if (disposed) return; // legendKey tore the mount down
+        if (life.disposed) return; // legendKey tore the mount down
       }
     } else if (spec.chartType === "timeline") {
       // Drawn lanes name the categories and a vertical render may draw one track instead, so a
@@ -1241,8 +1108,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     }
 
     // Expose the freshly built legend handle for the area-restack re-render path (onHighlight).
-    currentLegendHandle = legendHandle;
-    const dropped = pinsDropped(carried, legendHandle);
+    const dropped = life.adoptLegend(legendHandle, carried);
 
     currentLegendPos = legendPos;
 
@@ -1252,10 +1118,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     } else if (spec.chartType === "treemap") {
       // Per-tile hover: outline + dim, and the card unless chrome.tooltip is false. That flag
       // suppresses only the card, as on every chart type (CONFIG-SPEC `chrome.tooltip`).
-      hoverDetaches.push(attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer }));
+      life.addDetach(attachTreemapHover(svg, { tiles: built.treemapTiles ?? [], spec, showTooltip: chromeTooltip, tooltipContainer }));
     } else if (spec.chartType === "scatter") {
       // Scatter: per-point hover (no shared-x guide — points aren't aligned on x).
-      hoverDetaches.push(attachPointHover(svg, scatterPointHoverOptions({
+      life.addDetach(attachPointHover(svg, scatterPointHoverOptions({
         spec,
         pointOrder: pointOrder ?? dataInScope,
         colors,
@@ -1271,7 +1137,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     } else if (spec.chartType === "dotplot") {
       // Dot plot: category hover (resolve the category from the x-axis labels; list each series'
       // value). Reuses the categorical-line crosshair — no bars required.
-      hoverDetaches.push(attachCategoricalLineCrosshair(svg, {
+      life.addDetach(attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -1301,7 +1167,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // ring / ink / filled). Reuses the categorical crosshair with orientation.
       const dbMarkers = new Map(seriesOrder.map((s) => [s, ownValue(spec.series_marker, s) ?? "filled"] as const));
       const dbFills = new Map(seriesOrder.map((s) => [s, dbMarkers.get(s) === "ink" ? TBL.color.heading : (colors.get(s) || TBL.color.blue)] as const));
-      hoverDetaches.push(attachCategoricalLineCrosshair(svg, {
+      life.addDetach(attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y, ...(r._section != null ? { _section: r._section } : {}) })),
@@ -1324,7 +1190,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       // Categorical-x LINE or AREA: resolve the category from the x-axis labels (no bars) and show
       // a guide + tooltip. Area takes this path, not the band crosshair below, because the band
       // crosshair resolves the category from bar rects an area chart does not draw.
-      hoverDetaches.push(attachCategoricalLineCrosshair(svg, {
+      life.addDetach(attachCategoricalLineCrosshair(svg, {
         tooltipContainer,
         icons: seriesIcons,
         rows: dataInScope.map((r) => ({ _xc: r._xc, series: r.series, _y: r._y })),
@@ -1399,7 +1265,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
       const useTooltip = hoverMode === "tooltip";
       const totalRow = resolveTotalRow(spec, netMode, hoverMode);
       let secondaryDriver: ((key: unknown, active?: boolean) => void) | null = null;
-      hoverDetaches.push(attachBandCrosshair(svg, {
+      life.addDetach(attachBandCrosshair(svg, {
         tooltipContainer,
         rows: bandRows,
         isStacked,
@@ -1469,7 +1335,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
     } else if (spec.chartType === "histogram") {
       // Histogram: continuous numeric/temporal x, but BINNED bars — resolve the bin under the
       // cursor by x-extent (not a snapped point) and show a per-bin tooltip headed by the bin range.
-      hoverDetaches.push(attachHistogramHover(svg, {
+      life.addDetach(attachHistogramHover(svg, {
         tooltipContainer,
         rows: dataInScope.map((r) => ({ _x0: r._x0, _x1: r._x1, series: r.series, _y: r._y })),
         colors,
@@ -1485,7 +1351,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
         showTooltip: chromeTooltip,
       }));
     } else {
-      hoverDetaches.push(attachCrosshair(svg, {
+      life.addDetach(attachCrosshair(svg, {
         tooltipContainer,
         rows: dataInScope.map((r) => ({ time: r.time, series: r.series, value: r._y })),
         xField: "time",
@@ -1560,9 +1426,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
     // The carried state reached the new legend without its onHighlight: dim the marks added since
     // it was built (the hit paths above), and tell this draw's pill driver.
-    const carriedActive = legendHandle?.active() ?? new Set<string>();
-    if (carried && hasSelection(carried.state) && legendHandle) legendHandle.restyle();
-    if (carriedActive.size) pillDriver?.setActive(carriedActive);
+    const carriedActive = life.reapplyCarried(carried, legendHandle, (active) => pillDriver?.setActive(active));
 
     // onRender: at each of the four real re-render occasions this mount forces past draw()'s
     // same-width/same-legendPos guard above — mount/resize/reselect, and the area click-to-restack
@@ -1584,14 +1448,14 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           // return normally first; the throw still surfaces (uncaught, on its own microtask) rather
           // than being swallowed — it just arrives slightly later than the other three phases.
           //
-          // Guarded on `disposed`: a caller that tears the mount down before this microtask runs
+          // Guarded on `life.disposed`: a caller that tears the mount down before this microtask runs
           // (a synchronous mount-then-teardown — React StrictMode's dev double-invoke does exactly
           // this) must not have onRender fire afterward for a chart already disposed of — a logical
           // contract state, not DOM detachment; teardown never removes the card from its container.
           // Checked INSIDE the microtask (not before scheduling it) since `disposed` is only known
           // at the time this callback actually runs.
           //
-          // The svg is RE-READ from `currentSvg` inside the microtask rather than captured with this
+          // The svg is RE-READ from `life`'s svg 0 inside the microtask rather than captured with this
           // closure. Deferring means a synchronous re-render can land first — a host that changes a
           // title selector immediately after mountChart() returns reaches requestAccentRedraw, whose
           // draw() runs `canvas.replaceChildren(newSvg)` and notifies "reselect" synchronously — and
@@ -1604,30 +1468,26 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
           // all for the life of the chart. (Whether the label is exactly right in that sequence is a
           // smaller complaint than never firing; a consumer that decorates on more than one phase is
           // already handed the same fresh svg twice per redraw and has to be idempotent regardless.)
-          // Identity is read as `currentSvg`, the reference draw() assigns beside its own
+          // Identity is read as `life`'s svg 0, the reference draw() assigns beside its own
           // replaceChildren: `svg.parentNode === canvas` would answer the same question here but not
           // in mountFigure, where each pane's svg lives in its own cell wrapper, and a draw counter
           // would need threading and keeping in step to say no more than the live reference does.
           // Deliberately NOT `svg.isConnected`: a mount into a detached container reports false on a
           // perfectly current svg (most of the test suite mounts exactly that way).
-          queueMicrotask(() => {
-            if (disposed || !currentSvg) return;
-            notify(card, "tbl-render", { svg: currentSvg, phase: "mount" as const }, opts.onRender, () => disposed);
-          });
+          life.deferMountRender(0, () => opts.onRender);
         } else {
-          notify(card, "tbl-render", { svg, phase: renderPhase }, opts.onRender, () => disposed);
+          life.notify("tbl-render", { svg, phase: renderPhase }, opts.onRender);
         }
       }
     };
 
     // The drop is reported after onRender, which must be handed THIS draw's svg: on an area chart a
     // dropped pin changes the stack order, and onHighlight restacks with a draw of its own.
-    finishRedraw(
+    life.finishRedraw(
       fireRender,
       dropped ? () => onHighlight(carriedActive) : null,
-      // currentLegendHandle, not legendHandle: that restack may have replaced the legend again.
-      () => { if (carried?.focus) currentLegendHandle?.focus(carried.focus); },
-      () => disposed,
+      // life.legend, not legendHandle: that restack may have replaced the legend again.
+      () => { if (carried?.focus) life.legend?.focus(carried.focus); },
     );
   };
 
@@ -1687,10 +1547,10 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
 
   // Wire the accent-redraw hook (see its declaration above): a title-selector change forces
   // draw() past its same-width/same-legendPos early return, mirroring the area click-to-restack
-  // pattern (`lastWidth = -1` then a fresh draw() call at the current width/legendPos).
+  // pattern (`life.invalidate()` then a fresh draw() call at the current width/legendPos).
   requestAccentRedraw = () => {
-    if (disposed) return;
-    lastWidth = -1;
+    if (life.disposed) return;
+    life.invalidate();
     draw(card.clientWidth || lastOuterWidth || initialCardWidth, currentLegendPos ?? resolvedPos(), "reselect");
   };
 
@@ -1732,8 +1592,7 @@ export function mountChart(container: HTMLElement, opts: MountOptions): () => vo
   }
 
   return () => {
-    disposed = true;
-    runHoverDetaches(hoverDetaches);
+    life.dispose();
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
@@ -2589,12 +2448,17 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // x-<xAxisType>: same axis-keyed class as mountChart's card — see the comment there. A faceted
   // scatter never carried the chart-type class this replaces, so this is a fix, not just a rename.
   card.className = `figure-card x-${spec.xAxisType}`;
+  // Its disposed flag is set by the returned teardown and checked by the deferred "mount" onRender
+  // dispatch below — see mountChart's for why (a synchronous mount-then-teardown must not fire
+  // onRender afterward for a chart that no longer exists). Commit key: the grid signature.
+  // `life` also holds the pane svgs CURRENTLY in the grid, by pane index — re-read (not captured)
+  // by the deferred "mount" onRender dispatch below; see mountChart's identical dispatch comment.
+  // Emptied by a failed render, which replaces the grid with a .figure-error and leaves no live
+  // pane at all. And it holds every pane's hover detach handle of the current draw, and the legend
+  // of the current draw, read by the next one to carry its pins (see CarriedLegend).
+  const life = new LiveLifecycle<string>(card);
   // onHover: same notifier shape as mountChart's, forwarded per pane through wireFigureSvg's ctx.
-  const hoverNotifier = hoverNotifierFor(card, opts.onHover, () => disposed);
-  // Set by the returned teardown, checked by the deferred "mount" onRender dispatch below — see
-  // mountChart's identical `disposed` flag for why (a synchronous mount-then-teardown must not
-  // fire onRender afterward for a chart that no longer exists).
-  let disposed = false;
+  const hoverNotifier = life.hoverNotifier(opts.onHover);
   // Inline title selectors — same single shared selections object discipline as mountChart.
   // `afterChange` re-renders the pane grid so a colored option's accent recolors every pane's bars
   // live (parity with mountChart's requestAccentRedraw). Forward-declared: assigned once draw()
@@ -2610,7 +2474,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           onSelect: opts.onSelect,
           seriesColors: spec.series_colors,
           afterChange: () => requestFigureRedraw?.(),
-          isDisposed: () => disposed,
+          isDisposed: life.isDisposed,
         }
       : undefined,
   );
@@ -2650,16 +2514,6 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     actions: buildDownloadActions(doc, spec, rows, opts.downloadName, selections, opts.hooks),
   });
   container.appendChild(card);
-
-  let lastSig = "";
-  // The pane svgs CURRENTLY in the grid, by pane index — re-read (not captured) by the deferred
-  // "mount" onRender dispatch below; see mountChart's identical dispatch comment. Emptied by a
-  // failed render, which replaces the grid with a .figure-error and leaves no live pane at all.
-  let currentPaneSvgs: Array<SVGSVGElement | undefined> = [];
-  // Every pane's hover attachment of the current draw — see mountChart's `hoverDetaches`.
-  const hoverDetaches: HoverDetach[] = [];
-  // The legend of the current draw, read by the next one to carry its pins (see CarriedLegend).
-  let currentLegendHandle: LegendHandle | null = null;
 
   // Distinct in-scope facet values (respecting pane_order) → the pane count. Used to clamp the
   // column count BEFORE computing paneW, so the per-pane render width matches the grid cell
@@ -2724,10 +2578,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const useGridWidth = isShared || variableWidths;
     const paneW = Math.max(paneMinWidth, Math.floor((gridW - GRID_GAP * (cols - 1)) / cols));
     const sig = useGridWidth ? `s:${cols}:${gridW}` : `p:${cols}:${paneW}`;
-    if (sig === lastSig) return;
-    runHoverDetaches(hoverDetaches);
+    if (life.isCommitted(sig)) return;
+    life.runDetaches();
     // As mountChart's draw(): a consumer may unmount from the onHover(null) the detach just sent.
-    if (disposed) return;
+    if (life.disposed) return;
     // Inline-selector accent (parity with mountChart's draw()): recolor every pane's bars to the
     // active option's color. renderFigure forwards accentColor to each pane's renderChart, which
     // applies it to single/no-series bars (category_colors still overrides; multi-series unchanged).
@@ -2755,20 +2609,16 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
             ...(accentColor ? { accentColor } : {}),
           });
     } catch (e) {
-      if (disposed) return; // a hook in a pane's render tore the mount down
-      grid.replaceChildren(drawErrorNode(doc, e));
-      currentPaneSvgs = [];
+      // Skipped when a hook in a pane's render tore the mount down. Invalidated, as mountChart's
+      // draw(): the failed width and the last good one both retry.
       // As mountChart's draw(): the legend goes with the panes it pinned; its pins are kept.
-      legendSlot.replaceChildren();
-      card.classList.remove("is-selectable");
-      // Invalidated, as mountChart's draw(): the failed width and the last good one both retry.
-      lastSig = "";
+      life.failDraw(grid, e, () => legendSlot.replaceChildren());
       return;
     }
     // renderFigure runs the user's hooks synchronously for every pane; one may have torn the mount
     // down. Stop before touching the card again (as mountChart's draw(); also after renderLegend).
-    if (disposed) return;
-    lastSig = sig; // commit only after a successful render
+    if (life.disposed) return;
+    life.commit(sig); // commit only after a successful render
     // Explicit per-column px widths (shared mode, or variable pane_widths in either mode): the
     // panes were rendered at those widths, so the grid template must match. Else equal 1fr columns.
     if (fig.columnWidths && fig.columnWidths.length) {
@@ -2788,9 +2638,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
       if (pane.svg) cell.appendChild(pane.svg);
       grid.appendChild(cell);
     }
-    currentPaneSvgs = fig.panes.map((p) => (p.svg as SVGSVGElement | undefined) ?? undefined);
+    life.setSvgs(fig.panes.map((p) => (p.svg as SVGSVGElement | undefined) ?? undefined));
     // Read before the old legend leaves the DOM: focus falls to <body> once it does.
-    const carried = carryLegend(currentLegendHandle);
+    const carried = life.carryLegend();
     legendSlot.replaceChildren();
     // Highlight root = the grid, so legend hover/pin dims [data-series] across EVERY pane SVG.
     // Each pane registers its value-pill driver here; the legend fires them all on highlight.
@@ -2798,10 +2648,10 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     const hasFigShape = !!(fig.shapeLegendItems && fig.shapeLegendItems.length);
     const onHighlight = (active: Set<string>): void => {
       for (const d of pillDrivers) d.setActive(active);
-      if (disposed) return;
+      if (life.disposed) return;
       // onLegendSelect: same "however it changed" note as mountChart's identical dispatch —
       // fires on hover/focus/blur too, not only a pin click; high-frequency, debounce-worthy.
-      notify(card, "tbl-legend-select", { active: [...active] }, opts.onLegendSelect, () => disposed);
+      life.notify("tbl-legend-select", { active: [...active] }, opts.onLegendSelect);
     };
     const handle = fig.legendItems || hasFigShape
       ? renderLegend(legendSlot, fig.legendItems ?? [], {
@@ -2812,12 +2662,11 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
           colorTitle: fig.colorLegendTitle,
           shapeTitle: fig.shapeLegendTitle,
           state: carried?.state,
-          abandoned: () => disposed,
+          abandoned: life.isDisposed,
         })
       : null;
-    if (disposed) return; // legendKey tore the mount down
-    currentLegendHandle = handle;
-    const dropped = pinsDropped(carried, handle);
+    if (life.disposed) return; // legendKey tore the mount down
+    const dropped = life.adoptLegend(handle, carried);
     // Attach each pane's crosshair ALWAYS (single-series bar panes have no legend but still
     // need tooltips); selection click is gated on `handle` inside wireFigureSvg, and
     // `.is-selectable` is set below from the panes that were actually wired.
@@ -2874,7 +2723,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         hooks: opts.hooks,
         facet: pane.value,
         onHover: hoverNotifier,
-        onHoverDetach: (d) => hoverDetaches.push(d),
+        onHoverDetach: (d) => life.addDetach(d),
         ...(coordinated ? { onResolve: (key: unknown) => emit(idx, key) } : {}),
       });
       drivers.push(driver ?? (() => {}));
@@ -2887,9 +2736,9 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
     );
 
     // As mountChart's draw(): the carried state reached the legend without its onHighlight.
-    const carriedActive = handle?.active() ?? new Set<string>();
-    if (carried && hasSelection(carried.state) && handle) handle.restyle();
-    if (carriedActive.size) for (const d of pillDrivers) d.setActive(carriedActive);
+    const carriedActive = life.reapplyCarried(carried, handle, (active) => {
+      for (const d of pillDrivers) d.setActive(active);
+    });
 
     // onRender: once PER PANE (there is no single wrapping SVG for a figure to report) at the
     // three real re-render occasions — mirrors mountChart's dispatch, gated the same way, INCLUDING
@@ -2906,25 +2755,20 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
         fig.panes.forEach((pane, i) => {
           if (!pane.svg) return;
           if (renderPhase === "mount") {
-            // Guarded on `disposed`, and RE-READING the pane's live svg by index instead of capturing
-            // this render's -- see mountChart's identical dispatch comment for both.
-            queueMicrotask(() => {
-              const live = currentPaneSvgs[i];
-              if (disposed || !live) return;
-              notify(card, "tbl-render", { svg: live, phase: "mount" as const }, opts.onRender, () => disposed);
-            });
-          } else if (!disposed) { // a consumer may tear down from an earlier pane's onRender
-            notify(card, "tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender, () => disposed);
+            // Guarded on `life.disposed`, and RE-READING the pane's live svg by index instead of
+            // capturing this render's -- see mountChart's identical dispatch comment for both.
+            life.deferMountRender(i, () => opts.onRender);
+          } else if (!life.disposed) { // a consumer may tear down from an earlier pane's onRender
+            life.notify("tbl-render", { svg: pane.svg, phase: renderPhase }, opts.onRender);
           }
         });
       }
     };
 
-    finishRedraw(
+    life.finishRedraw(
       fireRender,
       dropped ? () => onHighlight(carriedActive) : null,
       () => { if (carried?.focus) handle?.focus(carried.focus); },
-      () => disposed,
     );
   };
 
@@ -2934,8 +2778,8 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // On a selection change, re-render the grid so the accent tracks the active option. Reset the
   // width-keyed guard (sig is width-only) so the same-width re-render isn't skipped.
   requestFigureRedraw = () => {
-    if (disposed) return;
-    lastSig = "";
+    if (life.disposed) return;
+    life.invalidate();
     draw(card.clientWidth || initialWidth, "reselect");
   };
   draw(initialWidth, "mount");
@@ -2956,8 +2800,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   }
 
   return () => {
-    disposed = true;
-    runHoverDetaches(hoverDetaches);
+    life.dispose();
     ro?.disconnect();
     if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
     closeTitleSelectors();

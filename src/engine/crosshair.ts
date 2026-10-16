@@ -169,6 +169,23 @@ export function listen(target: EventTarget, listeners: Record<string, EventListe
   };
 }
 
+/** The detach of a pointer-tracking hover attach (crosshair, band, histogram, categorical line):
+ *  `stop` its listeners (and mark it detached, where it keeps that flag), then end a hover in
+ *  progress (`hide(true)` releases the card and reports the end) or, with none, only release the
+ *  card. */
+function pointerHoverDetach(
+  stop: () => void,
+  isActive: () => boolean,
+  hide: (detaching: boolean) => void,
+  card: { release: () => void },
+): HoverDetach {
+  return () => {
+    stop();
+    if (isActive()) hide(true);
+    else card.release();
+  };
+}
+
 export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): HoverDetach {
   const {
     rows,
@@ -344,11 +361,7 @@ export function attachCrosshair(svgEl: SVGSVGElement, opts: CrosshairOptions): H
     pointerleave: () => hide(),
     pointerdown: update as EventListener,
   });
-  return () => {
-    unlisten();
-    if (active) hide(true);
-    else card.release();
-  };
+  return pointerHoverDetach(unlisten, () => active, hide, card);
 }
 
 /** One tooltip key, for every tooltip path.
@@ -1334,12 +1347,7 @@ export function attachBandCrosshair(svgEl: SVGSVGElement, opts: BandCrosshairOpt
     pointerleave: () => hide(),
     pointerdown: update as EventListener,
   });
-  return () => {
-    detached = true;
-    unlisten();
-    if (active) hide(true);
-    else card.release();
-  };
+  return pointerHoverDetach(() => { detached = true; unlisten(); }, () => active, hide, card);
 }
 
 // ---------------------------------------------------------------------------
@@ -1679,11 +1687,7 @@ export function attachHistogramHover(svgEl: SVGSVGElement, opts: HistogramHoverO
     pointerleave: () => hide(),
     pointerdown: update as EventListener,
   });
-  return () => {
-    unlisten();
-    if (active) hide(true);
-    else card.release();
-  };
+  return pointerHoverDetach(unlisten, () => active, hide, card);
 }
 
 /**
@@ -3270,12 +3274,7 @@ export function attachCategoricalLineCrosshair(svgEl: SVGSVGElement, opts: Categ
     pointerleave: () => hide(),
     pointerdown: update as EventListener,
   });
-  return () => {
-    detached = true;
-    unlisten();
-    if (active) hide(true);
-    else card.release();
-  };
+  return pointerHoverDetach(() => { detached = true; unlisten(); }, () => active, hide, card);
 }
 
 /**
