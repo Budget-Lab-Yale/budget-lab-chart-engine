@@ -15,7 +15,6 @@ import type { ResolvedColumns } from "./columns";
 import { SINGLE_SERIES_KEY } from "./columns";
 import { ownValue } from "./own-key";
 import { figurePaneValues } from "./panes";
-import { facetsDrawAsGroups } from "./facet-groups";
 import { hatchGroundError } from "./color-ref";
 
 interface Ground {
@@ -55,17 +54,15 @@ function singleSeriesColorMap(accent: { grounds: Paint[]; always: boolean }, ser
 }
 
 /** The rows each drawn pane holds: one pane for a single chart, one per rendered facet value for
- *  small multiples. A horizontal chart's facets draw as sections of one chart (spec/facet-groups.ts),
- *  and `section_order` — or `pane_order`, standing in for it there — drops the sections it omits. */
+ *  small multiples. `section_order` drops the sections it omits. */
 function paneRows(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns): TidyRow[][] {
   const facet = cols.facet;
-  const groups = facetsDrawAsGroups(spec);
-  const sectionField = groups ? facet : cols.section;
-  const sectionOrder = groups ? spec.small_multiples?.pane_order : spec.section_order;
+  const sectionField = cols.section;
+  const sectionOrder = spec.section_order;
   const drawn = sectionField && sectionOrder?.length
     ? rows.filter((r) => sectionOrder.includes((r[sectionField] as string) ?? ""))
     : rows;
-  if (!spec.small_multiples || !facet || groups) return [drawn];
+  if (!spec.small_multiples || !facet) return [drawn];
   return figurePaneValues(spec, drawn, facet).map((v) => drawn.filter((r) => r[facet] === v));
 }
 

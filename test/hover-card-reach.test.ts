@@ -370,7 +370,7 @@ describe("dot plot — card standalone, none in a default multi-pane figure", ()
 // ---------------------------------------------------------------------------
 // Dumbbell: the one type that keeps its card in a coordinated pane, on purpose
 // (render-live.ts's "NOT emitOnly" comment).
-// Its panes are vertical: a horizontal dumbbell draws its facets as groups in one chart.
+// Its panes are vertical: a horizontal dumbbell has no panes (columns.facet is rejected there).
 // ---------------------------------------------------------------------------
 
 describe("dumbbell — card standalone AND in a default pane", () => {

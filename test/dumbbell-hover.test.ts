@@ -3,8 +3,8 @@
 // Dumbbell live-hover PLUMBING. The hover GEOMETRY (which category the pointer resolves to) is
 // browser-runtime — jsdom has no layout so getBoundingClientRect returns 0 and mark centers can't
 // be read — and is verified in the live demo. What we CAN prove here: the hover is wired (a hit
-// target is attached for both orientations, pointer events don't throw), a faceted horizontal
-// dumbbell mounts as one grouped chart, and the tooltip HTML the hover shows lists each series' value.
+// target is attached for both orientations, pointer events don't throw), a sectioned horizontal
+// dumbbell mounts as one chart, and the tooltip HTML the hover shows lists each series' value.
 import { describe, it, expect } from "vitest";
 import { mountChart } from "../src/engine/render-live";
 import { renderChart } from "../src/engine/index";
@@ -62,7 +62,7 @@ describe("dumbbell hover — plumbing", () => {
     }).not.toThrow();
   });
 
-  it("a faceted horizontal dumbbell mounts one grouped chart (Ruling 80), with one hover target", () => {
+  it("a sectioned horizontal dumbbell mounts one chart, with one hover target", () => {
     const facetRows: TidyRow[] = [
       { pane: "Quintiles", group: "Q1", measure: "static", rate: "2.1" },
       { pane: "Quintiles", group: "Q1", measure: "collected", rate: "2.0" },
@@ -72,8 +72,7 @@ describe("dumbbell hover — plumbing", () => {
     const spec: ChartSpec = {
       ...SPEC,
       series_order: ["static", "collected"],
-      columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
-      small_multiples: { mode: "shared" },
+      columns: { category: "group", series: "measure", value: "rate", section: "pane" },
     };
     const container = document.createElement("div");
     document.body.appendChild(container);

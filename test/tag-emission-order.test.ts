@@ -7,7 +7,7 @@
 // painted, a category label's `data-category` must name its own text, and a dot's `data-category`
 // must name the label on its row. Each case below is one way the hand-predicted order used to drift:
 // a section order that differs from the data order, interleaved sections, uneven series per category,
-// a horizontal chart whose facets draw as groups, and a line series with no finite value.
+// a horizontal chart whose sections are its series column, and a line series with no finite value.
 import { describe, it, expect } from "vitest";
 import { renderChart, renderFigure } from "../src/engine/index";
 import { buildExportSvg } from "../src/embed/export-png";
@@ -113,6 +113,8 @@ const base = { title: "t", data: "d.csv", xAxisType: "categorical" } as const;
 const cols = { category: "c", series: "s", value: "v" };
 const colsSec = { ...cols, section: "sec" };
 const colsFacet = { ...cols, facet: "f" };
+// The State of Tariffs consumer-prices groups, in the section spelling a horizontal chart takes.
+const colsGroup = { ...cols, section: "f" };
 
 // A has X only, B has X and Y, C has Y only (the marks-overlays probe).
 const UNEVEN = rowsOf(`
@@ -126,7 +128,7 @@ const INTERLEAVED = rowsOf(`
   C,Y,4,S2
   B,X,2,S1
   B,Y,3,S1`);
-// State of Tariffs consumer-prices shape: series and facet are one column, so each group holds one
+// State of Tariffs consumer-prices shape: series and group are one column, so each group holds one
 // series and every category repeats across groups.
 const SERIES_AS_GROUPS = rowsOf(`
   Food,full,1,,full
@@ -158,11 +160,11 @@ describe("grouped horizontal bars: rect data-series follows the fy draw order", 
   it("sectioned, interleaved sections", () => {
     expect(chartErrors({ ...H, columns: colsSec }, INTERLEAVED, "y")).toEqual([]);
   });
-  it("facets drawn as groups, one series per group", () => {
-    expect(chartErrors({ ...H, columns: colsFacet }, SERIES_AS_GROUPS, "y")).toEqual([]);
+  it("sections, one series per section", () => {
+    expect(chartErrors({ ...H, columns: colsGroup }, SERIES_AS_GROUPS, "y")).toEqual([]);
   });
-  it("facets drawn as groups, pane_order reversed", () => {
-    const spec = { ...H, columns: colsFacet, small_multiples: { pane_order: ["none", "full"] } } as ChartSpec;
+  it("sections, one series per section, section_order reversed", () => {
+    const spec = { ...H, columns: colsGroup, section_order: ["none", "full"] } as ChartSpec;
     expect(chartErrors(spec, SERIES_AS_GROUPS, "y")).toEqual([]);
   });
   // Already right before the fix; kept so the shared helper cannot regress them.
@@ -194,10 +196,10 @@ describe("grouped vertical bars and stacks (already right; guarded through the s
       expect(tagErrors(pane.svg as SVGSVGElement, pane.colors ?? fig.colors, "x")).toEqual([]);
     }
   });
-  it("stacked: sectioned reversed, interleaved, facets as groups, null values", () => {
+  it("stacked: sectioned reversed, interleaved, one series per section, null values", () => {
     expect(chartErrors({ ...SH, columns: colsSec, section_order: ["S2", "S1"] }, UNEVEN, "y")).toEqual([]);
     expect(chartErrors({ ...SH, columns: colsSec }, INTERLEAVED, "y")).toEqual([]);
-    expect(chartErrors({ ...SH, columns: colsFacet }, SERIES_AS_GROUPS, "y")).toEqual([]);
+    expect(chartErrors({ ...SH, columns: colsGroup }, SERIES_AS_GROUPS, "y")).toEqual([]);
     expect(chartErrors({ ...SV, columns: cols }, DUMBBELL_INTERLEAVED_GAPS, "x")).toEqual([]);
   });
 });
@@ -210,8 +212,8 @@ describe("sectioned horizontal dumbbell: dots and labels tagged in the fy draw o
   it("interleaved sections, with missing values", () => {
     expect(chartErrors({ ...DH, columns: colsSec }, DUMBBELL_INTERLEAVED_GAPS, "y")).toEqual([]);
   });
-  it("facets drawn as groups", () => {
-    expect(chartErrors({ ...DH, columns: colsFacet }, SERIES_AS_GROUPS, "y")).toEqual([]);
+  it("one series per section", () => {
+    expect(chartErrors({ ...DH, columns: colsGroup }, SERIES_AS_GROUPS, "y")).toEqual([]);
   });
   it("sectioned in data order, unsectioned, and vertical (already right)", () => {
     expect(chartErrors({ ...DH, columns: colsSec, section_order: ["S1", "S2"] }, DUMBBELL, "y")).toEqual([]);
@@ -259,12 +261,12 @@ describe("line: a series with no finite value draws no path, so it takes no tag"
 
 describe("series_patterns follow the tag, so a texture lands on its own series' bars, live and in the PNG", () => {
   // The texture is keyed by data-series (assemble-plot.ts), so a wrong tag painted the hatch on the
-  // other series' bars. Facets drawn as groups, data interleaved by category.
+  // other series' bars. One series per section, data interleaved by category.
   const spec = {
     ...base,
     chartType: "bar",
     orientation: "horizontal",
-    columns: colsFacet,
+    columns: colsGroup,
     series_patterns: { none: "/" },
   } as ChartSpec;
   const check = (svg: Element, colors: Map<string, string>): void => {

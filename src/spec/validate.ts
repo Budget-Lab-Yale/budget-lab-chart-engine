@@ -17,7 +17,7 @@ import { POLY_DEFAULT_DEGREE, SHADE_FILL_OPACITY, Y_BOUND_LIMIT } from "./defaul
 // back to this Ajv-carrying module. Import it from ./filled-chart-types directly.
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
 import { isHorizontalDumbbell, valueAxisIsX } from "./dumbbell-orientation";
-import { facetsDrawAsGroups, facetGroupErrors } from "./facet-groups";
+import { horizontalFacetErrors } from "./facet-groups";
 import { colorRefError, monoBaseError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY } from "./columns";
@@ -170,15 +170,14 @@ function highlightSeriesChartTypeError(spec: { chartType?: unknown; highlightSer
 }
 
 /** `tooltip_section` puts the section in the hover CARD's header, so it needs sections: rejected
- *  without `columns.section` (no section to name), or a horizontal chart's `columns.facet`, whose
- *  values draw as sections (spec/facet-groups.ts). PRESENCE, not value, as the sibling gates.
+ *  without `columns.section` (no section to name). PRESENCE, not value, as the sibling gates.
  *  Accepted on every chart type `columns.section` allows (horizontal bar / stacked / dumbbell, by
  *  sectionColumnError): where the chart hovers with value pills rather than a card (a bar, a stack in
  *  pills mode) it is a no-op, since a stack's hover mode can depend on the data
  *  (`barStack.netDisplay: auto`). */
 function tooltipSectionError(spec: ChartSpec): string | null {
   if (spec.tooltip_section === undefined) return null;
-  if (spec.columns?.section == null && !facetsDrawAsGroups(spec)) {
+  if (spec.columns?.section == null) {
     return `tooltip_section needs columns.section — it names the hovered row's section in the hover card's header`;
   }
   return null;
@@ -1022,7 +1021,7 @@ const SPEC_RULES: readonly SpecRule[] = [
   single(dumbbellAxisError),
   single(titleSelectorsError),
   single(sectionColumnError),
-  facetGroupErrors,
+  horizontalFacetErrors,
   single(horizontalYAxisMarkerError),
   single(xAxisTicksOrientationError),
   single(waterfallSpecError),
@@ -1303,7 +1302,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // alone, and only a waterfall reads `columns.kind` (elsewhere a missing one changes nothing).
   if (cols.section) requiredRoles.push(["section", cols.section]);
   if (cols.kind && spec.chartType === "waterfall") requiredRoles.push(["kind", cols.kind]);
-  if (spec.small_multiples || facetsDrawAsGroups(spec)) {
+  if (spec.small_multiples) {
     if (!cols.facet) {
       errors.push(`small_multiples requires a facet column — set columns.facet`);
     } else {
@@ -1468,19 +1467,15 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // A sectioned row is identified by section + category (spec/section-key.ts), so the same label may
   // repeat across sections — but one section + category carries one value per series. A second row
   // would be drawn on top of the first, or merged into it by the hover, unseen. Only the sections
-  // section_order keeps: an excluded section's rows are never drawn. A horizontal chart's facets draw
-  // as sections (spec/facet-groups.ts), ordered by small_multiples.pane_order, and are named so here.
-  const groupsByFacet = facetsDrawAsGroups(spec);
-  const groupField = groupsByFacet ? cols.facet : cols.section;
-  const groupNoun = groupsByFacet ? "facet" : "section";
-  if (groupField && columns.has(groupField) && spec.xAxisType === "categorical") {
-    const groupOrder = groupsByFacet ? spec.small_multiples?.pane_order : spec.section_order;
+  // section_order keeps: an excluded section's rows are never drawn.
+  if (cols.section && columns.has(cols.section) && spec.xAxisType === "categorical") {
+    const secField = cols.section;
     const seen = new Set<string>();
     const reported = new Set<string>();
-    for (const r of rowsInSectionOrder(rows, groupOrder, (r) => r[groupField] as string)) {
+    for (const r of rowsInSectionOrder(rows, spec.section_order, (r) => r[secField] as string)) {
       const cat = r[cols.x] as string;
       if (cat == null || cat === "") continue;
-      const sec = (r[groupField] as string) ?? "";
+      const sec = (r[secField] as string) ?? "";
       const series = cols.series ? ((r[cols.series] as string) ?? "") : null;
       const id = JSON.stringify([sec, cat, series]);
       if (!seen.has(id)) { seen.add(id); continue; }
@@ -1488,7 +1483,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
       reported.add(id);
       const what = series != null ? `more than one ${JSON.stringify(series)} value` : "more than one value";
       errors.push(
-        `category ${JSON.stringify(cat)} in ${groupNoun} ${JSON.stringify(sec)} has ${what} — rows are identified by ${groupNoun} + category, so each ${groupNoun}'s row carries one value per series`,
+        `category ${JSON.stringify(cat)} in section ${JSON.stringify(sec)} has ${what} — rows are identified by section + category, so each section's row carries one value per series`,
       );
     }
   }

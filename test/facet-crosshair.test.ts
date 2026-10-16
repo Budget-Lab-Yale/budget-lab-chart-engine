@@ -137,8 +137,8 @@ describe("mountFigure shared crosshair wiring", () => {
   });
 });
 
-// A horizontal chart draws its facets as groups in one chart (spec/facet-groups.ts), so it has no
-// panes to coordinate; the secondary band cursor still draws a horizontal bar's hover.
+// A horizontal chart has no panes to coordinate (columns.facet is rejected there,
+// spec/facet-groups.ts); the secondary band cursor still draws a horizontal bar's hover.
 describe("secondary band cursor — horizontal bars (row highlight + tip pills)", () => {
   const spec: ChartSpec = {
     chartType: "bar",

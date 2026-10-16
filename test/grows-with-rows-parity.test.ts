@@ -4,8 +4,8 @@
 // (computeChartHeight) and the PNG export (buildExportSvg). They used to write the predicate out
 // separately, and F14 was a drift between them (the export left horizontal dumbbells out). Both now
 // ask `growsWithRows`; this pins that they agree for every chart type and orientation, omitted
-// included. (A chart that grows with its rows is never a small-multiples figure: its facets draw as
-// groups, spec/facet-groups.ts.)
+// included. (A chart that grows with its rows is never a small-multiples figure: columns.facet is
+// rejected on it, spec/facet-groups.ts.)
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { computeChartHeight } from "../src/engine/render-live";
 import { growsWithRows, horizontalBarChartHeight } from "../src/engine/figure";

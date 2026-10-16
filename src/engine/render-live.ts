@@ -898,7 +898,7 @@ function mountFigure(container: HTMLElement, opts: MountOptions): () => void {
   // Dot-plot AND bar/stacked panes render ~33% taller (320); waterfall panes taller still (420) to
   // clear rotated step labels; line/scatter keep the default (240). Single source of truth shared
   // with the PNG export (export-png.ts) so the two paths can't drift. (A horizontal bar, stack or
-  // dumbbell is never a figure: its facets draw as groups, spec/facet-groups.ts.)
+  // dumbbell is never a figure: `columns.facet` is rejected on it, spec/facet-groups.ts.)
   const figHeight = figurePaneHeight(spec);
 
   const drawGrid = (outerWidth: number, renderPhase?: "mount" | "resize" | "reselect"): void => {

@@ -194,7 +194,7 @@ type Family = {
   slug: string;
   mount: (faceted: boolean) => Case;
   /** false: no 2-pane cell — the family rejects small_multiples (timeline, treemap) or draws
-   *  facets as groups in one chart (a horizontal dumbbell). */
+   *  no panes (a horizontal dumbbell, which rejects columns.facet). */
   panes?: false;
 };
 

@@ -691,12 +691,13 @@ describe("D6: horizontal xAxis marker label sits in the top margin (fig07b regre
   });
 });
 
-// --- Faceted horizontal bars (Figure 7: scenario groups, grouped Pre/Post bars) ---
+// --- Grouped horizontal bars (Figure 7: scenario groups, grouped Pre/Post bars) ---
 //
-// A horizontal chart draws columns.facet as groups in one chart, as columns.section does (Ruling 80;
-// spec/facet-groups.ts), so this renders through renderChart.
+// The scenarios are sections of one chart (columns.section; columns.facet is rejected on a horizontal
+// chart, spec/facet-groups.ts). The golden was recorded from the facet spelling, which Ruling 80
+// mapped exactly to this one.
 
-const FIG7_FACETED_SPEC: ChartSpec = {
+const FIG7_GROUPED_SPEC: ChartSpec = {
   chartType: "bar",
   title: "Consumer Price Effects by PCE Spending Category",
   subtitle: "Percent change in consumer prices",
@@ -704,15 +705,12 @@ const FIG7_FACETED_SPEC: ChartSpec = {
   xAxisType: "categorical",
   orientation: "horizontal",
   series_order: ["Pre-Substitution", "Post-Substitution"],
-  columns: { x: "category", value: "value", series: "series", facet: "facet" },
-  small_multiples: {
-    mode: "shared",
-    pane_order: ["Section 122 Expires", "Section 122 Extended"],
-  },
+  columns: { x: "category", value: "value", series: "series", section: "facet" },
+  section_order: ["Section 122 Expires", "Section 122 Extended"],
   data: "figure7-tariff.csv",
 };
 
-describe("faceted horizontal bars draw as groups (Figure 7)", () => {
+describe("grouped horizontal bars (Figure 7)", () => {
   // At the height the live mount and the PNG export give it (it grows with its rows), not the
   // 353px default, which squeezes 80 bars to 2px.
   const fig7 = (spec: ChartSpec, rows: TidyRow[]) =>
@@ -723,9 +721,9 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
       .sort((a, b) => a.y - b.y)
       .map((h) => h.text);
 
-  it("one chart: a title per facet in pane_order over its own rows, one value axis", () => {
+  it("one chart: a title per section in section_order over its own rows, one value axis", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = fig7(FIG7_FACETED_SPEC, rows);
+    const { svg } = fig7(FIG7_GROUPED_SPEC, rows);
     expect(groupTitles(svg)).toEqual(["Section 122 Expires", "Section 122 Extended"]);
     // Both groups' bars: 2 groups × 20 categories × 2 series.
     expect(svg.querySelectorAll('g[aria-label="bar"] rect').length).toBe(80);
@@ -740,7 +738,7 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
 
   it("wraps long category labels onto multiple lines (no overflow into the plot)", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = fig7(FIG7_FACETED_SPEC, rows);
+    const { svg } = fig7(FIG7_GROUPED_SPEC, rows);
     const wrapped = Array.from(svg.querySelectorAll("text")).find((t) =>
       (t.textContent ?? "").startsWith("Food and beverages"),
     );
@@ -750,15 +748,15 @@ describe("faceted horizontal bars draw as groups (Figure 7)", () => {
 
   it("x_axis_ticks 'both' draws one value-tick row at the top and one at the bottom", () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const { svg } = fig7({ ...FIG7_FACETED_SPEC, x_axis_ticks: "both" }, rows);
+    const { svg } = fig7({ ...FIG7_GROUPED_SPEC, x_axis_ticks: "both" }, rows);
     expect(svg.querySelectorAll("g.tbl-x-tick-label").length).toBe(1);
     expect(svg.querySelectorAll("g.tbl-x-tick-label-top").length).toBe(1);
   });
 
   it("is deterministic and matches the golden", async () => {
     const rows = parseCsv("./fixtures/figure7-tariff.csv");
-    const a = fig7(FIG7_FACETED_SPEC, rows).svg.outerHTML;
-    const b = fig7(FIG7_FACETED_SPEC, rows).svg.outerHTML;
+    const a = fig7(FIG7_GROUPED_SPEC, rows).svg.outerHTML;
+    const b = fig7(FIG7_GROUPED_SPEC, rows).svg.outerHTML;
     expect(a).toBe(b);
     await expect(a).toMatchFileSnapshot("./fixtures/figure7-tariff-grouped.golden.svg");
   });
@@ -1851,9 +1849,10 @@ describe("golden figure — per-pane stacked small multiples (renderFigure, task
   });
 });
 
-// Faceted HORIZONTAL stacked: the facets draw as groups in one chart (Ruling 80), each plan's rows
-// under its title, the diverging net dot on every row. Reuses the diverging fixture.
-const HSTACK_SHARED_SPEC: ChartSpec = {
+// Grouped HORIZONTAL stacked: each plan a section of one chart, its rows under its title, the
+// diverging net dot on every row. Reuses the diverging fixture. The golden was recorded from the
+// facet spelling, which Ruling 80 mapped exactly to this one.
+const HSTACK_GROUPED_SPEC: ChartSpec = {
   chartType: "stacked",
   orientation: "horizontal",
   title: "Contributions to the net effect, by plan",
@@ -1861,18 +1860,15 @@ const HSTACK_SHARED_SPEC: ChartSpec = {
   xAxisType: "categorical",
   series_order: ["Lower rates", "Wider brackets", "Limit deductions", "Repeal credit"],
   data: "figure-stacked-perpane.csv",
-  columns: { x: "time", facet: "facet" },
-  small_multiples: {
-    mode: "shared",
-    pane_order: ["Plan A", "Plan B"],
-    pane_titles: { "Plan A": "Plan A", "Plan B": "Plan B" },
-  },
+  columns: { x: "time", section: "facet" },
+  section_order: ["Plan A", "Plan B"],
+  section_labels: { "Plan A": "Plan A", "Plan B": "Plan B" },
 };
 
-describe("golden — faceted horizontal stacked draws as groups", () => {
+describe("golden — grouped horizontal stacked", () => {
   it("one chart: each plan's rows under its title; a net dot per row", async () => {
     const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
-    const r = renderChart(HSTACK_SHARED_SPEC, rows, { width: 720, document });
+    const r = renderChart(HSTACK_GROUPED_SPEC, rows, { width: 720, document });
     const svg = r.svg as SVGSVGElement;
     const titles = Array.from(svg.querySelectorAll('g[font-weight="700"] text')).map((t) => t.textContent);
     expect(titles).toEqual(expect.arrayContaining(["Plan A", "Plan B"]));
@@ -1886,8 +1882,8 @@ describe("golden — faceted horizontal stacked draws as groups", () => {
 
   it("render is deterministic (byte-identical)", () => {
     const rows = parseCsv("./fixtures/figure-stacked-perpane.csv");
-    const a = renderChart(HSTACK_SHARED_SPEC, rows, { width: 720, document }).svg.outerHTML;
-    const b = renderChart(HSTACK_SHARED_SPEC, rows, { width: 720, document }).svg.outerHTML;
+    const a = renderChart(HSTACK_GROUPED_SPEC, rows, { width: 720, document }).svg.outerHTML;
+    const b = renderChart(HSTACK_GROUPED_SPEC, rows, { width: 720, document }).svg.outerHTML;
     expect(a).toBe(b);
   });
 });

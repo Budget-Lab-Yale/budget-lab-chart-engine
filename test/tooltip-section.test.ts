@@ -68,13 +68,6 @@ const dbRows = (): TidyRow[] =>
     { bar, sec, m: "Cash", v: String(20 + i) },
     { bar, sec, m: "Accrual", v: String(8 + i) },
   ]) as unknown as TidyRow[];
-// A horizontal chart's facets draw as sections (spec/facet-groups.ts), titled by pane_titles.
-const { section_labels: _sl, ...DUMBBELL_UNLABELLED } = DUMBBELL;
-const DUMBBELL_FACETS: ChartSpec = {
-  ...DUMBBELL_UNLABELLED,
-  columns: { category: "bar", series: "m", value: "v", facet: "sec" },
-  small_multiples: { pane_titles: LABELS.section_labels },
-};
 // A plain bar hovers with value pills.
 const barRows = (): TidyRow[] =>
   CATS.map(([bar, sec], i) => ({ bar, sec, v: String(10 + i) })) as unknown as TidyRow[];
@@ -121,7 +114,6 @@ const WITHOUT = ["Before any response", "After response", "Before any response",
 const CASES: Array<[string, ChartSpec, () => TidyRow[]]> = [
   ["stacked (card)", STACK, stackRows],
   ["dumbbell", DUMBBELL, dbRows],
-  ["dumbbell, facets as groups", DUMBBELL_FACETS, dbRows],
 ];
 
 describe("tooltip_section: the card header names the section first", () => {
@@ -177,7 +169,7 @@ describe("tooltip_section: the card header names the section first", () => {
 describe("tooltip_section: validation", () => {
   const ok = (spec: ChartSpec) => validateSpec(spec);
   it("accepted on a sectioned stack and dumbbell", () => {
-    for (const spec of [STACK, DUMBBELL, DUMBBELL_FACETS]) {
+    for (const spec of [STACK, DUMBBELL]) {
       for (const v of [true, false]) expect(ok({ ...spec, tooltip_section: v }).valid, spec.chartType).toBe(true);
     }
   });

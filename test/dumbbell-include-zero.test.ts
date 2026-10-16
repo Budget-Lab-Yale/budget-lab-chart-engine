@@ -80,7 +80,7 @@ describe("dumbbell — yAxisPolicy.includeZero", () => {
     expect(Math.max(...t)).toBe(50);
   });
 
-  it("true on a faceted chart (its facets drawn as groups): the one range starts at 0", () => {
+  it("true on a sectioned chart: the one range starts at 0", () => {
     const rows = [
       ...ROWS.map((r) => ({ ...r, pane: "A" })),
       ...ROWS.map((r) => ({ ...r, pane: "B", rate: String(Number((r as unknown as { rate: string }).rate) + 5) })),
@@ -88,8 +88,7 @@ describe("dumbbell — yAxisPolicy.includeZero", () => {
     const spec = withPolicy(
       { includeZero: true },
       {
-        columns: { category: "group", series: "measure", value: "rate", facet: "pane" },
-        small_multiples: { mode: "shared" },
+        columns: { category: "group", series: "measure", value: "rate", section: "pane" },
       },
     );
     const svg = renderChart(spec, rows, { width: 720, document }).svg as SVGSVGElement;

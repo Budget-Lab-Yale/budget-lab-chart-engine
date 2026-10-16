@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
 // A dumbbell with `orientation` omitted is HORIZONTAL (CONFIG-SPEC "Dumbbell options"; the mark,
-// marks/dumbbell.ts). Every other place that branches on a dumbbell's orientation — the facets drawn
-// as groups (spec/facet-groups.ts), the live mount (chart height, hover band) and the PNG export —
+// marks/dumbbell.ts). Every other place that branches on a dumbbell's orientation — sections,
+// validation (spec/facet-groups.ts), the live mount (chart height, hover band) and the PNG export —
 // must agree, so an omitted orientation renders exactly like an explicit `orientation: horizontal`.
 // Before, those places tested `=== "horizontal"`: a faceted dumbbell with no orientation sat side by
 // side at a fixed 320px height and clipped long labels.
@@ -31,7 +31,7 @@ const BASE: ChartSpec = {
   series_order: ["a", "b"],
   data: "d.csv",
 };
-const FACETED: ChartSpec = { ...BASE, columns: { ...BASE.columns, facet: "pane" } };
+const SECTIONED: ChartSpec = { ...BASE, columns: { ...BASE.columns, section: "pane" } };
 
 const paneRows = (pane: string, groups: string[]) =>
   groups.flatMap((g, i) => [
@@ -63,15 +63,15 @@ function liveHtml(spec: ChartSpec): string {
 
 describe("dumbbell with orientation omitted lays out as horizontal", () => {
   {
-    const spec: ChartSpec = { ...FACETED, small_multiples: { mode: "shared" } };
+    const spec: ChartSpec = SECTIONED;
 
-    it("faceted, live mount: one grouped chart, identical to orientation: horizontal", () => {
+    it("sectioned, live mount: one chart, identical to orientation: horizontal", () => {
       const html = liveHtml(omitted(spec));
       expect(html).not.toContain("figure-pane");
       expect(html).toBe(liveHtml(horizontal(spec)));
     });
 
-    it("faceted, PNG export: identical to orientation: horizontal", () => {
+    it("sectioned, PNG export: identical to orientation: horizontal", () => {
       expect(buildExportSvg(omitted(spec), ROWS).outerHTML).toBe(buildExportSvg(horizontal(spec), ROWS).outerHTML);
     });
   }

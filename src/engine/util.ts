@@ -1,15 +1,17 @@
 import type { ChartSpec, ValueAffixes } from "../spec/types";
 import type { RenderHooks, ValueLabelHookCtx } from "../spec/hooks";
 import { categoryText } from "../spec/section-key";
-import { facetsAsGroups } from "../spec/facet-groups";
+import { assertNoHorizontalFacet } from "../spec/facet-groups";
 
 /** `spec` as every exported entry that takes one renders it: renderChart, renderFigure, mountChart,
  *  buildExportSvg, and the renderers they dispatch to that are exported in their own right
  *  (renderPane, shapeDomainOver, renderTreemap, renderTimeline). Repeated order entries are dropped
- *  (withoutRepeatedOrderEntries) and a horizontal chart's `columns.facet` is drawn as groups
- *  (spec/facet-groups.ts, Ruling 80). A spec neither touches is returned as is, the same object. */
+ *  (withoutRepeatedOrderEntries), and a horizontal chart's `columns.facet`, which validation rejects,
+ *  throws that validation message (spec/facet-groups.ts) rather than drawing. A spec with no repeat is
+ *  returned as is, the same object. */
 export function normalizeSpec(spec: ChartSpec): ChartSpec {
-  return facetsAsGroups(withoutRepeatedOrderEntries(spec));
+  assertNoHorizontalFacet(spec);
+  return withoutRepeatedOrderEntries(spec);
 }
 
 /** `spec` with each repeated `series_order` / `shape_order` entry dropped, the first kept. A repeat is

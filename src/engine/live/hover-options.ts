@@ -17,8 +17,8 @@
 //      cursor (`pillsHearCursor: false`). A histogram pane coordinates only in shared mode. A
 //      standalone chart never coordinates, with one exception: a band chart in pills hover mode
 //      drives its own coordinated cursor, a bus of one (`emitOnly` + the full secondary).
-//   2. Orientation. A pane is always vertical: a horizontal bar, stack or dumbbell draws its facets
-//      as groups in one chart (spec/facet-groups.ts), never as panes. A standalone band or dumbbell
+//   2. Orientation. A pane is always vertical: `columns.facet` is rejected on a horizontal bar, stack
+//      or dumbbell (spec/facet-groups.ts), so it has no panes. A standalone band or dumbbell
 //      reads `orientation` (and, horizontal, the row strip from the left edge + the label accent).
 //   3. Value-pill default: `resolveValuePills(spec, netMode, pane, segmentLabelsDropped)` — a pane
 //      paints no segment labels, so it passes `pane: true` and nothing dropped.

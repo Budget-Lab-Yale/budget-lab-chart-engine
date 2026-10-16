@@ -15,7 +15,6 @@ import { parseDate } from "../spec/parse-time";
 import { ownValue } from "../spec/own-key";
 import { sectionKeyer, categoryText, rowsInSectionOrder } from "../spec/section-key";
 import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
-import { facetsDrawAsGroups } from "../spec/facet-groups";
 import { figurePaneValues } from "../spec/panes";
 import { histogramThresholds } from "./histogram-bin";
 import { domainBounds, isReversedDomain } from "./scales";
@@ -199,7 +198,7 @@ function fitRowsUnder(
 /** Whether a chart's height grows with its category rows: horizontal bar/stacked, and a horizontal
  *  dumbbell (orientation omitted included). The one predicate the live mount (computeChartHeight)
  *  and the PNG export (buildExportSvg) both ask, so the two cannot drift apart. Such a chart is
- *  never a small-multiples figure: its facets draw as groups (spec/facet-groups.ts). */
+ *  never a small-multiples figure: `columns.facet` is rejected on it (spec/facet-groups.ts). */
 export function growsWithRows(spec: ChartSpec): boolean {
   return (
     ((spec.chartType === "bar" || spec.chartType === "stacked") && spec.orientation === "horizontal") ||
@@ -261,7 +260,7 @@ export function horizontalBarChartHeight(spec: ChartSpec, rows: TidyRow[], opts:
 /** Fixed per-pane px height for a small-multiples figure, by chart type — the single source of
  *  truth shared by the live figure mount (render-live) and the PNG export (export-png), so the
  *  two can't drift (the export previously omitted waterfall's taller pane, squashing it to 240).
- *  A horizontal bar, stack or dumbbell is never a figure (its facets draw as groups), so a dumbbell
+ *  A horizontal bar, stack or dumbbell is never a figure (`columns.facet` is rejected on it), so a dumbbell
  *  pane here is a vertical one. */
 export function figurePaneHeight(spec: ChartSpec): number {
   if (spec.chartType === "waterfall") return 420;
@@ -554,7 +553,6 @@ function figureBinThresholds(
  * value exactly on the bound is not past it. Both bounds or neither: none.
  */
 export function loneBoundWarnings(spec: ChartSpec, rows: TidyRow[]): string[] {
-  // A horizontal chart's facets are groups of one chart, on one axis (spec/facet-groups.ts).
   spec = normalizeSpec(spec);
   const { min, max } = spec.yAxisPolicy ?? {};
   if ((min == null) === (max == null)) return [];
@@ -585,11 +583,7 @@ export function renderFigure(
   rows: TidyRow[],
   opts: RenderOptions = {},
 ): FigureRenderResult {
-  if (facetsDrawAsGroups(spec)) {
-    throw new Error(
-      "renderFigure: a horizontal bar, stacked or dumbbell chart draws columns.facet as groups in one chart, not as panes (Ruling 80) — render it with renderChart or render.",
-    );
-  }
+  // Throws for a horizontal chart's columns.facet (spec/facet-groups.ts).
   spec = normalizeSpec(spec);
   const sm = spec.small_multiples;
   if (!sm) throw new Error("renderFigure called without spec.small_multiples.");
@@ -642,8 +636,8 @@ export function renderFigure(
   // every pane's renderPane via opts.binThresholds.
   const binThresholds = figureBinThresholds(spec, rows, cols, mode);
 
-  // A horizontal bar, stacked or dumbbell chart never reaches here: its facets draw as groups of one
-  // chart (spec/facet-groups.ts), and the guard at the top refuses it. So every figure is a vertical
+  // A horizontal bar, stacked or dumbbell chart never reaches here: `columns.facet` is rejected on it
+  // (spec/facet-groups.ts), and normalizeSpec at the top throws. So every figure is a vertical
   // (or non-categorical) grid, with no category gutter, row-sized height or sections.
   const keyOf = rowCategoryKey(rows, cols);
   const effHeight = opts.height;

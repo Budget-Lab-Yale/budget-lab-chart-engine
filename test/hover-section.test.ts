@@ -114,12 +114,8 @@ describe("onHover reports the hovered row's section", () => {
     expect(last().category).toBe("Top 1%");
   });
 
-  it("a horizontal chart's facets are its sections: onHover reports the facet value as the section", () => {
-    const spec = {
-      ...BAR,
-      columns: { x: "group", series: "measure", value: "rate", facet: "ranking" },
-      small_multiples: { pane_order: [WEALTH, INCOME] },
-    } as ChartSpec;
+  it("section_order putting the second section first: onHover reports the section of the row under the pointer", () => {
+    const spec = { ...BAR, section_order: [WEALTH, INCOME] } as ChartSpec;
     const { svgs, hover, last } = mount(spec, rowsOf());
     const ys = rowCentres(svgs[0]!);
     expect(ys).toHaveLength(4);

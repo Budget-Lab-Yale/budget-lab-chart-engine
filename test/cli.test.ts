@@ -28,6 +28,7 @@ import { PNG } from "pngjs";
 import { BUNDLE_PATH } from "./setup/global-build";
 import { CHART_CSS } from "../src/embed/styles";
 import { HAS_BROWSER } from "./helpers/browser";
+import { HORIZONTAL_FACET_ERROR } from "../src/spec/facet-groups";
 
 const EXAMPLE_SPEC = resolve(
   fileURLToPath(new URL("./fixtures/sample-chart/chart.yaml", import.meta.url)),
@@ -154,6 +155,34 @@ describe("runValidate — series_order lists a series twice", () => {
     const result = await runValidate(specPath);
     expect(result.exitCode).toBe(1);
     expect(result.message).toBe(`${specPath}: /series_order: "a" appears more than once`);
+  });
+});
+
+describe("runValidate / runRender — columns.facet on a horizontal chart", () => {
+  // Rejected (spec/facet-groups.ts); snapshot and serve load through the same loadSpecAndRows.
+  it("fails validation with the one message and writes no HTML", async () => {
+    const dir = join(tmpdir(), `cli-test-hfacet-${Date.now()}`);
+    mkdirSync(dir, { recursive: true });
+    const specPath = join(dir, "chart.yaml");
+    const csvPath = join(dir, "data.csv");
+    const outPath = join(dir, "out.html");
+    tempFiles.push(specPath, csvPath, outPath);
+    writeFileSync(csvPath, "cat,pane,value\na,P,1\nb,Q,2\n", "utf8");
+    writeFileSync(
+      specPath,
+      [
+        "chartType: bar", "orientation: horizontal", "title: Test", "xAxisType: categorical", "data: data.csv",
+        "columns: { x: cat, value: value, facet: pane }",
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    const validated = await runValidate(specPath);
+    expect(validated.exitCode).toBe(1);
+    expect(validated.message).toBe(`${specPath}: ${HORIZONTAL_FACET_ERROR}`);
+    const rendered = await runRender(specPath, { outPath, liveBundleJs: STUB_BUNDLE, css: "body{}" });
+    expect(rendered.exitCode).toBe(1);
+    expect(rendered.message).toContain(HORIZONTAL_FACET_ERROR);
+    expect(existsSync(outPath)).toBe(false);
   });
 });
 

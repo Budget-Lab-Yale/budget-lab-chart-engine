@@ -801,7 +801,7 @@ export function buildExportSvg(
     const figMeta = meta as FigureRenderResult;
     const cols = figMeta.columns;
     const gridRows = figMeta.rows;
-    // A horizontal bar, stack or dumbbell is never a figure (its facets draw as groups,
+    // A horizontal bar, stack or dumbbell is never a figure (`columns.facet` is rejected on it,
     // spec/facet-groups.ts), so every pane takes figurePaneHeight's fixed height.
     // Every pane of a figure takes this one height (row-sized chart types are never figures), so
     // fillPanes sizes all grid rows equally to fill the frame, growing or shrinking them, but never

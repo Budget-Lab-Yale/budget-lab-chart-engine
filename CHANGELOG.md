@@ -286,13 +286,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 ### Upgrading
 - **Archive scan** (`budget-lab-charts` at main 8ef220b): every `chart.yaml` and `table.yaml`, 88
   in all (77 figures under `charts/` and 11 slide-pipeline fixtures), validates exactly as it did
-  on 1.18.0. No figure needs a change. The one failure, the slide pipeline's deliberate bad-input
-  fixture `scripts/slides/fixtures/unknown-field/chart.yaml`, already failed.
+  on 1.18.0, except two `ecec-macro` figures that set `columns.facet` on a horizontal stack and need
+  a rename first (see **Horizontal facets**, below). The one other failure, the slide pipeline's
+  deliberate bad-input fixture `scripts/slides/fixtures/unknown-field/chart.yaml`, already failed.
   `budget-lab-interactives` has no specs this engine validates.
 - **Newly rejected** by `tbl-chart validate` (and `validateChart`). Except for table `decimals`
-  from 11 to 100 and `highlightSeries` off a bar or histogram (below), each of these rendered
-  wrongly, blank, or not at all, so a spec that now fails needs fixing, not waiving. The validation
-  changes below alter no rendered output.
+  from 11 to 100, `highlightSeries` off a bar or histogram, and `columns.facet` on a horizontal
+  chart (below), each of these rendered wrongly, blank, or not at all, so a spec that now fails
+  needs fixing, not waiving. The validation changes below alter no rendered output; a horizontal
+  chart's `columns.facet` also stops rendering (see its entry).
   - A spec key that names a value in the data and is not in the data, on every chart type,
     histograms included, wherever the chart reads the field: the `series_*` maps,
     `highlightSeries` (bar, histogram), `series_marker` and `gap_annotation.series_a`/`series_b`
@@ -334,6 +336,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     listed it under the bar and stacked-bar options, but a stacked chart, like the others, drew
     exactly as it would without the field. Stacked charts do not support it. No published figure
     sets the field.
+  - `columns.facet` on a horizontal `bar`, `stacked` or `dumbbell` chart (a dumbbell with
+    `orientation` omitted included), with or without `small_multiples`. Since 1.16.0 the engine drew
+    it as `columns.section` (Ruling 80; see 1.16.0 **Changed**, "Horizontal charts draw
+    `columns.facet` as groups"). It is now one error that names the section spelling, and it
+    replaces the errors 1.16.0 added beside it for `columns.section`, `small_multiples.columns`,
+    `mode`, `pane_widths`, `coordinated_cursor`, `section_order` and `section_labels`. A `facet` on
+    an annotation, `yAxisPolicy.markers` or `overlays` entry is still reported, since the rename
+    does not cover it. `tooltip_section` on such a chart now also reports that it needs
+    `columns.section`. `renderChart`, `renderFigure`, `mountChart` and the PNG export throw the
+    same message instead of drawing the chart, so `budget-lab-interactives`, which renders without
+    validating, fails too. Published specs use it: see **Horizontal facets**, below.
+- **Horizontal facets** (see **Newly rejected**): these specs set `columns.facet` on a horizontal
+  chart and must be migrated before a repin, or they fail validation and do not render. Rename
+  `columns.facet` to `columns.section`, `small_multiples.pane_order` to `section_order` and
+  `small_multiples.pane_titles` to `section_labels`, and delete `small_multiples`. 1.16.0 drew the
+  facet spelling by making exactly that rewrite on the spec (Ruling 80), so after the rename the
+  output is identical: the engine's two goldens recorded from the facet spelling
+  (`figure7-tariff-grouped`, `hstacked-grouped`) match byte for byte from the section spelling.
+  - `budget-lab-charts`: `charts/articles/2026/10/ecec-macro/full-workforce-gdp-by-estimate/chart.yaml`
+    (stacked, `facet: estimate`) and
+    `charts/articles/2026/10/ecec-macro/parental-contributions-by-policy/chart.yaml` (stacked,
+    `facet: year`).
+  - `budget-lab-interactives`, State of Tariffs: `tools/state-of-tariffs/data/manifest.json` (the
+    consumer-prices bar figure, `facet: substitution`, in every tab and vintage) and 43 specs in 31 files under
+    `tools/state-of-tariffs/data/previous-vintages/*/vintage.json`. Either edit those files, or add
+    the rename as a shim in `tools/state-of-tariffs/render.js`, which already rewrites
+    `spec.columns.facet`; the shim is the cheaper route.
 - **No longer rejected**, because they render correctly:
   - `small_multiples.pane_widths` sized to the panes the grid draws, when a facet cell is blank. A
     blank cell is not a pane, but it was counted as one.

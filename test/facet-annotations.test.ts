@@ -294,8 +294,8 @@ describe("horizontal bars — xAxis value-axis markers (RED-proven new capabilit
 
 // ---------------------------------------------------------------------------
 // Composition: ONE marker carrying BOTH `facet` and `value_format` + a `{value}` token, across
-// per-pane and shared vertical yAxis. (A horizontal chart draws its facets as groups, so validation
-// rejects a facet-scoped marker there: spec/facet-groups.ts.) Each pane must render
+// per-pane and shared vertical yAxis. (A horizontal chart has no panes: validation rejects
+// columns.facet and a facet-scoped marker there, spec/facet-groups.ts.) Each pane must render
 // ONLY its own facet-scoped marker, with its label formatted from ITS OWN coordinate value (not
 // a neighboring pane's) — proving the facet filter and the {value} substitution compose
 // correctly rather than one silently overriding or bypassing the other.
