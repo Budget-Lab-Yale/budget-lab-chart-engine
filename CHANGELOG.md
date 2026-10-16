@@ -145,6 +145,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   (mono tiers included); it was ignored. The legend and the PNG key show the dim, and a segment
   label on a dimmed segment is drawn in dark text. A key the data lacks is now a validation
   error on a stacked chart too. No published figure sets the field.
+- Stacked and waterfall value labels without `valueLabels.decimals`: the precision is now the
+  fewest decimals the data needs, as CONFIG-SPEC says. Rounding error in a sum counted as
+  precision, so stacked nets of 1.1 + 2.2 and 1.5 + 2.5 printed "3.30" and "4.00", and a waterfall
+  of 1.1, 2.2, 0.5 printed "1.10", "3.30", "3.80" in its labels and "+1.10" in its value pill, live
+  and in the PNG. They print "3.3", "4.0", "1.1", "3.3", "3.8" and "+1.1". Values are counted to
+  12 significant digits of the chart's largest value. No published figure moves: the archive's
+  stacks without `decimals` hold integer data, and its waterfall sets `decimals`.
+- Value-axis ticks below 1e-6: each tick now prints its value. Every tick printed "0" (or "0.0000")
+  because the decimal count read JavaScript's exponent form ("2e-7"). Ticks take the fewest
+  decimals that write every tick exactly (counted, as above, to 12 significant digits of the
+  largest tick), and never fewer than the tick step has, so every tick prints its own value: a
+  domain pinned to [1e12, 1e12 + 1] reads 1000000000000.0, 1000000000000.2, and so on. No
+  published figure moves.
+- Value labels count decimals to 12 significant digits of the chart's largest value, so where that
+  value is 1e10 or more, decimals below its 12th digit are dropped (a label on 12345678901.25 reads
+  12345678901.3). No published figure has values that large.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
 - CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):

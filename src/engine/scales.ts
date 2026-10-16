@@ -3,7 +3,7 @@ import { d3 } from "./vendor";
 import type { ChartSpec, ChartType, ValueAffixes } from "../spec/types";
 import type { PreparedRow } from "./marks/index";
 import { applyValueAffixes, minMax } from "./util";
-import { fractionDigitsNeeded, valueLabelDecimals } from "./value-decimals";
+import { tickFractionDigits, valueLabelDecimals } from "./value-decimals";
 
 export interface YAxisResult {
   domain: [number, number];
@@ -496,7 +496,7 @@ export function makeTickFormatter(
   ticks: number[],
   affixes: ValueAffixes = { prefix: "", suffix: "" },
 ): (d: number) => string {
-  const maxFrac = fractionDigitsNeeded(ticks);
+  const maxFrac = tickFractionDigits(ticks);
   return (d: number) => {
     if (!Number.isFinite(d)) return "";
     return applyValueAffixes(d.toFixed(maxFrac), affixes);

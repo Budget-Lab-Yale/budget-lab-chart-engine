@@ -958,6 +958,12 @@ describe("tooltip_decimals and a waterfall's hover: the pill ignores it, a card 
     expect(pill(wf({ tooltip_decimals: 3, valueLabels: { decimals: 1 } }))).toEqual(["+5.0"]);
   });
 
+  it("waterfall: the data's precision ignores float noise in the running total (A9)", () => {
+    // The running total 1.1 + 2.2 is 3.3000000000000003; its noise made the pill read "+1.10".
+    const noisy = [["One", "1.1"], ["Two", "2.2"], ["Three", "0.5"]].map(([step, value]) => ({ step, value })) as unknown as TidyRow[];
+    expect(pill(wf({}), noisy)).toEqual(["+1.1"]);
+  });
+
   // Small multiples: a coordinated pane hovers with the same pill (data precision); a pane that
   // hovers with a card instead — coordinated_cursor: false, or a figure with one pane (a waterfall
   // figure is not coordinated with nothing to coordinate) — formats the card with tooltip_decimals.
