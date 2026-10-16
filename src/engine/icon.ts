@@ -495,7 +495,7 @@ export function iconSvgGroup(doc: Document, icon: IconSpec): SVGElement | null {
  *  legend does instead of re-deriving from raw colour maps. Typed structurally rather than importing
  *  LegendItem, which would be a cycle (engine/index imports this module).
  *
- *  A chart that DRAWS no legend row still has one to translate: `buildSeriesKeyRows` (index.ts)
+ *  A chart that DRAWS no legend row still has one to translate: `buildSeriesKeyRows` (legend-items.ts)
  *  resolves a row per series with no legend-presence rule applied, so a lone histogram or waterfall
  *  keys from this same function rather than from a hand-built IconSpec that could drift from it. */
 export function iconFromLegendItem(item: {
@@ -559,9 +559,9 @@ export function iconFromLegendItem(item: {
  *  BOTH sources are legend rows, which is the whole trick. `legendItems` wins where it exists,
  *  because a drawn row is already resolved — symbol, ring, texture and the colour actually painted.
  *  `keyRows` covers the series a legend SUPPRESSES — most often a single unstyled series, though
- *  `legendShowsSeriesRows` (index.ts) is the exact rule and `legend: false` suppresses at any count.
+ *  `legendShowsSeriesRows` (legend-items.ts) is the exact rule and `legend: false` suppresses at any count.
  *  Those charts still tooltip, and they used to key from a separate set of loose channels that
- *  drifted from the legend's rules (see index.ts buildSeriesKeyRows). Filling the gap from the row
+ *  drifted from the legend's rules (see legend-items.ts buildSeriesKeyRows). Filling the gap from the row
  *  the legend would have drawn is what lets those channels be deleted rather than merely bypassed.
  *
  *  It does NOT re-colour. A fill the legend cannot know (`bar_color`, `category_colors`, the

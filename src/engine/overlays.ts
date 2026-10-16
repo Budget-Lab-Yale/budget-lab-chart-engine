@@ -94,7 +94,7 @@ export function overlayLineColor(
 }
 
 /** Does this entry draw in the pane being rendered? SINGLE SOURCE for the draw-time filter and the
- *  value-axis fold (both in index.ts): an overlay that is filtered OUT of a pane must not widen that
+ *  value-axis fold (both in pane.ts): an overlay that is filtered OUT of a pane must not widen that
  *  pane's value axis either — and in `small_multiples.mode: "shared"` the unioned domain then
  *  flattens every pane, including the one that legitimately draws the line. Deriving the two
  *  separately is exactly how they drifted apart.
@@ -177,7 +177,7 @@ function columnPoints(
 }
 
 /** Every `overlays[].column` value the overlay lines of THIS pane actually draw. `column` is real
- *  per-row data, so unlike the constructed kinds it folds into the value-axis extent (see index.ts's
+ *  per-row data, so unlike the constructed kinds it folds into the value-axis extent (see pane.ts's
  *  yForAxis) — otherwise a fitted series that runs above the raw data would silently sit off-frame.
  *
  *  Scoped to what is drawn, via the same `columnPoints`/`overlayDrawsInPane` the geometry uses: a
@@ -189,7 +189,7 @@ export function overlayColumnValues(
   rows: PreparedRow[],
   ctx: {
     /** The adapter's raw `xField`. Anything but "_xn"/"_xd" — i.e. "_xc", a categorical axis —
-     *  renders no overlays at all, matching index.ts's own draw-side guard, so it folds nothing.
+     *  renders no overlays at all, matching pane.ts's own draw-side guard, so it folds nothing.
      *  Narrowed here rather than cast at the call site: a cast would silently make a categorical
      *  axis read `_xn` off every row as NaN. */
     xField: string;

@@ -20,8 +20,11 @@ import { figurePaneValues } from "../spec/panes";
 import { computeThresholds, temporalThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
-import { renderPane, paneXValues, singleChartDrawsNetDots, buildColorMap, buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems, shapeDomainOver, paneValueExtent } from "./index";
-import type { LegendItem, ShapeLegendItem, RenderOptions, PaneResult } from "./index";
+import { renderPane, paneXValues, singleChartDrawsNetDots, shapeDomainOver, paneValueExtent } from "./pane";
+import type { RenderOptions, PaneResult } from "./pane";
+import { buildColorMap } from "./color-map";
+import { buildLegendItems, buildSeriesKeyRows, buildShapeLegendItems } from "./legend-items";
+import type { LegendItem, ShapeLegendItem } from "./legend-items";
 import type { SharedXDomain } from "./x-adapter";
 import { resolveValueAffixes, normalizeSpec } from "./util";
 import { dumbbellRowExtent } from "./marks/dumbbell";
@@ -157,7 +160,7 @@ export const FIT_ROW_CLEAR_PX = FIT_LABEL_LINE_PX - FACETED_CAT_LABEL_PX;
 
 /** The pitch (px) a row-sized chart's per-row MARKS need beyond its bars and labels, or 0: a horizontal
  *  dumbbell's dots, connector and gap label (dumbbellRowExtent), and a stack's net dot when it draws
- *  one (index.ts singleChartDrawsNetDots: the renderer's own row prep, series scope and predicate). Each row's marks are centred on the row, so a row needs its own reach above
+ *  one (pane.ts singleChartDrawsNetDots: the renderer's own row prep, series scope and predicate). Each row's marks are centred on the row, so a row needs its own reach above
  *  the centre plus the reach below the centre of the row before it, plus FIT_ROW_CLEAR_PX. */
 function rowMarksPx(spec: ChartSpec, rows: TidyRow[]): number {
   if (isHorizontalDumbbellSpec(spec)) {
@@ -439,7 +442,7 @@ export interface FigurePane {
   overlayTooltips?: OverlayTooltipLine[];
   /** This pane's key row per series, INCLUDING the ones the figure legend suppresses — a
    *  single-series figure draws no legend but still tooltips. Per-pane, not figure-level, because
-   *  per-pane mode resolves colours independently. See index.ts buildSeriesKeyRows. */
+   *  per-pane mode resolves colours independently. See legend-items.ts buildSeriesKeyRows. */
   seriesKeyRows?: LegendItem[];
 }
 
@@ -676,7 +679,7 @@ export function renderFigure(
   // every pane's symbols and the shape legend index. A pane numbering its own shapes drew a shape
   // another pane also has with a different marker, and the legend (pane 0's) had no row for a shape
   // pane 0 lacks. The list is renderPane's own shape rule run over the rows of every DRAWN pane
-  // (index.ts shapeDomainOver), so a figure whose panes already agreed resolves the list each pane
+  // (pane.ts shapeDomainOver), so a figure whose panes already agreed resolves the list each pane
   // did and renders unchanged. Unlike a series' colour position, a shape found only in a pane
   // pane_order leaves out takes no position: the panes never counted it, and neither did the legend.
   const figureShapes =

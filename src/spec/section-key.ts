@@ -2,7 +2,7 @@
 // category; its display text is still the category. So "Top 1%" under "Ranked by income" and
 // "Top 1%" under "Ranked by net worth" are two rows that both read "Top 1%".
 //
-// Every chart type reads this through one point: renderPane's row prep (engine/index.ts
+// Every chart type reads this through one point: renderPane's row prep (engine/pane.ts
 // `prepareRows`) rewrites `_xc` to the key, so the band domain, hover resolution and DOM tagging
 // all see distinct rows without any per-mark code. Callers that read raw rows (figure heights) key
 // them through `sectionKeyer` too. Reader-facing text goes back through `categoryText`.

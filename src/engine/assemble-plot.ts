@@ -219,7 +219,7 @@ function labelsInside(
   );
 }
 
-/** A point callout as index.ts hands it to assemblePlot: coordinates resolved, plus the display
+/** A point callout as pane.ts hands it to assemblePlot: coordinates resolved, plus the display
  *  strings its `{point_label}` / `{x}` / `{series}` tokens read. The VALUES are computed where the
  *  rows are; the substitution happens here, in one pass with `{value}`, so a data cell that happens
  *  to contain "{value}" is never re-expanded by a second pass. */
@@ -238,7 +238,7 @@ export interface AssembleOptions {
   colors: Map<string, string>;
   spec: ChartSpec;
   /** Point callouts with any series-snap / `point:` coordinates already resolved and the row-token
-   *  VALUES attached (index.ts has the data). When present, used instead of spec.annotations.points
+   *  VALUES attached (pane.ts has the data). When present, used instead of spec.annotations.points
    *  so the resolved coordinates render. */
   points?: ResolvedPointCallout[];
   /** The resolved x-axis domain as a numeric span [min,max] (ms for dates) — the coordinate space
@@ -983,7 +983,7 @@ export function assemblePlot({
     });
   }
 
-  // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by index.ts
+  // 6c. Point callouts: a label at a data coordinate (x, y); y is explicit or resolved by pane.ts
   //     (series-snap). With connector, draw a plain leader LINE from the label to the point — the
   //     label offset (dx/dy px) is converted to a second data coordinate via the x/y extents so
   //     the leader aims exactly at the point, then stops `LEADER_END_INSET` short of its centre.
@@ -993,7 +993,7 @@ export function assemblePlot({
     const p = pointsAnn[pi]!;
     // `px` is a number/Date on a numeric/temporal axis, or the CATEGORY STRING on a band scale
     // (Plot positions it at the bar center) — so point callouts now land on bar-type charts too.
-    // A `point:` callout arrives with `x` filled in by index.ts (or was dropped there); one that
+    // A `point:` callout arrives with `x` filled in by pane.ts (or was dropped there); one that
     // reaches this loop without `x` has no anchor and draws nothing.
     if (p.x == null) continue;
     const px = xOpts.markerToX({ x: p.x });

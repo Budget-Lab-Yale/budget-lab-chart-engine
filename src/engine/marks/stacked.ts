@@ -60,7 +60,7 @@ function hasNegativeValues(data: PreparedRow[]): boolean {
 
 /** Whether a stack over `data` (its in-scope rows, as the builder receives them) draws net dots, given
  *  the chart's drawn series count. The builder decides with this, and so does the height model (via
- *  index.ts singleChartDrawsNetDots), so a fitted row pitch is floored for exactly the dots drawn. */
+ *  pane.ts singleChartDrawsNetDots), so a fitted row pitch is floored for exactly the dots drawn. */
 export function netDotsDrawn(spec: ChartSpec, data: PreparedRow[], seriesCount: number): boolean {
   return drawsNetDots(resolveNetMode(spec, hasNegativeValues(data)), seriesCount);
 }

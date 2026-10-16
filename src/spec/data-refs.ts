@@ -77,7 +77,7 @@ const notHistogram = (s: ChartSpec): boolean => s.chartType !== "histogram";
 const dumbbell = (s: ChartSpec): boolean => s.chartType === "dumbbell";
 
 /** `x_labels` is read in two places only: the hover CARD's header, and a callout label's `{x}` token
- *  (engine/index.ts xTokenFor). Checked where one of them is certain to read it: a callout using
+ *  (engine/pane.ts xTokenFor). Checked where one of them is certain to read it: a callout using
  *  `{x}`, a dumbbell (whose card survives every layout), or a standalone categorical line, area or
  *  dot plot. Bars, stacks and waterfalls hover with value pills in most layouts, and a coordinated
  *  small-multiples pane replaces its card with the cursor's RAW category echo, so there the field is

@@ -36,7 +36,7 @@ export interface BuildXOptsOptions {
   /** Categorical axis: horizontal / wrapped / rotated category labels. */
   labelMode?: BandLabelMode;
   /** Categorical axis: stamp the hover-accent hook class on the category labels — passed true for
-   *  bar/stacked charts only (see index.ts), so other categorical chart types (categorical-x line,
+   *  bar/stacked charts only (see pane.ts), so other categorical chart types (categorical-x line,
    *  dot plot) stay byte-identical. */
   tagCategoryLabels?: boolean;
   /** Reserved px between the plot frame's bottom edge and the tick labels — the x-axis rug's strip

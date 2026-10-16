@@ -42,7 +42,7 @@ export interface TooltipHookCtx {
 /** One legend row. `rendered` is the engine's own key markup for THIS row, in `medium`'s
  *  vocabulary, so a hook can wrap rather than replace it. `color` is `undefined` for a row with
  *  no colour of its own — e.g. a cumulative stack's Total row, whose dot draws the neutral `net`
- *  ink instead — matching `LegendItem.color` (engine/index.ts), which the declared `string` here
+ *  ink instead — matching `LegendItem.color` (engine/legend-items.ts), which the declared `string` here
  *  did not.
  *
  *  A RETURNED string must be written for `medium`, not merely echo `rendered` unchanged and hope:

@@ -65,7 +65,7 @@ function paneRows(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns): Tidy
 const seriesOf = (r: TidyRow, cols: ResolvedColumns): string =>
   cols.series ? ((r[cols.series] as string) ?? "") : SINGLE_SERIES_KEY;
 
-/** A pane's series, as the engine scopes them (engine/index.ts `scopeToSeries`). */
+/** A pane's series, as the engine scopes them (engine/pane.ts `scopeToSeries`). */
 function paneSeries(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns): string[] {
   const present = [...new Set(rows.map((r) => seriesOf(r, cols)))];
   return spec.series_order?.length ? spec.series_order.filter((s) => present.includes(s)) : present;
@@ -134,7 +134,7 @@ function waterfallGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumn
  *  - histogram (marks/histogram.ts): highlight dimming; else, on one series, `bar_color` if set;
  *    else the accent (one series) and the series colour.
  *  - stacked: a `barStack.mono` stack paints tonal tiers, never an authored colour. Otherwise the
- *    accent (one series) and the series colour, through the colour map (engine/index.ts).
+ *    accent (one series) and the series colour, through the colour map (engine/pane.ts).
  *  - area: the accent (one series) and the series colour. */
 function seriesGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns): Ground[] {
   const out: Ground[] = [];

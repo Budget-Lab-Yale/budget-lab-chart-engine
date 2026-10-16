@@ -1,7 +1,7 @@
 // Overlay marks: the resolved polylines (engine/overlays.ts) turned into Plot marks.
 //
 // Not a chartType builder — overlays apply to every numeric/temporal-x chart type, so they are built
-// once in index.ts and pushed into whichever builder's layers, for the same reason assemblePlot owns
+// once in pane.ts and pushed into whichever builder's layers, for the same reason assemblePlot owns
 // the generic chrome rather than each builder repeating it.
 //
 // The line paints in `overlay` (above the data marks: a fit hidden behind a dense scatter is not a fit
@@ -10,7 +10,7 @@
 // That split is what `confidence_bands` already does.
 //
 // CLIPPING: both carry `clip: true` UNCONDITIONALLY, not from ctx.clipMarks. That flag is computed
-// from the DATA's drawn extent (index.ts) and knows nothing about overlays, while the y domain is
+// from the DATA's drawn extent (pane.ts) and knows nothing about overlays, while the y domain is
 // pinned (assemble-plot.ts) — so `method: lm` with `domain: axis` on a steep slope, or `fun: "x^2"`,
 // would paint over the axis labels and the title. Overlay LABELS are not clipped, per the standing
 // decision recorded on MarkContext.clipMarks: a half-cut label reads worse than one past the axis.

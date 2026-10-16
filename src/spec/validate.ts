@@ -1330,7 +1330,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   // The one matched row must also carry a numeric value — an empty value cell is legal data (the
   // per-row check below allows it) but gives the callout no y — and must be a row the figure DRAWS:
   // `series_order` and the shape domain are inclusion filters (buildPointMarks draws no dot for a
-  // row outside either — the inferred shape domain omits a blank cell, index.ts), the callout's own
+  // row outside either — the inferred shape domain omits a blank cell, pane.ts), the callout's own
   // `facet:` keeps it out of every pane but that one (where its row is absent), and a blank facet
   // cell or one `small_multiples.pane_order` omits is not a rendered pane (figure.ts). In each case
   // the label would point at an observation that is not drawn — or not be drawn itself — without a
@@ -1347,7 +1347,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
         errors.push(`annotations.points[${i}].point ${JSON.stringify(p.point)} matches ${n} rows — a keyed callout must name exactly one; disambiguate the ${JSON.stringify(rawPointLabel)} cells or anchor the callout by x and y`);
       } else {
         const row = matched[0] as TidyRow;
-        // Blank exactly as the engine reads it (`valRaw === ""` gives `_y: null`, index.ts). A
+        // Blank exactly as the engine reads it (`valRaw === ""` gives `_y: null`, pane.ts). A
         // whitespace-only or non-numeric cell is already reported once per row below, so only
         // blankness is this callout's own error.
         const valRaw = (row[cols.value] as string | undefined) ?? "";
@@ -1413,7 +1413,7 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
 
   // INVARIANT: every column whose cells the value axis reads gets ONE numeric-or-empty check —
   // `value` above, the CI columns, and a `column` overlay's column. The overlay column is not
-  // optional here: engine/index.ts reads it with unary `+` and skips anything non-finite, so a
+  // optional here: engine/pane.ts reads it with unary `+` and skips anything non-finite, so a
   // mistyped cell does not drop a point, it drops the VERTEX and reroutes the line straight from
   // its neighbours — byte-identical to a blank cell and invisible to the author. A genuinely blank
   // cell stays legitimate (isNumericOrEmpty accepts ""): blank means absent, per CONFIG-SPEC.md.

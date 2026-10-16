@@ -328,7 +328,7 @@ export interface Overlay {
   intercept?: number;
   /** KIND 4 — a data column holding a precomputed value per row (a fit produced in Stata, R or
    *  Python), drawn as a line over the marks. Unlike the other three kinds, this is real per-row data
-   *  and therefore DOES fold into the value-axis extent — see index.ts's yForAxis. */
+   *  and therefore DOES fold into the value-axis extent — see pane.ts's yForAxis. */
   column?: string;
   /** `method` and `column`: one line per colour series (`series`, default) or one over every in-scope
    *  point (`none`). Rejected on `fun` and `slope`+`intercept`, which do not read the data. */
