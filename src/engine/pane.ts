@@ -31,7 +31,7 @@ import type { BandLabelMode } from "./axes";
 import { makeXAdapter, numericAxisDomain } from "./x-adapter";
 import type { XAdapter, SharedXDomain } from "./x-adapter";
 import { parseDate } from "../spec/parse-time";
-import { binValues, computeThresholds, temporalThresholds, normalizeBinned } from "./histogram-bin";
+import { binValues, histogramThresholds, normalizeBinned } from "./histogram-bin";
 import type { BinInput, BinnedRow } from "./histogram-bin";
 import { markBuilderFor } from "./marks/index";
 import type { PreparedRow, MarkLayers, MarkContext } from "./marks/index";
@@ -494,16 +494,7 @@ function histogramPaneRows(
       })
       .filter((r) => Number.isFinite(r.x));
     const values = inputs.map((r) => r.x);
-    const bw = spec.histogram?.binWidth;
-    const thresholds =
-      binThresholds ??
-      (isTemporal
-        ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
-        : computeThresholds(values, {
-            bins: spec.histogram?.bins,
-            binWidth: typeof bw === "number" ? bw : undefined,
-            domain: spec.histogram?.domain,
-          }));
+    const thresholds = binThresholds ?? histogramThresholds(values, spec.histogram, isTemporal);
     binned = binValues(inputs, {
       thresholds,
       normalize: spec.histogram?.normalize,

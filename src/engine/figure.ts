@@ -17,7 +17,7 @@ import { sectionKeyer, categoryText, rowsInSectionOrder } from "../spec/section-
 import { isHorizontalDumbbell as isHorizontalDumbbellSpec } from "../spec/dumbbell-orientation";
 import { facetsDrawAsGroups } from "../spec/facet-groups";
 import { figurePaneValues } from "../spec/panes";
-import { computeThresholds, temporalThresholds } from "./histogram-bin";
+import { histogramThresholds } from "./histogram-bin";
 import type { TidyRow } from "../data/index";
 import type { PreparedRow, MarkLayers } from "./marks/index";
 import { renderPane, paneXValues, singleChartDrawsNetDots, shapeDomainOver, paneValueExtent } from "./pane";
@@ -542,14 +542,7 @@ function figureBinThresholds(
   const values = rows
     .map((r) => (isTemporal ? parseDate(r[cols.x] ?? "").getTime() : +(r[cols.x] ?? "")))
     .filter((v) => Number.isFinite(v));
-  const bw = spec.histogram?.binWidth;
-  return isTemporal
-    ? temporalThresholds(values, bw, spec.histogram?.bins, spec.histogram?.domain)
-    : computeThresholds(values, {
-        bins: spec.histogram?.bins,
-        binWidth: typeof bw === "number" ? bw : undefined,
-        domain: spec.histogram?.domain,
-      });
+  return histogramThresholds(values, spec.histogram, isTemporal);
 }
 
 /**
@@ -694,7 +687,6 @@ export function renderFigure(
     const drawn = new Set(paneShapes.flatMap((s) => s ?? []));
     return buildShapeLegendItems(spec, { ...layers, shapeNames: figureShapes.filter((s) => drawn.has(s)) }, figureShapes);
   };
-  const paneShapes: Array<string[] | undefined> = [];
   // 2. Grid layout. columns = config else default; rows = ceil(n / columns). col = i % columns,
   //    row = floor(i / columns).
   // Column count: a live-layer override (responsive reflow) wins, else the spec config, else the
@@ -781,66 +773,51 @@ export function renderFigure(
     return { mode: worst, marginBottom: Math.max(...paneCats.map((p) => bandLabelMarginBottom(p.cats, worst))) };
   };
 
-  // PER-PANE mode: each pane is its OWN single-frame SVG with an independent y-scale and units
-  // (a continuous x range is still shared — see sharesXRange) (Plot faceting can't give
-  // independent y-scales, so we render + compose N
-  // mini-SVGs instead of one faceted SVG). Each pane gets a distinct deterministic
-  // classNameSuffix ("p0", "p1", …) so clip-path ids stay unique across the composed DOM, and
-  // `pane: true` thins its line stroke.
-  if (mode === "per-pane") {
-    // Keep the first pane's full PaneResult so the figure-level legend reads its real mark
-    // layers (rect swatches for bar/stacked, the diverging-stack "Total" extra, mono/categorical
-    // seriesColors). Line panes carry a dashedNames-only layer, so this is a no-op for them.
-    // Variable pane widths in per-pane mode: distribute the inner data width by the resolved
-    // weights, but EVERY column keeps its own full y-label gutter (independent axes). Absent
-    // (equal) ⇒ leave widths undefined so the live grid uses equal `1fr` columns as before.
-    const perPaneWidths = variableWidths
-      ? perPaneColumnWidths(availW, columns, gridGap, colWeights).colWidths
-      : undefined;
-    // Coordinate x-label rotation/wrap + bottom margin across panes so their baselines align — each
-    // pane draws its own x-axis, so a pane with longer/rotated labels would otherwise sit lower.
-    // Data width per column: the variable per-pane widths, else the single equal pane width.
-    const perPaneDataW = perPaneWidths
-      ? perPaneWidths.map((w) => w - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT)
-      : Array.from({ length: columns }, () => (opts.width ?? availW) - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT);
-    const { mode: ppXLabelMode, marginBottom: ppMarginBottom } = coordinateXLabels(perPaneDataW);
+  const paneRowsOf = (value: string): TidyRow[] => rows.filter((r) => (r[facetField] as string) === value);
+
+  // A probe render of one pane over its own rows (classNameSuffix "probe", SVG discarded), which
+  // each mode reads its shared ranges off. `binThresholds` is only ever set in shared mode
+  // (figureBinThresholds), so a per-pane probe passes none.
+  const probePane = (value: string): PaneResult =>
+    renderPane(
+      spec,
+      paneRowsOf(value),
+      {
+        ...opts,
+        height: effHeight,
+        pane: true,
+        paneFacetValue: value,
+        ...(binThresholds ? { binThresholds } : {}),
+      },
+      "probe",
+    );
+
+  // Both modes render their panes through this ONE loop, so the result collection cannot drift
+  // between them (it has: `paneFills` was once pushed only in per-pane mode, so shared mode, the
+  // DEFAULT, handed firstPainted() an empty map and its legend fell through to the palette — panes
+  // painted a `highlightSeries`-dimmed series grey, the one legend over them keyed it amber;
+  // key-agreement.test.ts asserts both modes against the fill the panes are drawn in). The modes
+  // differ only in the options `modeOpts` adds per pane (domain and layout policy), which follow the
+  // common ones exactly as the two loops' option literals once did. Panes render in pane order, each
+  // with classNameSuffix `p${i}`, and each pane's afterRender fires right after its own render.
+  const renderPanes = (modeOpts: (col: number) => Partial<RenderOptions>) => {
+    // The first pane's mark layers, for the figure-level legend (rect swatches for bar/stacked, the
+    // diverging-stack "Total" extra, mono/categorical seriesColors), and its value formatter, for a
+    // `{value}` token in a keyed annotation label. Per-pane mode: each pane has its own scale, so the
+    // first one keys them. Shared mode: every pane shares one value scale, so it IS the figure's.
     let firstLayers: MarkLayers | undefined;
-    // The first pane's value formatter, for a `{value}` token in a keyed annotation label (per-pane
-    // mode: each pane has its own scale, so the first one keys them).
     let firstFormatValue: ((v: number) => string) | undefined;
-    // Each pane's PAINTED textures, in pane order — folded into the figure legend's (see
+    // Each pane's PAINTED textures and fills, in pane order — folded into the figure legend's (see
     // figureSeriesHatches). Collected rather than taken from pane 0 so a series pane 0 lacks is
     // still keyed, matching how `figureSeries` is resolved over every pane's rows.
     const panePainted: Array<Map<string, SeriesHatch>> = [];
-  const paneFills: Array<Map<string, string>> = [];
-    // The panes share one x range (see sharesXRange), read off a probe render of each pane.
-    const xProbes = sharesXRange(spec)
-      ? paneValues.map((value) =>
-          renderPane(
-            spec,
-            rows.filter((r) => (r[facetField] as string) === value),
-            { ...opts, height: effHeight, pane: true, paneFacetValue: value },
-            "probe",
-          ),
-        )
-      : [];
-    const sharedX = figureSharedX(xProbes);
-    const xTickValues = figureXTickValues(spec, xProbes);
-    // Ticks fit the narrowest pane, measured with the margins renderPane itself subtracts.
-    const xTickWidth = paneTickWidth(
-      spec,
-      Array.from({ length: columns }, (_, c) => perPaneWidths?.[c] ?? opts.width ?? availW),
-      opts.marginLeft ?? TBL_MARGIN_LEFT,
-      opts,
-    );
+    const paneFills: Array<Map<string, string>> = [];
+    const paneShapes: Array<string[] | undefined> = [];
     const panes: FigurePane[] = paneValues.map((value, i) => {
-      // Restrict the rows to this pane (own y-domain/units): renderPane renders a standalone
-      // single frame for these rows only.
-      const paneRows = rows.filter((r) => (r[facetField] as string) === value);
       const col = i % columns;
       const p = renderPane(
         spec,
-        paneRows,
+        paneRowsOf(value),
         {
           ...opts,
           height: effHeight,
@@ -849,12 +826,7 @@ export function renderFigure(
           paletteSeries: figureSeries,
           ...(figureShapes ? { paletteShapes: figureShapes } : {}),
           chartSeriesCount,
-          ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
-          ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
-          ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
-          ...(sharedX ? { sharedX } : {}),
-          ...(xTickWidth != null ? { xTickWidth } : {}),
-          ...(xTickValues ? { xTickValues } : {}),
+          ...modeOpts(col),
         },
         `p${i}`,
       );
@@ -891,11 +863,19 @@ export function renderFigure(
         seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted, figureSeries),
       };
     });
+    return { panes, firstLayers, firstFormatValue, panePainted, paneFills, paneShapes };
+  };
 
-    // Figure-level legend: series config is shared across panes, so compute it ONCE — from the
-    // FIGURE's series/colors (not pane 0's: a pane may be missing a series) plus the first pane's
-    // mark layers, which carry the swatch shapes and are the same for every pane. Its textures come
-    // from what the PANES painted, never from figureColors — see figureSeriesHatches.
+  // The figure result over the rendered panes. Figure-level legend: series config is shared across
+  // panes, so compute it ONCE — from the FIGURE's series/colors (not pane 0's: a pane may be missing
+  // a series) plus the first pane's mark layers, which carry the swatch shapes and are the same for
+  // every pane. L1/single-series → null. Its textures come from what the PANES painted, never from
+  // figureColors — see figureSeriesHatches.
+  const figureResult = (
+    resultMode: FigureRenderResult["mode"],
+    { panes, firstLayers, firstFormatValue, panePainted, paneFills, paneShapes }: ReturnType<typeof renderPanes>,
+    columnWidths: number[] | undefined,
+  ): FigureRenderResult => {
     const first = panes[0];
     const figureLayers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
     const legendItems = buildLegendItems(
@@ -908,11 +888,11 @@ export function renderFigure(
     );
 
     return {
-      mode: "per-pane",
+      mode: resultMode,
       panes,
       columns,
       rows: gridRows,
-      ...(perPaneWidths ? { columnWidths: perPaneWidths } : {}),
+      ...(columnWidths ? { columnWidths } : {}),
       legendItems,
       shapeLegendItems: figureShapeLegend(firstLayers, paneShapes),
       colorLegendTitle: spec.color_legend_title,
@@ -929,6 +909,49 @@ export function renderFigure(
       legendVisualOrder: firstLayers?.legendVisualOrder,
       netMode: firstLayers?.netMode,
     };
+  };
+
+  // PER-PANE mode: each pane is its OWN single-frame SVG with an independent y-scale and units
+  // (a continuous x range is still shared — see sharesXRange) (Plot faceting can't give
+  // independent y-scales, so we render + compose N
+  // mini-SVGs instead of one faceted SVG). Each pane gets a distinct deterministic
+  // classNameSuffix ("p0", "p1", …) so clip-path ids stay unique across the composed DOM, and
+  // `pane: true` thins its line stroke.
+  if (mode === "per-pane") {
+    // Variable pane widths in per-pane mode: distribute the inner data width by the resolved
+    // weights, but EVERY column keeps its own full y-label gutter (independent axes). Absent
+    // (equal) ⇒ leave widths undefined so the live grid uses equal `1fr` columns as before.
+    const perPaneWidths = variableWidths
+      ? perPaneColumnWidths(availW, columns, gridGap, colWeights).colWidths
+      : undefined;
+    // Coordinate x-label rotation/wrap + bottom margin across panes so their baselines align — each
+    // pane draws its own x-axis, so a pane with longer/rotated labels would otherwise sit lower.
+    // Data width per column: the variable per-pane widths, else the single equal pane width.
+    const perPaneDataW = perPaneWidths
+      ? perPaneWidths.map((w) => w - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT)
+      : Array.from({ length: columns }, () => (opts.width ?? availW) - TBL_MARGIN_LEFT - TBL_MARGIN_RIGHT);
+    const { mode: ppXLabelMode, marginBottom: ppMarginBottom } = coordinateXLabels(perPaneDataW);
+    // The panes share one x range (see sharesXRange), read off a probe render of each pane.
+    const xProbes = sharesXRange(spec) ? paneValues.map(probePane) : [];
+    const sharedX = figureSharedX(xProbes);
+    const xTickValues = figureXTickValues(spec, xProbes);
+    // Ticks fit the narrowest pane, measured with the margins renderPane itself subtracts.
+    const xTickWidth = paneTickWidth(
+      spec,
+      Array.from({ length: columns }, (_, c) => perPaneWidths?.[c] ?? opts.width ?? availW),
+      opts.marginLeft ?? TBL_MARGIN_LEFT,
+      opts,
+    );
+    // Each pane renders over its own rows only (own y-domain/units).
+    const rendered = renderPanes((col) => ({
+      ...(perPaneWidths ? { width: perPaneWidths[col] } : {}),
+      ...(ppXLabelMode ? { xLabelMode: ppXLabelMode } : {}),
+      ...(ppMarginBottom != null ? { marginBottom: ppMarginBottom } : {}),
+      ...(sharedX ? { sharedX } : {}),
+      ...(xTickWidth != null ? { xTickWidth } : {}),
+      ...(xTickValues ? { xTickValues } : {}),
+    }));
+    return figureResult("per-pane", rendered, perPaneWidths);
   }
 
   // SHARED mode: the SAME per-pane composition as above (N independent mini-SVGs in the grid,
@@ -952,20 +975,7 @@ export function renderFigure(
   //    beyond a bar's ceiling), and leaves those figures exactly as they were before the fallback.
   //    Dropping the pane instead lost such a marker's extent and drew it off the frame. Only when
   //    every pane needs the fallback does the figure take it, as the union of their fallback domains.
-  const probes = paneValues.map((value) =>
-    renderPane(
-      spec,
-      rows.filter((r) => (r[facetField] as string) === value),
-      {
-        ...opts,
-        height: effHeight,
-        pane: true,
-        paneFacetValue: value,
-        ...(binThresholds ? { binThresholds } : {}),
-      },
-      "probe",
-    ),
-  );
+  const probes = paneValues.map(probePane);
   const anyAscends = probes.some((p) => !p.yDomainWithoutFallback);
   let yLo = Infinity;
   let yHi = -Infinity;
@@ -1000,112 +1010,17 @@ export function renderFigure(
 
   // 4. Render each pane as its own single frame at its column's OUTER width + left margin, forcing
   //    the shared y-domain. Panes hide the y-tick LABELS on non-leftmost columns.
-  let firstLayers: MarkLayers | undefined;
-  // Shared mode: every pane shares one value scale, so this IS the figure's value formatter.
-  let firstFormatValue: ((v: number) => string) | undefined;
-  // Each pane's PAINTED textures, in pane order — folded into the figure legend's (see
-  // figureSeriesHatches).
-  const panePainted: Array<Map<string, SeriesHatch>> = [];
-  const paneFills: Array<Map<string, string>> = [];
-  const panes: FigurePane[] = paneValues.map((value, i) => {
-    const col = i % columns;
-    const paneRows = rows.filter((r) => (r[facetField] as string) === value);
-    const p = renderPane(
-      spec,
-      paneRows,
-      {
-        ...opts,
-        height: effHeight,
-        pane: true,
-        paneFacetValue: value,
-        paletteSeries: figureSeries,
-        ...(figureShapes ? { paletteShapes: figureShapes } : {}),
-        chartSeriesCount,
-        yDomain: sharedYDomain,
-        ...(binThresholds ? { binThresholds } : {}),
-        ...(sharedX ? { sharedX } : {}),
-        ...(xTickWidth != null ? { xTickWidth } : {}),
-        ...(xTickValues ? { xTickValues } : {}),
-        width: colWidths[col],
-        ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),
-        ...(forcedMarginBottom != null ? { marginBottom: forcedMarginBottom } : {}),
-        hideYAxisLabels: col > 0,
-        marginLeft: colMarginLeft[col],
-      },
-      `p${i}`,
-    );
-    if (i === 0) {
-      firstLayers = p.layers;
-      firstFormatValue = p.formatValue;
-    }
-    panePainted.push(p.seriesHatches);
-    paneShapes.push(p.layers.shapeNames);
-    // Pushed in BOTH pane loops or the figure legend lies. `paneFills` was declared here and pushed
-    // only in the per-pane branch, so shared mode — the DEFAULT — handed firstPainted() an empty map
-    // and the legend fell through to the palette: panes painted a `highlightSeries`-dimmed series
-    // grey, the one legend over them keyed it amber. Gated by key-agreement.test.ts, which asserts
-    // both modes against the fill the panes are drawn in.
-    paneFills.push(p.seriesPainted);
-    // Escape hatch, per pane — see the identical call + rationale in the per-pane-mode branch above.
-    if (opts.hooks?.afterRender && p.svg) {
-      opts.hooks.afterRender(p.svg, { phase: opts.phase ?? "live", facet: value });
-    }
-    return {
-      value,
-      title: titleFor(value),
-      svg: p.svg,
-      dataInScope: p.dataInScope,
-      colors: p.colors,
-      seriesOrder: p.seriesNames,
-      dashedNames: p.layers.dashedNames,
-      symbolScale: p.layers.symbolScaleOpts,
-      shapeIsSeries: p.layers.shapeIsSeries ?? false,
-      pointOrder: p.layers.pointOrder,
-      valueAffixes: p.valueAffixes ?? resolveValueAffixes(spec),
-      tooltipXParse: p.tooltipXParse,
-      tooltipXFormat: p.tooltipXFormat,
-      overlayTooltips: p.overlayTooltips,
-      netMode: p.layers.netMode,
-      legendVisualOrder: p.layers.legendVisualOrder,
-      seriesKeyRows: buildSeriesKeyRows(spec, p.seriesNames, p.colors, p.layers, p.seriesHatches, p.seriesPainted, figureSeries),
-    };
-  });
-
-  // 4. Figure-level legend: series config is shared across panes, so compute it ONCE — from the
-  //    FIGURE's series/colors (not pane 0's: a pane may be missing a series) plus the first pane's
-  //    mark layers, which carry the swatch shapes. L1/single-series → null. Its textures come from
-  //    what the PANES painted, never from figureColors — see figureSeriesHatches.
-  const first = panes[0];
-  const figureLayers = firstLayers ?? { underlay: [], overlay: [], tagging: [], dashedNames: new Set<string>() };
-  const legendItems = buildLegendItems(
-    spec,
-    legendSeries,
-    figureColors,
-    figureLayers,
-    drawnKeyRows(buildSeriesKeyRows(spec, figureSeries, figureColors, figureLayers, figureSeriesHatches(panePainted), firstPainted(paneFills))),
-    firstFormatValue,
-  );
-
-  return {
-    mode: "shared",
-    panes,
-    columns,
-    rows: gridRows,
-    columnWidths: colWidths,
-    legendItems,
-    shapeLegendItems: figureShapeLegend(firstLayers, paneShapes),
-    colorLegendTitle: spec.color_legend_title,
-    shapeLegendTitle: spec.shape_legend_title,
-    seriesLabels,
-    colors: figureColors,
-    seriesOrder: figureSeries,
-    dashedNames: first?.dashedNames ?? new Set(),
-    valueAffixes: first?.valueAffixes ?? resolveValueAffixes(spec),
-    xAxisTitle: spec.x_axis_title ?? null,
-    dataInScope: first?.dataInScope ?? [],
-    tooltipXParse: first?.tooltipXParse,
-    tooltipXFormat: first?.tooltipXFormat,
-    legendVisualOrder: firstLayers?.legendVisualOrder,
-    netMode: firstLayers?.netMode,
-  };
+  const rendered = renderPanes((col) => ({
+    yDomain: sharedYDomain,
+    ...(binThresholds ? { binThresholds } : {}),
+    ...(sharedX ? { sharedX } : {}),
+    ...(xTickWidth != null ? { xTickWidth } : {}),
+    ...(xTickValues ? { xTickValues } : {}),
+    width: colWidths[col],
+    ...(forcedXLabelMode ? { xLabelMode: forcedXLabelMode } : {}),
+    ...(forcedMarginBottom != null ? { marginBottom: forcedMarginBottom } : {}),
+    hideYAxisLabels: col > 0,
+    marginLeft: colMarginLeft[col],
+  }));
+  return figureResult("shared", rendered, colWidths);
 }

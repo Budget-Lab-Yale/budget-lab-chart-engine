@@ -2,6 +2,7 @@
 // no Date.now/random. Operates on already-parsed numeric x (temporal callers pass epoch-ms and
 // usually explicit `thresholds` from calendarEdges/temporal helpers).
 import { minMax } from "./util";
+import type { HistogramConfig } from "../spec/types";
 
 export interface BinnedRow { series: string; _x0: number; _x1: number; _y: number; _facet?: string }
 export interface BinInput { series: string; x: number; weight?: number; _facet?: string }
@@ -99,6 +100,24 @@ export function temporalThresholds(
   }
   if (typeof binWidth === "number" && binWidth > 0) return computeThresholds(valuesMs, { binWidth: binWidth * DAY_MS, domain: [min, max] });
   return computeThresholds(valuesMs, { bins, domain: [min, max] });
+}
+
+/** The bin thresholds of raw histogram x values under `histogram`'s bins/binWidth/domain: the one
+ *  rule a figure's shared thresholds (figure.ts) and a pane's own (pane.ts) are both computed by, so
+ *  shared and per-pane histograms cannot bin differently. `values` are epoch ms on a temporal axis. */
+export function histogramThresholds(
+  values: number[],
+  histogram: HistogramConfig | undefined,
+  isTemporal: boolean,
+): number[] {
+  const bw = histogram?.binWidth;
+  return isTemporal
+    ? temporalThresholds(values, bw, histogram?.bins, histogram?.domain)
+    : computeThresholds(values, {
+        bins: histogram?.bins,
+        binWidth: typeof bw === "number" ? bw : undefined,
+        domain: histogram?.domain,
+      });
 }
 
 /** Normalize pre-computed bin heights (`_y`) per series. "proportion": each series' bins sum to 1;

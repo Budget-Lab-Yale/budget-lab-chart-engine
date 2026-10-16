@@ -115,6 +115,56 @@ export function numericAxisDomain(domain: unknown): [number, number] | undefined
   return Number.isFinite(lo) && Number.isFinite(hi) ? [lo as number, hi as number] : undefined;
 }
 
+/** The two date axes, temporal and quarterly: one domain / ticks / margin / scale build, differing
+ *  only in how an x string parses (`parse`, for markers and the crosshair) and formats in the card,
+ *  and in a temporal histogram's bin-edge span (`histogramDomain`). */
+function dateAdapter(cfg: {
+  xType: "temporal" | "quarterly";
+  parse: (v: string) => Date;
+  histogramDomain: [number, number] | undefined;
+  /** The card's x format, which may read the pane's rows. */
+  tooltipXFormat: (data: Array<Record<string, any>>) => (v: number) => string;
+}): XAdapter {
+  const { xType, parse, histogramDomain } = cfg;
+  return {
+    parseX: (v) => parseXValue(xType, v),
+    xField: "_xd",
+    validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
+    buildXOpts(data, { bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
+      const tooltipXFormat = cfg.tooltipXFormat(data);
+      let xDomain: [Date, Date];
+      if (histogramDomain) {
+        xDomain = [new Date(histogramDomain[0]), new Date(histogramDomain[1])];
+      } else if (sharedX) {
+        xDomain = [new Date(sharedX.data[0]), new Date(sharedX.data[1])];
+      } else {
+        const xs = data.map((r) => +r._xd);
+        xDomain = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
+      }
+      const ticks = dateAxisTicks(xDomain, tickWidth, sharedX?.scale, tickValues);
+      // axis:null/label:null so Plot draws NO native axis — the engine's tblTemporalXAxis marks are
+      // the axis. Without this, xPlotOpts replaces the whole x-scale (assemble-plot merges by
+      // assignment, not over the default) and Plot's native ticks render on top → doubled labels.
+      const xPlotOpts = histogramDomain
+        ? { type: "utc", domain: xDomain, axis: null, label: null }
+        : sharedX
+          ? { domain: sharedX.scale.map((v) => new Date(v)), axis: null, label: null }
+          : undefined;
+      return {
+        marginBottom: temporalMarginBottom(ticks) + bottomGutter,
+        ...(xPlotOpts ? { xPlotOpts } : {}),
+        axisMarks: tblTemporalXAxis(xDomain, tickWidth, bottomGutter, sharedX?.scale, ticks),
+        // The SAME local-midnight parse as the chart's own points (parseDate / parseQuarter), not
+        // `new Date(string)` — that parses YYYY-MM-DD as UTC and then formats in local time,
+        // shifting "2022-01-01" to "Dec 2021" in negative-offset zones (and mis-snapping the guide).
+        markerToX: (m) => parse(m.x),
+        tooltipXParse: (v) => +parse(v),
+        tooltipXFormat,
+      };
+    },
+  };
+}
+
 export function makeXAdapter(
   xType: XAxisType,
   xAxisPolicy?: XAxisPolicy,
@@ -191,11 +241,12 @@ export function makeXAdapter(
     };
   }
   if (xType === "temporal") {
-    return {
-      parseX: (v) => parseXValue("temporal", v),
-      xField: "_xd",
-      validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
-      buildXOpts(data, { bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
+    return dateAdapter({
+      xType,
+      parse: parseDate,
+      // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
+      histogramDomain,
+      tooltipXFormat(data) {
         // An ANNUAL series — every point on 1 January — is identified by its year alone, so the
         // month in the card is noise: `Jan 1950` under an axis reading `1950`. The axis already
         // collapses a year-cadence span to a bare `%Y` (`tblTemporalXAxis`), and this stops the
@@ -205,64 +256,24 @@ export function makeXAdapter(
         const annualData =
           data.every((d: any) => (d._xd as unknown) instanceof Date) &&
           isAnnualSeries(data.map((d: any) => d._xd as Date));
-        // Histogram: the domain is the caller-supplied bin-edge span, not the data range.
-        let xDomain: [Date, Date];
-        if (histogramDomain) {
-          xDomain = [new Date(histogramDomain[0]), new Date(histogramDomain[1])];
-        } else if (sharedX) {
-          xDomain = [new Date(sharedX.data[0]), new Date(sharedX.data[1])];
-        } else {
-          const xs = data.map((r) => +r._xd);
-          xDomain = [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
-        }
-        const ticks = dateAxisTicks(xDomain, tickWidth, sharedX?.scale, tickValues);
-        return {
-          marginBottom: temporalMarginBottom(ticks) + bottomGutter,
-          // axis:null/label:null so Plot draws NO native axis — the engine's tblTemporalXAxis marks
-          // are the axis. Without this, xPlotOpts replaces the whole x-scale (assemble-plot merges by
-          // assignment, not over the default) and Plot's native ticks render on top → doubled labels.
-          xPlotOpts: histogramDomain
-            ? { type: "utc", domain: xDomain, axis: null, label: null }
-            : sharedX
-              ? { domain: sharedX.scale.map((v) => new Date(v)), axis: null, label: null }
-              : undefined,
-          axisMarks: tblTemporalXAxis(xDomain, tickWidth, bottomGutter, sharedX?.scale, ticks),
-          markerToX: (m) => parseDate(m.x),
-          // Use the SAME local-midnight parse as the chart's line points (parseDate), not
-          // `new Date(string)` — that parses YYYY-MM-DD as UTC and then formats in local time,
-          // shifting "2022-01-01" to "Dec 2021" in negative-offset zones (and mis-snapping the
-          // guide). Default to a single-line "%b %Y" to match the axis —
-          // which is wrong only when the data is finer than the ticks (a daily series has every
-          // point in a month sharing one label), hence spec.tooltip_x_format.
-          tooltipXParse: (v) => +parseDate(v),
-          tooltipXFormat: (v) => d3.timeFormat(tooltipXFormatPattern ?? (annualData ? "%Y" : "%b %Y"))(new Date(v)),
-        };
+        // Default to a single-line "%b %Y" to match the axis — which is wrong only when the data is
+        // finer than the ticks (a daily series has every point in a month sharing one label), hence
+        // spec.tooltip_x_format.
+        return (v) => d3.timeFormat(tooltipXFormatPattern ?? (annualData ? "%Y" : "%b %Y"))(new Date(v));
       },
-    };
+    });
   }
   if (xType === "quarterly") {
-    return {
-      parseX: (v) => parseXValue("quarterly", v),
-      xField: "_xd",
-      validate: () => true, // parseX throws on a malformed date, so every row has a valid _xd
-      buildXOpts(data, { bottomGutter = 0, dataWidth, tickWidth = dataWidth, sharedX, tickValues } = {}) {
-        const xs = data.map((r) => +r._xd);
-        const xDomain: [Date, Date] = sharedX
-          ? [new Date(sharedX.data[0]), new Date(sharedX.data[1])]
-          : [new Date(d3.min(xs) as number), new Date(d3.max(xs) as number)];
-        const ticks = dateAxisTicks(xDomain, tickWidth, sharedX?.scale, tickValues);
-        return {
-          marginBottom: temporalMarginBottom(ticks) + bottomGutter,
-          ...(sharedX ? { xPlotOpts: { domain: sharedX.scale.map((v) => new Date(v)), axis: null, label: null } } : {}),
-          axisMarks: tblTemporalXAxis(xDomain, tickWidth, bottomGutter, sharedX?.scale, ticks),
-          markerToX: (m) => parseQuarter(m.x),
-          tooltipXParse: (v) => +parseQuarter(v),
-          tooltipXFormat: tooltipXFormatPattern
-            ? (v) => d3.timeFormat(tooltipXFormatPattern)(new Date(v))
-            : (v) => formatQuarter(new Date(v)),
-        };
-      },
-    };
+    return dateAdapter({
+      xType,
+      parse: parseQuarter,
+      // A quarterly axis takes no histogram span: a histogram's x is numeric or temporal.
+      histogramDomain: undefined,
+      tooltipXFormat: () =>
+        tooltipXFormatPattern
+          ? (v) => d3.timeFormat(tooltipXFormatPattern)(new Date(v))
+          : (v) => formatQuarter(new Date(v)),
+    });
   }
   if (xType === "categorical") {
     return {
