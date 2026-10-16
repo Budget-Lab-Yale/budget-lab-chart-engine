@@ -274,9 +274,12 @@ export function buildStackedMarks(
       return { ...r, _y: total ? ((y as number) / total) * 100 : 0 };
     });
   }
+  // Clip only the segments, as bar.ts does: the net dot and labels stay unclipped so a label is
+  // never cut in half. Gated on ctx.clipMarks, so a stack that fits its domain is byte-identical.
+  const clipOpt = ctx.clipMarks ? { clip: true as const } : {};
   const stackMark = horizontal
-    ? Plot.barX(stackData, { ...rowChannels(catField), x: "_y", fill: fillChannel })
-    : Plot.barY(stackData, { x: catField, y: "_y", fill: fillChannel });
+    ? Plot.barX(stackData, { ...rowChannels(catField), x: "_y", fill: fillChannel, ...clipOpt })
+    : Plot.barY(stackData, { x: catField, y: "_y", fill: fillChannel, ...clipOpt });
 
   const overlay: unknown[] = [stackMark];
 

@@ -93,6 +93,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     a card from an earlier move stays with its old content) actually do. The old account said both
     were retried on the next resize.
   - Hooks: `legendKey` receives `__annotation:<label>` as `ctx.series` on annotation rows, and markup
+- Stacked bars with a hard `yAxisPolicy.min` or `max` that a stack's sum passes: the segments are
+  now clipped to the plot frame, as every other chart type's marks already were. They painted past
+  the frame, over the title and legend or into the category-label gutter, live and in the PNG. The
+  net total and its dot stay unclipped. A stack that fits its domain is unchanged. See
+  **Upgrading**.
     a hook changes is exported unwrapped on every chart type, not only timelines.
   - `barStack.netLabelColor` and `valueLabels.signed` are documented as accepted with no effect.
   - Shading: `side` is measured against `baseline`, not zero.
@@ -202,6 +207,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   started later drew a different axis from its neighbours. The shared range is the union of every
   pane's own; on a date axis that includes markers, bands and callouts past the data. Categorical
   panes keep their own categories; histograms keep their binning rules.
+- **Stacked bars clipped** (see **Fixed**): three published figures move, all in
+  `articles/2026/10/ecec-macro`: `full-workforce-gdp-by-estimate`, `parental-contributions-by-policy`
+  and `parents-and-children-contributions`. Each is a horizontal stack with `yAxisPolicy.min: 0`
+  whose Child allowance rows are small negatives (down to -0.0014). Those segments painted up to
+  about 5 px left of the zero line, into the category-label gutter (about 7 px in the PNG). They are
+  now clipped away, so the slivers no longer show, and the stack mark gains a `clip-path` group.
+  The notes on two of these figures say the child allowance's contributions are small and negative;
+  to show them, drop `min: 0` from the three specs in `budget-lab-charts` (to be done there
+  separately). No other published stacked figure has a hard bound its data passes.
 - Temporal and quarterly tick labels no longer overprint in a narrow plot. The cadence still comes
   from the span of the data, and now steps up (quarterly, half-yearly, then 1, 2, 5, 10, 20, 50, 100
   years and so on, down to a single tick) while adjacent labels would overlap at the drawn width,

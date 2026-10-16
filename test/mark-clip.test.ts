@@ -424,6 +424,111 @@ describe("area / scatter / dotplot / histogram — the remaining types", () => {
   });
 });
 
+describe("stacked marks — clipMarks reaches the stack (A2)", () => {
+  // Before the fix the stack mark was built with no `clip`, so the gate computed clipMarks from the
+  // stacked extent and the builder dropped it: 0 clipPaths, rects painting over the title/legend
+  // (vertical) or into the category-label gutter (horizontal, the ecec-macro child-allowance slivers).
+  const STACK_BASE = {
+    chartType: "stacked",
+    title: "t",
+    xAxisType: "categorical",
+    columns: { x: "cat", value: "value", series: "series" },
+  } as unknown as ChartSpec;
+
+  const stack = (vals: Array<[string, string, number]>): TidyRow[] =>
+    vals.map(([cat, series, value]) => ({ cat, series, value: String(value) })) as unknown as TidyRow[];
+
+  /** The frame Plot clips to: the one clipPath's rect. */
+  function clipFrame(svg: SVGSVGElement) {
+    const r = svg.querySelector("clipPath rect")!;
+    const n = (a: string) => Number(r.getAttribute(a));
+    return { x: n("x"), y: n("y"), w: n("width"), h: n("height") };
+  }
+
+  /** Stack segment rects (the barY/barX mark), with their geometry and whether a clip-path
+   *  ancestor bounds them. */
+  function stackRects(svg: SVGSVGElement) {
+    return Array.from(svg.querySelectorAll('g[aria-label="bar"] rect')).map((r) => {
+      const n = (a: string) => Number(r.getAttribute(a) ?? 0);
+      return {
+        x: n("x"),
+        y: n("y"),
+        w: n("width"),
+        h: n("height"),
+        clipped: r.closest("g[clip-path]") != null,
+      };
+    });
+  }
+
+  it("vertical: clips when the stack top exceeds the hard max, and no rect paints unclipped outside the frame", () => {
+    const spec = { ...STACK_BASE, yAxisPolicy: { max: 10 } } as ChartSpec;
+    const data = stack([
+      ["a", "X", 20],
+      ["a", "Y", 20],
+      ["b", "X", 5],
+      ["b", "Y", 3],
+    ]);
+    const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(1);
+    const frame = clipFrame(svg);
+    const rects = stackRects(svg);
+    expect(rects.length).toBe(4);
+    // The overflow is real (the clip is geometric, not a data filter) ...
+    const outside = rects.filter((r) => r.y < frame.y - 0.5 || r.y + r.h > frame.y + frame.h + 0.5);
+    expect(outside.length).toBeGreaterThan(0);
+    // ... and every rect, in particular the overflowing ones, sits under the clip.
+    expect(rects.every((r) => r.clipped)).toBe(true);
+  });
+
+  it("horizontal: clips negative segments below a hard min: 0 (the ecec-macro shape)", () => {
+    const spec = {
+      ...STACK_BASE,
+      orientation: "horizontal",
+      yAxisPolicy: { min: 0 },
+    } as unknown as ChartSpec;
+    const data = stack([
+      ["a", "X", 0.1],
+      ["a", "Y", -0.02],
+      ["b", "X", 0.08],
+      ["b", "Y", -0.01],
+    ]);
+    const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(1);
+    const frame = clipFrame(svg);
+    const rects = stackRects(svg);
+    const outside = rects.filter((r) => r.x < frame.x - 0.5 || r.x + r.w > frame.x + frame.w + 0.5);
+    expect(outside.length).toBeGreaterThan(0);
+    expect(rects.every((r) => r.clipped)).toBe(true);
+  });
+
+  it("does NOT clip a stack whose sums fit the hard domain (byte-identical for in-range stacks)", () => {
+    const spec = { ...STACK_BASE, yAxisPolicy: { min: 0, max: 50 } } as ChartSpec;
+    const data = stack([
+      ["a", "X", 20],
+      ["a", "Y", 20],
+    ]);
+    const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(0);
+  });
+
+  it("leaves the net-total text unclipped (labels are never cut in half)", () => {
+    const spec = {
+      ...STACK_BASE,
+      yAxisPolicy: { max: 10 },
+      barStack: { netDisplay: "text" },
+    } as unknown as ChartSpec;
+    const data = stack([
+      ["a", "X", 20],
+      ["a", "Y", 20],
+    ]);
+    const { svg } = renderChart(spec, data, { width: 720, height: 400, document });
+    expect(clipCount(svg)).toBe(1);
+    for (const t of Array.from(svg.querySelectorAll('g[aria-label="text"]'))) {
+      expect(t.closest("g[clip-path]")).toBeNull();
+    }
+  });
+});
+
 describe("computeDrawnValueExtent", () => {
   const prep = (ys: number[]): PreparedRow[] =>
     ys.map((y, i) => ({ series: "A", _y: y, _xc: `c${i}` })) as unknown as PreparedRow[];
