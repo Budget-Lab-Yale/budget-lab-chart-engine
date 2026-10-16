@@ -441,9 +441,24 @@ export function detectBandLabelMode(svgEl: SVGSVGElement, plotBottom: number): "
   return mode;
 }
 
+/** The text an axis label READS. A wrapped label is one `<tspan>` per line, and `textContent` joins
+ *  the lines with no space, so a wrapped "A B" read as "AB": another category's name when both are
+ *  on the axis. Joining the lines with one space reads it as drawn. Trimmed. */
+function axisLabelText(t: SVGTextElement): string {
+  const lines = Array.from(t.children).filter((c) => c.localName === "tspan");
+  const text = lines.length ? lines.map((l) => l.textContent ?? "").join(" ") : (t.textContent ?? "");
+  return text.trim();
+}
+
+/** Whitespace runs as one space, trimmed: the form an axis label and a category are compared in, so
+ *  a doubled or non-breaking space does not stop a label from matching its category. */
+function collapseSpace(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
 /** Locate the rendered x-axis label for `category` and return its box in SVG user coords (center
- *  + top/bottom), so the highlight can be aligned exactly to it regardless of mode. Matches on
- *  whitespace-insensitive text (a wrapped label's tspans concatenate without the space). */
+ *  + top/bottom), so the highlight can be aligned exactly to it regardless of mode. Matches on the
+ *  label's text as read by `axisLabelText`, case-insensitively and with whitespace runs collapsed. */
 export function findAxisLabelBox(
   svgEl: SVGSVGElement,
   plotBottom: number,
@@ -456,14 +471,14 @@ export function findAxisLabelBox(
   const Hd = vb?.height || +(svgEl.getAttribute("height") ?? "") || svgRect.height;
   const sx = Wd / svgRect.width;
   const sy = Hd / svgRect.height;
-  const norm = (s: string | null): string => (s ?? "").replace(/\s+/g, "").toLowerCase();
+  const norm = (s: string): string => collapseSpace(s).toLowerCase();
   const target = norm(category);
   for (const t of Array.from(svgEl.querySelectorAll<SVGTextElement>("text"))) {
     if (t.closest(".tbl-coord") || t.closest(".tbl-y-tick-label")) continue;
     const r = t.getBoundingClientRect();
     if (!r.width) continue;
     if ((r.top - svgRect.top) * sy < plotBottom - 2) continue; // x-axis labels only
-    if (norm(t.textContent) !== target) continue;
+    if (norm(axisLabelText(t)) !== target) continue;
     return {
       cx: ((r.left + r.right) / 2 - svgRect.left) * sx,
       cy: ((r.top + r.bottom) / 2 - svgRect.top) * sy,
@@ -584,23 +599,22 @@ export function readNetDotMarkers(svgEl: SVGSVGElement): Array<{ cx: number; cy:
 /** Read the categorical x-axis label centers (one row of labels below the plot): category → cx
  *  in SVG user coords. Screen-space measurement; empty without layout (jsdom).
  *
- *  A label's text is mapped back to one of `categories` (the rows' `_xc` values), because the
- *  label is not always the category verbatim: a wrapped label is two `<tspan>`s and `textContent`
- *  joins them with no space ("Lowest incomehouseholds"), which matched no row, so the card listed
- *  no values and a coordinated pane drew nothing. An exact match wins; otherwise the comparison
- *  ignores whitespace, as `findAxisLabelBox` does. Text that matches no category is kept as read. */
+ *  A label's text (`axisLabelText`: a wrapped label's lines joined by one space) is mapped back to
+ *  one of `categories` (the rows' `_xc` values). Reading a wrapped label by `textContent` gave
+ *  "Lowest incomehouseholds", which matched no row, so the card listed no values and a coordinated
+ *  pane drew nothing. An exact match wins; otherwise whitespace runs compare as one space, as in
+ *  `findAxisLabelBox`. Text that matches no category is kept as read. */
 export function readCategoryCentersFromAxis(
   svgEl: SVGSVGElement,
   plotBottom: number,
   categories: ReadonlyArray<string | undefined>,
 ): Array<{ category: string; cx: number }> {
-  const squash = (s: string): string => s.replace(/\s+/g, "");
   const exact = new Set<string>();
-  const bySquashed = new Map<string, string>();
+  const byCollapsed = new Map<string, string>();
   for (const c of categories) {
     if (!c) continue;
     exact.add(c);
-    if (!bySquashed.has(squash(c))) bySquashed.set(squash(c), c);
+    if (!byCollapsed.has(collapseSpace(c))) byCollapsed.set(collapseSpace(c), c);
   }
   const svgRect = svgEl.getBoundingClientRect();
   if (!svgRect.width || !svgRect.height) return [];
@@ -616,8 +630,8 @@ export function readCategoryCentersFromAxis(
     const r = t.getBoundingClientRect();
     if (!r.width) continue;
     if ((r.top - svgRect.top) * sy < plotBottom - 2) continue; // x-axis labels sit below the plot
-    const text = (t.textContent ?? "").trim();
-    const category = exact.has(text) ? text : (bySquashed.get(squash(text)) ?? text);
+    const text = axisLabelText(t);
+    const category = exact.has(text) ? text : (byCollapsed.get(collapseSpace(text)) ?? text);
     if (!category || seen.has(category)) continue;
     seen.add(category);
     out.push({ category, cx: ((r.left + r.right) / 2 - svgRect.left) * sx });
