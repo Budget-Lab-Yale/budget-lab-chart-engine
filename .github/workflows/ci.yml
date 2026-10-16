@@ -32,6 +32,10 @@ jobs:
       image: mcr.microsoft.com/playwright:v1.61.0-noble
     steps:
       - uses: actions/checkout@v5
+      # checkout's safe.directory entry lives in a temporary config it removes afterwards. Inside the
+      # container the workspace is owned by another uid, so without this every later git command
+      # reports "Not a git repository".
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
