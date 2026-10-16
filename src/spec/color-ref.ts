@@ -65,16 +65,62 @@ export function isPaletteName(value: string): boolean {
 // Is this a color the engine can paint?
 // ---------------------------------------------------------------------------
 
-// Observable Plot's own `isColor` (plot-0.6.16, `_o`), transcribed. This is the gate that decides
-// whether a string is painted as a constant or read as a column name, so it — not d3.color — is the
-// ground truth for "will this render". The two disagree in both directions and the differences are
-// real: Plot takes `none` / `currentcolor` / `var(…)` / `oklch(…)`, which d3.color rejects, and Plot's
-// list omits `yellowgreen`, which d3.color accepts and which therefore BLANKS a mark. Transcribed
-// rather than imported because this file must stay free of the vendored bundles (see header); it is
-// pinned to the vendored Plot version, so re-check it when Plot is upgraded.
-const CSS_HEX_RE = /^#[0-9a-f]{3,8}$/;
+// Observable Plot's own `isColor` (plot-0.6.16, `_o`), transcribed, then NARROWED to what a browser
+// paints. Plot's test decides whether a string is painted as a constant or read as a column name, so
+// nothing outside it may pass. But it is loose: `#` plus 3 to 8 hex digits, and any of these function
+// names around ANY parentheses. A 5-digit hex or `rgb(foo)` reaches the SVG as written and the browser
+// drops it, so a filled mark inherits the chart's `currentColor` and a line is not drawn. Hence the hex
+// length and the contents of rgb()/hsl() (cssColorArgPatterns below) are checked too. Plot and d3.color
+// disagree in both directions and the differences are real: Plot takes `none` / `currentcolor` /
+// `var(…)` / `oklch(…)`, which d3.color rejects, and Plot's list omits `yellowgreen`, which d3.color
+// accepts and which therefore BLANKS a mark. Transcribed rather than imported because this file must
+// stay free of the vendored bundles (see header); it is pinned to the vendored Plot version, so
+// re-check it when Plot is upgraded.
+const CSS_HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/;
 const CSS_FUNCTION_RE =
-  /^(?:url|var|rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color|color-mix)\(.*\)$/;
+  /^(url|var|rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\((.*)\)$/;
+
+// CSS Color 4 argument lists for rgb()/rgba() and hsl()/hsla() (the `a` forms are aliases), matched
+// against the lowercased value. Both the legacy comma form and the modern space form, since a browser
+// paints both: a legacy rgb() takes three numbers or three percentages, never a mix, and a legacy
+// hsl() a hue and two percentages; the space form mixes freely, takes `none`, and puts the alpha
+// after `/`. Built on first use, not at load: the browser bundle imports this file for the name table
+// and never runs the check, and esbuild cannot drop a top-level `new RegExp` or template literal.
+let cssColorArgs: Record<"rgb" | "hsl", RegExp[]> | undefined;
+function cssColorArgPatterns(): Record<"rgb" | "hsl", RegExp[]> {
+  if (cssColorArgs) return cssColorArgs;
+  const ws = "[ \\t\\n\\r\\f]*";
+  const gap = "[ \\t\\n\\r\\f]+";
+  const num = "[+-]?(?:\\d+|\\d*\\.\\d+)(?:e[+-]?\\d+)?";
+  const pct = `${num}%`;
+  const hue = `${num}(?:deg|grad|rad|turn)?`;
+  const alpha = `${num}%?`;
+  const channel = `${num}%?|none`;
+  const args = (body: string): RegExp => new RegExp(`^${ws}${body}${ws}$`);
+  const commaList = (...parts: string[]): string =>
+    parts.map((p) => `(?:${p})`).join(`${ws},${ws}`) + `(?:${ws},${ws}(?:${alpha}))?`;
+  const spaceList = (...parts: string[]): string =>
+    parts.map((p) => `(?:${p})`).join(gap) + `(?:${ws}/${ws}(?:${alpha}|none))?`;
+  return (cssColorArgs = {
+    rgb: [
+      args(commaList(num, num, num)),
+      args(commaList(pct, pct, pct)),
+      args(spaceList(channel, channel, channel)),
+    ],
+    hsl: [args(commaList(hue, pct, pct)), args(spaceList(`${hue}|none`, channel, channel))],
+  });
+}
+
+/** Whether the contents of `rgb(…)` / `hsl(…)` (or their `a` aliases) are a CSS argument list a
+ *  browser paints. A nested function (`var()`, `calc()`) or a relative color (`rgb(from …)`) is
+ *  passed unchecked: both are valid CSS this grammar does not model, and rejecting them would fail a
+ *  spec that renders. */
+function cssColorArgsOk(fn: "rgb" | "hsl", body: string): boolean {
+  // A CSS comment separates tokens like whitespace does.
+  const args = body.replace(/\/\*[\s\S]*?\*\//g, " ");
+  if (args.includes("(") || /^[ \t\n\r\f]*from[ \t\n\r\f]/.test(args)) return true;
+  return cssColorArgPatterns()[fn].some((re) => re.test(args));
+}
 // Both @__PURE__ marks are load-bearing, and BOTH are needed (the `new Set` and the `.split` are
 // separate calls): they let esbuild drop these 147 names from the browser bundle, which imports the
 // table above from this file but never the check. Verified — the names appear in dist/embed/live.js
@@ -103,7 +149,14 @@ const CSS_NAMED = /* @__PURE__ */ new Set(
  *  name). Palette names are NOT included — resolve those first. */
 function isCssColor(value: string): boolean {
   const v = value.toLowerCase().trim();
-  return CSS_HEX_RE.test(v) || CSS_FUNCTION_RE.test(v) || CSS_NAMED.has(v);
+  if (CSS_HEX_RE.test(v) || CSS_NAMED.has(v)) return true;
+  const fn = CSS_FUNCTION_RE.exec(v);
+  if (!fn) return false;
+  const name = fn[1] as string;
+  const body = fn[2] as string;
+  if (name === "rgb" || name === "rgba") return cssColorArgsOk("rgb", body);
+  if (name === "hsl" || name === "hsla") return cssColorArgsOk("hsl", body);
+  return true;
 }
 
 /** True when a spec's color reference resolves to something paintable: a palette name, or a CSS
@@ -112,43 +165,67 @@ export function isColorRef(value: string): boolean {
   return isPaletteName(value) || isCssColor(value);
 }
 
-/** The subset of the above that a HATCH can be grounded over — narrower, because PAINTING a colour and
- *  READING one are different jobs done by different code.
+// d3-color's `color()` parser (d3 7.9.0), transcribed: the grammar the engine READS a colour with.
+// Deriving a hatch band walks the ground's tonal ramp, and every step of that (`lightness`,
+// `shiftLightness` in engine/palette.ts) starts from `d3.color(ground)`. When that returns null the
+// band comes back equal to the ground and `resolveHatch` throws, so this grammar is the rule a hatch
+// ground has to meet, and the validator applies it rather than an approximation. Transcribed, not
+// imported, for the reason in the header; `test/hatch-ground-agreement.test.ts` holds it to the real
+// `d3.color` string by string, so a d3 upgrade cannot quietly reopen the validate-yes/render-no gap.
+const D3_INT = "\\s*([+-]?\\d+)\\s*";
+const D3_NUM = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)\\s*";
+const D3_PCT = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)%\\s*";
+// Built on first use, like cssColorArgPatterns above and for the same reason.
+let d3FunctionRes: RegExp[] | undefined;
+const d3FunctionPatterns = (): RegExp[] =>
+  (d3FunctionRes ??= [
+    new RegExp(`^rgb\\(${D3_INT},${D3_INT},${D3_INT}\\)$`),
+    new RegExp(`^rgb\\(${D3_PCT},${D3_PCT},${D3_PCT}\\)$`),
+    new RegExp(`^rgba\\(${D3_INT},${D3_INT},${D3_INT},${D3_NUM}\\)$`),
+    new RegExp(`^rgba\\(${D3_PCT},${D3_PCT},${D3_PCT},${D3_NUM}\\)$`),
+    new RegExp(`^hsl\\(${D3_NUM},${D3_PCT},${D3_PCT}\\)$`),
+    new RegExp(`^hsla\\(${D3_NUM},${D3_PCT},${D3_PCT},${D3_NUM}\\)$`),
+  ]);
+
+/** Whether `d3.color` parses `value`: a hex of 3, 4, 6 or 8 digits; comma-separated `rgb()` with
+ *  whole-number or all-percentage channels, `rgba()` the same plus an alpha; comma-separated `hsl()` /
+ *  `hsla()` with a unitless hue; a CSS colour name; or `transparent`. Not the space-separated forms,
+ *  not `none` / `currentColor`, not the modern functions. d3's name table is Plot's minus `none`,
+ *  `currentcolor` and `transparent` (which d3 matches on its own), plus `yellowgreen`. */
+export function isReadableColor(value: string): boolean {
+  const v = value.trim().toLowerCase();
+  if (CSS_HEX_RE.test(v) || d3FunctionPatterns().some((re) => re.test(v))) return true;
+  return (CSS_NAMED.has(v) && v !== "currentcolor" && v !== "none") || v === "yellowgreen";
+}
+
+/** The subset of `isColorRef` that a HATCH can be grounded over — narrower, because PAINTING a colour
+ *  and READING one are different jobs done by different code.
  *
- *  Plot paints `oklch(…)`, `lab(…)`, `color-mix(…)`, `var(…)`, `currentColor` and `none`, so `isColorRef`
- *  admits them all. Deriving a hatch band means parsing the ground to walk its tonal ramp, and that is
- *  d3's job — d3-color predates those syntaxes and returns null for every one, so a spec pairing
- *  `series_patterns` with one validated clean and then THREW at render. Same
- *  validate-says-yes/render-says-no gap the rest of this module closes, one field over.
- *
- *  Measured against the real pipeline (`resolveColor` then `resolveHatch`), not assumed — the surprises
- *  are that the SPACE-separated function forms fail where the comma forms parse, and that `transparent`
- *  parses fine. `test/hatch-ground-agreement.test.ts` re-derives every case, so upgrading d3 or widening
- *  Plot's table cannot quietly reopen the gap.
+ *  Plot paints `oklch(…)`, `lab(…)`, `color-mix(…)`, `var(…)`, `currentColor`, `none` and the
+ *  space-separated `rgb(0 114 178)`, so `isColorRef` admits them all. Deriving a hatch band means
+ *  parsing the ground (`isReadableColor`), and d3-color returns null for every one of those, so a spec
+ *  pairing `series_patterns` with one validated clean and then THREW at render.
  *
  *  Scope: only consulted for values `isColorRef` already admits. `yellowgreen` is groundable but not in
  *  Plot's table, so it is refused earlier and never reaches here. */
 export function isHatchGroundable(value: string): boolean {
   // A palette name resolves to a hex before any hatch is derived, so the name itself is groundable.
-  if (isPaletteName(value)) return true;
-  const v = value.toLowerCase().trim();
-  if (CSS_HEX_RE.test(v)) return true;
-  // The LEGACY comma syntax only: d3-color reads `rgb(0,114,178)` and not `rgb(0 114 178)`.
-  if (/^(?:rgba?|hsla?)\([^/]*,[^/]*\)$/.test(v)) return true;
-  // A named colour resolves, except the two that name no colour until something else supplies one.
-  return CSS_NAMED.has(v) && v !== "currentcolor" && v !== "none";
+  return isPaletteName(value) || isReadableColor(value);
 }
 
 /** The error for a texture over a ground the band deriver cannot read. */
 export function hatchGroundError(where: string, series: string, value: unknown): string | null {
   if (typeof value !== "string" || value.trim() === "") return null;
-  if (isHatchGroundable(value)) return null;
+  // A value the engine cannot even PAINT is `colorRefError`'s to report, with the better message.
+  if (!isColorRef(value) || isHatchGroundable(value)) return null;
   return (
     `${where}: ${JSON.stringify(value)} cannot carry a \`series_patterns\` texture. The hatch band is ` +
-    `derived by walking the ground's own tonal ramp, which needs a colour the engine can PARSE — and ` +
-    `modern CSS syntaxes (oklch, lab, color-mix, …) and \`currentColor\` are paintable but not ` +
-    `parseable, so series ${JSON.stringify(series)} would fail at render. Use a palette name ` +
-    `(blue, blue-500), a hex, or rgb()/hsl().`
+    `derived by walking the ground's own tonal ramp, which needs a colour the engine can PARSE, so ` +
+    `series ${JSON.stringify(series)} would fail at render. Readable: a palette name (blue, blue-500), ` +
+    `a hex, comma-separated rgb() with whole-number or all-percentage channels ("rgb(0,114,178)"), ` +
+    `or comma-separated hsl() with a unitless hue ("hsl(200,50%,40%)"). Paintable but not readable: ` +
+    `modern CSS syntaxes (oklch, lab, color-mix, …), the space-separated rgb()/hsl() forms, ` +
+    `\`currentColor\`.`
   );
 }
 

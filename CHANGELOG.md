@@ -76,14 +76,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
 - CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
-  - Colors: lists the forms validation accepts (hex of 3 to 8 digits, named CSS functions with
-    unchecked contents, Plot's CSS keywords) in place of "any CSS color passes through". `yellowgreen`
-    is rejected; `#12345` passes and is ignored by the browser (a filled mark inherits
-    `currentColor`, a line is not drawn) and fails at render under a texture; `"Blue"` is the CSS
-    keyword, not the palette's blue. Color fields elsewhere now point to that section rather than
-    saying "named color or `#hex`".
-  - Series textures: validation catches only some unreadable grounds under a texture; others (for
-    example a wrong-length hex, `rgb(foo, bar)`, `category_colors`) pass and fail at render.
+  - Colors: lists the forms validation accepts (hex, the named CSS functions, Plot's CSS keywords) in
+    place of "any CSS color passes through". `yellowgreen` is rejected; `"Blue"` is the CSS keyword,
+    not the palette's blue. Color fields elsewhere now point to that section rather than saying
+    "named color or `#hex`".
   - Table inline math: `\$` is a dollar sign only in text parsed for math. In the PNG export,
     multi-line text can be parsed line by line, so `\$` can keep its backslash on a line without
     math; the table's `notes` line is never parsed.
@@ -131,6 +127,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     `"7"`, where any other string fell back to automatic binning. `histogram.domain` must be
     ascending (a reversed one drew a single bin).
   - A whitespace-only value cell is rejected as not numeric. It drew as 0.
+  - Colors: a hex must have 3, 4, 6 or 8 digits, and the contents of `rgb()`, `rgba()`, `hsl()` and
+    `hsla()` get a syntax check (three channels and an optional alpha, comma- or space-separated).
+    A 5- or 7-digit hex or `rgb(foo)` reached the SVG as
+    written and the browser dropped it: a filled mark took the chart's text color and a line was
+    not drawn.
+  - Under a `series_patterns` texture, a color the engine cannot read (`oklch()`, `currentColor`, a
+    space-separated `rgb()`, an `rgb()` with fractional channels, …) is rejected where it is the
+    color actually painted under the texture, when the chart is validated with its data:
+    `bar_color` on a chart whose one series is named, or beside a `series_colors[""]`;
+    `category_colors`; `waterfall.colors`; a title-selector option's color. These threw at render.
+    The check follows fill precedence, so it no longer rejects a color that is never painted under
+    the texture: a `series_colors` entry that `bar_color` overrides, `bar_color` on a stacked, area
+    or waterfall chart, or a later title selector's color when an earlier selector colors every
+    option. `validateSpec` without the data no longer makes this check.
   - Tables: `format` `decimals` must be an integer from 0 to 10 in every scope (a negative or
     over-100 value threw at render, a fraction was truncated), and `emphasis_column` /
     `footnote_column` must name a column in the data (a typo dropped every emphasis or footnote).

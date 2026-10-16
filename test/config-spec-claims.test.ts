@@ -64,9 +64,9 @@ describe("CONFIG-SPEC Colors: accepted forms", () => {
     expect(barFill("rgb(0,114,178)")).toBe("rgb(0,114,178)");
   });
 
-  it("# plus 3 to 8 hex digits, in any case; a 5- or 7-digit value passes though it is not valid CSS", () => {
-    for (const c of ["#abc", "#ABCD", "#1A1A2E", "#1a1a2e80", "#12345", "#1234567"]) expect(ok(c), c).toBe(true);
-    for (const c of ["#ab", "#123456789", "#ggg"]) expect(ok(c), c).toBe(false);
+  it("# plus 3, 4, 6 or 8 hex digits, in any case; a 5- or 7-digit value is not valid CSS and is rejected", () => {
+    for (const c of ["#abc", "#ABCD", "#1A1A2E", "#1a1a2e80"]) expect(ok(c), c).toBe(true);
+    for (const c of ["#ab", "#12345", "#1234567", "#123456789", "#ggg"]) expect(ok(c), c).toBe(false);
     // jsdom's CSS parser, as a browser's: a 6-digit hex is a colour, a 5-digit one is dropped.
     const parsed = (c: string): string => {
       const el = document.createElement("div");
@@ -78,20 +78,28 @@ describe("CONFIG-SPEC Colors: accepted forms", () => {
     expect(parsed("#1234567")).toBe("");
   });
 
-  it("a 5- or 7-digit hex under a texture passes validation and fails at render", () => {
-    for (const c of ["#12345", "#1234567"]) {
-      const textured = spec({ ...BAR, bar_color: c, series_patterns: { "": "/" } });
-      expect(validateSpec(textured).valid, c).toBe(true);
-      expect(() => renderChart(textured, ROWS, { width: 600, height: 300, document }), c).toThrow(/cannot derive a hatch band/);
-    }
-  });
-
-  it("the named CSS functions, whatever their parentheses hold", () => {
+  it("the named CSS functions, in parentheses", () => {
     for (const fn of ["rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color", "color-mix", "var", "url"]) {
       expect(ok(`${fn}(0 1 2)`), fn).toBe(true);
     }
-    expect(ok("rgb(foo)")).toBe(true);
     expect(ok("calc(1)")).toBe(false);
+  });
+
+  it("rgb/rgba/hsl/hsla contents get a syntax check: three channels and an optional alpha, comma- or space-separated; rgb(foo) is rejected", () => {
+    for (const c of ["rgb(0,114,178)", "rgb(0 114 178 / 50%)", "rgba(0,114,178,0.5)", "hsl(200,50%,40%)", "hsla(200 50% 40% / 0.4)"]) {
+      expect(ok(c), c).toBe(true);
+    }
+    for (const c of ["rgb(foo)", "rgba(foo)", "hsl(foo)", "hsla(foo)", "rgb(0,114)", "rgb(0 114)", "rgb(0,114,178,1,1)"]) expect(ok(c), c).toBe(false);
+  });
+
+  it("in the space form the channels must be separated by whitespace", () => {
+    expect(ok("rgb(10% 20% 30%)")).toBe(true);
+    expect(ok("rgb(10%20%30%)")).toBe(false);
+  });
+
+  it("a nested function, a relative color, and the other functions' contents are not checked", () => {
+    for (const c of ["rgb(var(--r), 0, 0)", "hsl(calc(100 + 100) 50% 40%)", "rgb(from blue r g b)"]) expect(ok(c), c).toBe(true);
+    for (const fn of ["hwb", "lab", "lch", "oklab", "oklch", "color", "color-mix", "var", "url"]) expect(ok(`${fn}(foo)`), fn).toBe(true);
   });
 
   it("CSS keywords from Plot's list, in any case, including transparent, none and currentColor — but not yellowgreen", () => {
@@ -119,30 +127,6 @@ describe("CONFIG-SPEC Colors: accepted forms", () => {
 
   it("anything else is rejected at load", () => {
     for (const c of ["blu", "blue-450", "BLUE-200", "not a colour"]) expect(ok(c), c).toBe(false);
-  });
-
-  it("a 5-digit hex on a line is written as given, and nothing above it supplies a stroke, so the line is not drawn", () => {
-    const LINE = spec({ chartType: "line", title: "t", xAxisType: "numeric", data: "d", series_colors: { "": "#12345" } });
-    expect(validateSpec(LINE).valid).toBe(true);
-    const svg = renderChart(LINE, rows([{ time: "0", value: "1" }, { time: "10", value: "4" }]), { width: 600, height: 300, document }).svg;
-    const path = svg.querySelector('g[aria-label="line"] path')!;
-    let el: Element | null = path;
-    while (el && !el.hasAttribute("stroke")) el = el.parentElement;
-    expect(el?.getAttribute("stroke")).toBe("#12345");
-    let up: Element | null = el!.parentElement;
-    while (up && !up.hasAttribute("stroke")) up = up.parentElement;
-    expect(up, "an ancestor supplies a stroke to fall back to").toBeNull();
-  });
-
-  it("a 5- or 7-digit hex is written as given; a browser drops it and the mark inherits the chart's currentColor", () => {
-    const svg = renderChart({ ...BAR, bar_color: "#12345" }, ROWS, { width: 600, height: 300, document }).svg;
-    const g = svg.querySelector('g[aria-label="bar"]')!;
-    expect(g.getAttribute("fill")).toBe("#12345");
-    let up: Element | null = g.parentElement;
-    while (up && !up.hasAttribute("fill")) up = up.parentElement;
-    expect(up).toBe(svg);
-    expect(svg.getAttribute("fill")).toBe("currentColor");
-    expect(svg.style.color).not.toBe("");
   });
 
   it("every color field takes the CSS forms too", () => {
@@ -178,7 +162,7 @@ describe("CONFIG-SPEC Series textures: the color under a texture", () => {
     }
   });
 
-  const UNREADABLE = ["currentColor", "none", "var(--x)", "oklch(0.6 0.1 200)", "color-mix(in srgb, red, blue)", "rgb(0 114 178)"];
+  const UNREADABLE = ["currentColor", "none", "var(--x)", "oklch(0.6 0.1 200)", "color-mix(in srgb, red, blue)", "rgb(0 114 178)", "rgb(0.5, 114, 178)"];
 
   it("an unreadable ground renders without a texture", () => {
     const plain = spec({ chartType: "bar", title: "t", xAxisType: "categorical", data: "d.csv" });
@@ -188,52 +172,49 @@ describe("CONFIG-SPEC Series textures: the color under a texture", () => {
     }
   });
 
-  it("under a texture, validation catches some: currentColor or oklch() set through series_colors, naming the series", () => {
-    const S = spec({ ...BAR, columns: { x: "time", value: "value", series: "s" }, series_patterns: { Up: "/" } });
-    for (const c of ["currentColor", "oklch(0.6 0.1 200)"]) {
-      const v = validateSpec(spec({ ...S, series_colors: { Up: c } }));
-      expect(v.valid, c).toBe(false);
-      expect(v.errors.join(" "), c).toMatch(/series "Up"/);
-    }
-    for (const c of UNREADABLE) expect(validateSpec(spec({ ...BAR, series_colors: { "": c } })).valid, c).toBe(false);
-  });
-
-  const GAPS: Array<[string, ChartSpec, () => void]> = [
-    ["a 5-digit hex", spec({ ...BAR, bar_color: "#12345" }), () => draw(spec({ ...BAR, bar_color: "#12345" }))],
-    ["a comma-form function holding no color", spec({ ...BAR, bar_color: "rgb(foo, bar)" }), () => draw(spec({ ...BAR, bar_color: "rgb(foo, bar)" }))],
-    [
-      "bar_color on a chart whose one series is named",
-      spec({ ...BAR, columns: { x: "time", value: "value", series: "s" }, bar_color: "oklch(0.6 0.1 200)", series_patterns: { Up: "/" } }),
-      () => renderChart(
-        spec({ ...BAR, columns: { x: "time", value: "value", series: "s" }, bar_color: "oklch(0.6 0.1 200)", series_patterns: { Up: "/" } }),
-        rows([{ time: "A", s: "Up", value: "6" }, { time: "B", s: "Up", value: "3" }]),
-        { width: 600, height: 300, document },
-      ),
-    ],
-    [
-      "category_colors",
-      spec({ ...BAR, category_colors: { A: "oklch(0.6 0.1 200)" } }),
-      () => draw(spec({ ...BAR, category_colors: { A: "oklch(0.6 0.1 200)" } })),
-    ],
-    [
-      "waterfall.colors",
-      spec({ ...BAR, chartType: "waterfall", waterfall: { colors: { increase: "oklch(0.6 0.1 200)" } } }),
-      () => draw(spec({ ...BAR, chartType: "waterfall", waterfall: { colors: { increase: "oklch(0.6 0.1 200)" } } })),
-    ],
+  const UP = rows([{ time: "A", s: "Up", value: "6" }, { time: "B", s: "Up", value: "3" }]);
+  const NAMED = { columns: { x: "time", value: "value", series: "s" }, series_patterns: { Up: "/" } };
+  const BAD = "oklch(0.6 0.1 200)";
+  const LAID: Array<[string, ChartSpec, TidyRow[], string, string]> = [
+    ["series_colors", spec({ ...BAR, ...NAMED, series_colors: { Up: BAD } }), UP, 'series_colors["Up"]', "Up"],
+    ["bar_color on a chart whose one series is named", spec({ ...BAR, ...NAMED, bar_color: BAD }), UP, "bar_color", "Up"],
+    ["category_colors", spec({ ...BAR, category_colors: { A: BAD } }), ROWS, 'category_colors["A"]', ""],
+    ["waterfall.colors", spec({ ...BAR, chartType: "waterfall", waterfall: { colors: { increase: BAD } } }), ROWS, "waterfall.colors.increase", ""],
     [
       "a title-selector option's color",
-      spec({ ...BAR, title: "t {k}", title_selectors: { k: { options: [{ id: "a", color: "oklch(0.6 0.1 200)" }] } } }),
-      () => buildExportSvg(spec({ ...BAR, title: "t {k}", title_selectors: { k: { options: [{ id: "a", color: "oklch(0.6 0.1 200)" }] } } }), ROWS),
+      spec({ ...BAR, title: "t {k}", title_selectors: { k: { options: [{ id: "a", color: BAD }] } } }),
+      ROWS, "title_selectors.k.options[0].color", "",
     ],
   ];
-  for (const [name, s, render] of GAPS) {
-    it(`${name} under a texture passes validation and fails at render`, () => {
-      const named = (s.columns as { series?: string } | undefined)?.series === "s";
-      const data = named ? rows([{ time: "A", s: "Up", value: "6" }, { time: "B", s: "Up", value: "3" }]) : ROWS;
-      expect(validateChart(s, data).valid).toBe(true);
-      expect(render).toThrow(/cannot derive a hatch band/);
-    });
-  }
+
+  it("under a texture, validating with the data rejects it where it is the color painted, naming the field and the series", () => {
+    for (const c of UNREADABLE) expect(validateChart(spec({ ...BAR, series_colors: { "": c } }), ROWS).valid, c).toBe(false);
+    for (const [name, s, data, field, series] of LAID) {
+      const v = validateChart(s, data);
+      expect(v.valid, name).toBe(false);
+      expect(v.errors.join(" "), name).toContain(`${field}: ${JSON.stringify(BAD)} cannot carry a \`series_patterns\` texture`);
+      expect(v.errors.join(" "), name).toContain(`series ${JSON.stringify(series)}`);
+      // Without the texture the same colour validates: the texture is what makes it unreadable.
+      const { series_patterns: _, ...untextured } = s as unknown as Record<string, unknown>;
+      expect(validateChart(spec(untextured), data).valid, `${name}, untextured`).toBe(true);
+      // The renderer agrees. The PNG export resolves the title selector, so it reaches every case.
+      expect(() => buildExportSvg(s, data), name).toThrow(/cannot derive a hatch band/);
+    }
+  });
+
+  it("validateSpec alone, without the data, does not check it", () => {
+    for (const [name, s] of LAID) expect(validateSpec(s).valid, name).toBe(true);
+  });
+
+  it("a color another field overrides is not painted, so it passes: series_colors under bar_color, bar_color on several series", () => {
+    const under = spec({ ...BAR, series_colors: { "": BAD }, bar_color: "blue" });
+    expect(validateChart(under, ROWS).errors).toEqual([]);
+    expect(() => buildExportSvg(under, ROWS)).not.toThrow();
+    const two = rows([{ time: "A", s: "Up", value: "6" }, { time: "A", s: "Dn", value: "3" }]);
+    const several = spec({ ...BAR, ...NAMED, bar_color: BAD });
+    expect(validateChart(several, two).errors).toEqual([]);
+    expect(() => buildExportSvg(several, two)).not.toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------------------------

@@ -1732,12 +1732,13 @@ Notes:
   A name the engine cannot paint at all (a typo like `blue-450`) fails **validation**, texture or no
   texture. A string it can paint but cannot measure — `currentColor`, `none`, a CSS `var(--…)`, the
   modern color functions (`oklch`, `color-mix`, …), the SPACE-separated function forms
-  (`rgb(0 114 178)`) — renders without a texture. Under one, validation catches some of these, for
-  example `currentColor` or `oklch(…)` set through `series_colors`, and fails naming the series. It
-  does not catch every unreadable ground yet: others pass validation and fail at render. Examples
-  are a hex of the wrong length (`"#12345"`), `"rgb(foo, bar)"`, `bar_color` on a chart whose one
-  series is named, and a ground set by `category_colors`, `waterfall.colors` or a title-selector
-  option's `color`.
+  (`rgb(0 114 178)`), an `rgb()` with fractional channels — renders without a texture. Under one,
+  validating the chart with its data (`validateChart`, or `tbl-chart validate`) rejects it where it
+  is the color actually painted under the texture: through `series_colors`, `bar_color`,
+  `category_colors`, `waterfall.colors` or a title-selector option's `color`. The error names the
+  field and the series. `validateSpec` alone, without the data, does not check this. A color that
+  another field overrides is not painted, so it passes: a `series_colors` entry under a `bar_color`,
+  or `bar_color` on a chart with several series.
 - Coarse bands need room: a segment much under ~30px along the stacking axis shows less than
   two full periods and reads as a partial band rather than a texture.
 - **With `barStack.mono`, a texture borrows a neighbour's shade.** A mono stack spends consecutive
@@ -1769,14 +1770,15 @@ takes only a categorical hue (see the end of this section):
 A value that is not a palette name reaches the renderer unchanged. Validation accepts it in these
 forms, ignoring case and surrounding spaces:
 
-- **Hex:** `#` and 3 to 8 hex digits, e.g. `"#1A1A2E"`. Only the 3-, 4-, 6- and 8-digit forms are
-  valid CSS: a 5- or 7-digit value (`"#12345"`) passes validation and is written into the SVG as
-  given, but a browser ignores it: a filled mark falls back to the fill it inherits from the chart
-  (`currentColor`, the chart's text color), and a line, which inherits no stroke, is not drawn.
-  Under a [texture](#series-textures) it fails at render.
+- **Hex:** `#` and 3, 4, 6 or 8 hex digits, e.g. `"#1A1A2E"`. A 5- or 7-digit value (`"#12345"`)
+  is not valid CSS and is rejected.
 - **CSS functions:** `rgb`, `rgba`, `hsl`, `hsla`, `hwb`, `lab`, `lch`, `oklab`, `oklch`, `color`,
-  `color-mix`, `var` or `url`, followed by parentheses. What the parentheses hold is not checked, so
-  `rgb(foo)` passes.
+  `color-mix`, `var` or `url`, followed by parentheses. The contents of `rgb()`, `rgba()`, `hsl()`
+  and `hsla()` get a syntax check: three channels and an optional alpha, comma-separated
+  (`rgb(0,114,178)`) or space-separated (`rgb(0 114 178 / 50%)`), so `rgb(foo)` is rejected. In the
+  space form the channels must be separated by whitespace. A nested function such as `var()` or
+  `calc()` inside them, a relative color (`rgb(from …)`), and the contents of the other functions are
+  not checked.
 - **CSS keywords:** the names Observable Plot recognises, such as `steelblue`, `transparent`, `none`
   and `currentColor`. Plot's list omits `yellowgreen`, so that one is rejected.
 

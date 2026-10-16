@@ -17,12 +17,11 @@ import { CHART_SPEC_SCHEMA } from "./schema";
 import { FILLED_CHART_TYPES } from "./filled-chart-types";
 import { isHorizontalDumbbell, valueAxisIsX } from "./dumbbell-orientation";
 import { facetsDrawAsGroups, facetGroupErrors } from "./facet-groups";
-import { colorRefError, monoBaseError, hatchGroundError } from "./color-ref";
+import { colorRefError, monoBaseError } from "./color-ref";
 import type { ChartSpec, XAxisType } from "./types";
 import { resolveColumns, isPreBinned, SINGLE_SERIES_KEY } from "./columns";
 import { rowsInSectionOrder } from "./section-key";
 import { resolveAnnotations } from "./annotations";
-import { ownValue } from "./own-key";
 import { resolveRugTracks, fullyHiddenRugTracks, rugBoundPosition } from "./rug";
 import { temporalValueError, quarterValueError } from "./parse-time";
 import type { ResolvedColumns } from "./columns";
@@ -34,6 +33,7 @@ import { timelineDataErrors, timelineColumns } from "./timeline";
 import { treemapDataErrors, treemapColumns } from "./treemap";
 import { keyReferenceErrors } from "./data-refs";
 import { figurePaneValues } from "./panes";
+import { textureGroundErrors } from "./texture-grounds";
 import type { RefDomains } from "./data-refs";
 
 export interface ValidationResult {
@@ -1053,21 +1053,6 @@ export function validateSpec(spec: unknown): ValidationResult {
   if (txfErr) return { valid: false, errors: [txfErr] };
   const xTicksErr = xTicksError(spec as { xAxisType?: unknown; chartType?: unknown; x_ticks?: unknown });
   if (xTicksErr) return { valid: false, errors: [xTicksErr] };
-  // A texture over a ground the band deriver cannot PARSE: paintable, so `colorErrors` passes it, and
-  // a hard throw at render. Checked against the AUTHORED colour — a palette default is always a hex.
-  const groundErrors: string[] = [];
-  for (const series of Object.keys((spec as { series_patterns?: Record<string, unknown> }).series_patterns ?? {})) {
-    const declared = ownValue((spec as { series_colors?: Record<string, unknown> }).series_colors, series);
-    const authored = declared ?? (series === "" ? (spec as { bar_color?: unknown }).bar_color : undefined);
-    const err = hatchGroundError(
-      declared !== undefined ? `series_colors[${JSON.stringify(series)}]` : "bar_color",
-      series,
-      authored,
-    );
-    if (err) groundErrors.push(err);
-  }
-  if (groundErrors.length) return { valid: false, errors: groundErrors };
-
   const patErr = seriesPatternsError(spec as { chartType?: unknown; series_patterns?: unknown });
   if (patErr) return { valid: false, errors: [patErr] };
   const colErrors = colorErrors(spec as ChartSpec);
@@ -1232,12 +1217,14 @@ function validateHistogramData(
   return { valid: errors.length === 0, errors };
 }
 
-/** A histogram's references: the same table as every other chart type, plus pane_widths. Its rows
- *  are binned, not drawn one per row, but the series, pane and scope keys name the same cells. */
+/** A histogram's references: the same table as every other chart type, plus pane_widths and the
+ *  colours a texture is laid over. Its rows are binned, not drawn one per row, but the series, pane
+ *  and scope keys name the same cells. */
 function histogramReferenceErrors(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns, columns: Set<string>): string[] {
   return [
     ...keyReferenceErrors(spec, refDomains(spec, rows, cols, columns)),
     ...paneWidthsErrors(spec, rows, cols, columns),
+    ...textureGroundErrors(spec, rows, cols),
   ];
 }
 
@@ -1457,6 +1444,8 @@ export function validateChartData(spec: ChartSpec, rows: TidyRow[]): ValidationR
   const knownSeries = JSON.stringify([...seriesSeen].sort());
   errors.push(...keyReferenceErrors(spec, domains));
   errors.push(...paneWidthsErrors(spec, rows, cols, columns));
+  // A texture over an unreadable colour that only the data shows will be painted under it.
+  errors.push(...textureGroundErrors(spec, rows, cols));
 
   // `shading` regions: whether a `side` filter can ever match anything. A region naming an unknown
   // series is reported by the table above and has nothing to measure here.
