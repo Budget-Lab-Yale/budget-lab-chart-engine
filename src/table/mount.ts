@@ -6,7 +6,7 @@ import type { TidyRow } from "../data/index.js";
 import type { TableModel } from "./model.js";
 import { buildTableModel } from "./model.js";
 import { layoutTable, layoutOptionsFromSpec } from "./layout.js";
-import { renderTableHtml, bodyRowOf } from "./render-html.js";
+import { renderTableHtml, bodyRowOf, fillFootnoteListHtml } from "./render-html.js";
 import { splitPanes, layoutPanes } from "./panes.js";
 import { buildFigureHeader } from "../engine/live/title-select.js";
 import { renderSourceLine } from "../engine/source-line.js";
@@ -536,16 +536,8 @@ export function mountTable(container: HTMLElement, opts: MountTableOptions): () 
     // Footnote definition list (spec §8) — rebuilt each draw into the card-level block, which is
     // attached only when there are footnotes (so an empty block never appears in the DOM). It is
     // inserted right after the scroll wrapper so it sits above the source line.
-    fnBlock.replaceChildren();
+    fillFootnoteListHtml(fnBlock, model.footnotes, doc);
     if (model.footnotes.length > 0) {
-      for (const fn of model.footnotes) {
-        const line = doc.createElement("div");
-        const sup = doc.createElement("sup");
-        sup.textContent = fn.marker;
-        line.appendChild(sup);
-        line.appendChild(doc.createTextNode(` ${fn.text}`));
-        fnBlock.appendChild(line);
-      }
       if (fnBlock.parentNode == null) canvasScroll.insertAdjacentElement("afterend", fnBlock);
     } else if (fnBlock.parentNode != null) {
       fnBlock.remove();
@@ -712,16 +704,8 @@ function mountMultiPaneTable(container: HTMLElement, opts: MountTableOptions): (
       const table = scroll.querySelector("table");
       if (table) markFit(scroll, table, spec);
     }
-    fnBlock.replaceChildren();
+    fillFootnoteListHtml(fnBlock, Array.from(fnMap, ([marker, text]) => ({ marker, text })), doc);
     if (fnMap.size > 0) {
-      for (const [marker, text] of fnMap) {
-        const line = doc.createElement("div");
-        const sup = doc.createElement("sup");
-        sup.textContent = marker;
-        line.appendChild(sup);
-        line.appendChild(doc.createTextNode(` ${text}`));
-        fnBlock.appendChild(line);
-      }
       if (fnBlock.parentNode == null) card.appendChild(fnBlock);
     } else if (fnBlock.parentNode != null) {
       fnBlock.remove();

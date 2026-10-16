@@ -12,12 +12,12 @@
 //      that each drawn line's baseline lies inside its own band (row, header cell or header);
 //   4. the footnote list.
 //
-// Known divergences (finding A10, 2026-10-15 debt review) are `it.fails` with the finding id in the
-// name, so the suite is green today. When phase 5 fixes one, its `it.fails` starts failing: switch it
-// to `it`. Every other check is a normal `it`.
+// A case may list a known divergence in `fails` (check -> an `it.fails` title carrying the finding
+// id), so the suite stays green until it is fixed. The eight finding-A10 divergences (2026-10-15 debt
+// review) were fixed in phase 5 (T5.9) and are normal `it`s now; no case lists one.
 //
-// Not a parity divergence, so a normal `it` here: a negative value that rounds to zero prints
-// "-0.0" in red on BOTH paths (A10's `-0.0` defect is pinned in export-golden.test.ts instead).
+// A leaf header the live table clamps (header_max_lines) keeps its whole label in the DOM but shows
+// only N lines; the SVG draws only those, so the header check compares a clamped cell by prefix.
 //
 // Text measurement: getContext is stubbed to null so the live mount, the export and the layout
 // recomputed here all use the same `s.length * fontPx * 0.6` fallback (src/table/measure.ts).
@@ -212,6 +212,8 @@ function bodyStrings(r: Rendered, which: "main" | "text"): { html: string[]; svg
 interface HeaderDesc {
   tier: number; start: number; end: number; leaf: boolean;
   label: string[]; sublabel: string[];
+  /** Live only: the label sits in a header_max_lines clamp. */
+  clamped?: boolean;
   svg?: { rect: { x: number; y: number; w: number; h: number }; labelLines: SvgLine[]; sublabelLines: SvgLine[] };
 }
 
@@ -235,6 +237,7 @@ function htmlHeader(r: Rendered): { cells: HeaderDesc[]; corner: string[] } {
           leaf: t + th.rowSpan === tiers && th.colSpan === 1,
           label: htmlLines(th, (el) => el === sub),
           sublabel: sub ? htmlLines(sub) : [],
+          ...(th.querySelector(".tbl-table-header-clamp") ? { clamped: true } : {}),
         });
       }
       col += th.colSpan;
@@ -273,6 +276,20 @@ function svgHeader(r: Rendered): { cells: HeaderDesc[]; corner: SvgLine[] } {
     };
   });
   return { cells, corner: svgLines(cornerTexts).lines };
+}
+
+/** A leaf the live table clamps (header_max_lines) shows its first N lines, the last ending in an
+ *  ellipsis, while its DOM still holds the whole label. The SVG draws only what shows. For such a
+ *  cell, check that the SVG text is the start of the live label and compare the rest as the label. */
+function unclamp(svgCells: HeaderDesc[], htmlCells: HeaderDesc[]): HeaderDesc[] {
+  return svgCells.map((c) => {
+    const text = words(c.label);
+    if (!c.leaf || !text.endsWith("…")) return c;
+    const live = htmlCells.find((h) => h.leaf && h.start === c.start);
+    expect(live?.clamped, `leaf ${c.start} ends in an ellipsis but the live cell is not clamped`).toBe(true);
+    expect(words(live!.label).startsWith(text.slice(0, -1).trimEnd())).toBe(true);
+    return { ...c, label: live!.label };
+  });
 }
 
 const headerStrings = (cells: HeaderDesc[], corner: string[]): string[] =>
@@ -391,6 +408,45 @@ function headerClampViolations(r: Rendered, spec: TableSpec, part: "count" | "fi
   return out;
 }
 
+/** Cell footnote markers drawn off their cell's last line. The marker must rise FOOTNOTE_RISE above
+ *  that line's baseline (a marker that continues after a superscript inherits its raised baseline)
+ *  and start right of every glyph run on the line (a stacked sub+super is as wide as its wider half).
+ *  Run widths use the same `length * fontPx * 0.6` fallback the renderer measured with. */
+const FOOTNOTE_RISE = 4;
+function markerViolations(r: Rendered): { checked: number; violations: string[] } {
+  const out: string[] = [];
+  let checked = 0;
+  for (const cg of Array.from(r.body.querySelectorAll("g.tbl-table-cell"))) {
+    const texts = allTexts(cg);
+    const marker = cg.querySelector('tspan[baseline-shift="super"]');
+    if (!marker) continue;
+    checked++;
+    const host = marker.parentElement!;
+    // Effective baseline of the marker: the host's y, moved by every y / dy up to and including it.
+    let y = Number(host.getAttribute("y"));
+    for (const n of Array.from(host.children)) {
+      if (n.hasAttribute("y")) y = Number(n.getAttribute("y"));
+      if (n.hasAttribute("dy")) y += Number(n.getAttribute("dy"));
+      if (n === marker) break;
+    }
+    const lines = svgLines(texts).lines;
+    const last = Math.max(...lines.map((l) => l.y));
+    if (Math.abs(y - (last - FOOTNOTE_RISE)) > 0.01) out.push(`marker "${marker.textContent}" baseline ${y}, line baseline ${last}`);
+    if (marker.hasAttribute("x")) {
+      const mx = Number(marker.getAttribute("x"));
+      const fs = Number(host.getAttribute("font-size"));
+      for (const s of Array.from(host.querySelectorAll("tspan[y]"))) {
+        if (s === marker) continue;
+        const sy = Number(s.getAttribute("y"));
+        if (Math.abs(sy - last) > fs / 2) continue; // another line
+        const right = Number(s.getAttribute("x")) + (s.textContent ?? "").length * Number(s.getAttribute("font-size") ?? fs) * 0.6;
+        if (mx < right - 0.01) out.push(`marker "${marker.textContent}" at x ${mx} overlaps "${s.textContent}" ending at ${right}`);
+      }
+    }
+  }
+  return { checked, violations: out };
+}
+
 // ---- 4. footnote list --------------------------------------------------------------------------
 
 function footnoteStrings(r: Rendered): { html: string[]; svg: string[] } {
@@ -439,7 +495,6 @@ const CASES: Case[] = [
       { row: "Raises rate", col: "Enacted", value: "No", fn: "" },
       { row: "Raises rate", col: "Cost", value: -1.2, fn: "" },
     ]),
-    fails: { textCells: "A10 text-cell footnote marker missing in the SVG export" },
   },
   {
     name: "multi-tier header with a blank top tier over a two-column group",
@@ -450,7 +505,6 @@ const CASES: Case[] = [
     rows: rowsOf(["Revenue", "Outlays"].flatMap((row, r) =>
       [["", "M", "a"], ["", "M", "b"], ["G", "H", "c"], ["G", "H", "d"]].map(([t0, t1, leaf], i) =>
         ({ row, t0: t0!, t1: t1!, leaf: leaf!, value: 1 + r + i })))),
-    fails: { header: "A10 upper-tier header drawn over the wrong columns in the SVG export" },
   },
   {
     name: "`\\\\` in a group label",
@@ -461,7 +515,6 @@ const CASES: Case[] = [
     },
     rows: rowsOf(["One", "Two"].flatMap((grp) => ["Alpha", "Beta"].flatMap((row, i) =>
       ["2026", "2027"].map((per, j) => ({ grp, row, per, value: 100 + i * 10 + j }))))),
-    fails: { "band:group": "A10 `\\\\` in a group label: SVG second line overlaps the next row" },
   },
   {
     name: "`\\\\` in the corner (stub_header)",
@@ -471,7 +524,6 @@ const CASES: Case[] = [
       format: { default: { decimals: 0 } },
     },
     rows: yearRows(["Alpha", "Beta"], ["2026", "2027"], (i, j) => 10 + i + j),
-    fails: { "band:corner": "A10 `\\\\` in the corner: SVG second line drops into the body" },
   },
   {
     name: "`\\\\` in a banner",
@@ -482,7 +534,6 @@ const CASES: Case[] = [
     },
     rows: rowsOf(["Alpha", "Beta"].flatMap((row, i) =>
       ["2026", "2027"].map((per, j) => ({ row, opt: "Option", per, value: 10 + i + j })))),
-    fails: { "band:banner": "A10 `\\\\` in a banner: SVG second line overlaps the tier below" },
   },
   {
     name: "`\\\\` in a sublabel",
@@ -492,7 +543,6 @@ const CASES: Case[] = [
       format: { default: { decimals: 0 } },
     },
     rows: yearRows(["Alpha", "Beta"], ["2026", "2027"], (i, j) => 10 + i + j),
-    fails: { "band:sublabel": "A10 `\\\\` in a sublabel: SVG second line drops into the body" },
   },
   {
     name: "stub_wrap and stub_nowrap both set",
@@ -502,7 +552,6 @@ const CASES: Case[] = [
       format: { default: { decimals: 1 } },
     },
     rows: yearRows(["Expanded child tax credit refundability", "Short"], ["2026", "2027"], (i, j) => 1.5 + i + j),
-    fails: { stubLines: "A10 stub_wrap + stub_nowrap: SVG wraps the stub, the live table does not" },
   },
   {
     name: "leaf header exceeding header_max_lines",
@@ -515,7 +564,41 @@ const CASES: Case[] = [
     // to two fitting lines; "Share of total federal tax change" needs more than two.
     rows: rowsOf(["Bottom quintile", "Top quintile"].flatMap((row, i) =>
       ["Share of total federal tax change", "Average tax change"].map((col, j) => ({ row, col, value: 2.5 * (i + 1) + j })))),
-    fails: { headerFit: "A10 header_max_lines overflow: the live header clamps, the SVG overruns its column" },
+  },
+  {
+    // Every slot at once: corner, banner over a blank-absorbed tier, leaf label, sublabel, group
+    // label + note, stub, text cell (with a footnote), footnote with math; collapsible (expanded).
+    name: "`\\\\` in every slot, with blanks at several header tiers",
+    spec: {
+      title: "Everything", data: "d.csv", stub: ["grp", { label: "row" }], header: ["t0", "t1", "leaf"], value: "value",
+      stub_header: `Corner ${BS2} two`,
+      header_labels: { M: `Middle ${BS2} banner`, G: `Top ${BS2} banner ${BS2} three`, c: `Leaf ${BS2} c` },
+      sublabels: { d: `sub ${BS2} two` },
+      group_labels: { One: `Group ${BS2} one` },
+      group_notes: { One: "A note under a broken label." },
+      collapsible: { default: "expanded" },
+      footnote_column: "fn", footnotes: { a: "Math \\(x^2\\) here." },
+      format: { default: { decimals: 1 } },
+    },
+    rows: rowsOf(["One", "Two"].flatMap((grp) => [`Row ${BS2} split`, "Plain"].flatMap((row, r) =>
+      [["", "M", "a"], ["", "M", "b"], ["G", "H", "c"], ["G", "H", "d"], ["G", "", "e"], ["", "", "f"]].map(([t0, t1, leaf], i) =>
+        ({ grp, row, t0: t0!, t1: t1!, leaf: leaf!, value: leaf === "e" ? (r ? "Text" : `Two ${BS2} lines`) : 1 + r + i, fn: leaf === "e" && r === 0 ? "a" : "" }))))),
+  },
+  {
+    name: "footnote markers after trailing math, a stacked script and a broken line",
+    spec: {
+      title: "Markers", data: "d.csv", stub: [{ label: "row" }], header: ["col"], value: "value",
+      format: { default: { decimals: 1 } },
+      footnote_column: "fn", footnotes: { a: "Squared.", b: "Stacked.", c: "Broken.", d: "Numeric." },
+    },
+    rows: rowsOf([
+      { row: "One", col: "Term", value: "Rate \\(x^2\\)", fn: "a" },
+      { row: "One", col: "Cost", value: 3, fn: "d" },
+      { row: "Two", col: "Term", value: "Share \\(\\theta_{1}^{KK}\\)", fn: "b" },
+      { row: "Two", col: "Cost", value: 4, fn: "" },
+      { row: "Three", col: "Term", value: `Line ${BS2} two \\(y_i\\)`, fn: "c" },
+      { row: "Three", col: "Cost", value: 5, fn: "" },
+    ]),
   },
   {
     name: "negative value rounding to zero",
@@ -566,7 +649,7 @@ describe("table HTML <-> SVG export parity", () => {
         const rr = r();
         const h = htmlHeader(rr), s = svgHeader(rr);
         expect(h.cells.length).toBeGreaterThan(0);
-        expect(headerStrings(s.cells, s.corner.map((l) => l.text))).toEqual(headerStrings(h.cells, h.corner));
+        expect(headerStrings(unclamp(s.cells, h.cells), s.corner.map((l) => l.text))).toEqual(headerStrings(h.cells, h.corner));
       });
 
       test("hardLines", "3. hard line breaks in group labels, corner, banners and sublabels match", () => {
@@ -601,6 +684,14 @@ describe("table HTML <-> SVG export parity", () => {
         });
         test("headerFit", "3. every drawn leaf-header line fits its column, as the live clamp does", () => {
           expect(headerClampViolations(r(), c.spec, "fit")).toEqual([]);
+        });
+      }
+
+      if (c.spec.footnote_column) {
+        it("3. every cell footnote marker sits on its cell's last line, after its text", () => {
+          const { checked, violations } = markerViolations(r());
+          expect(checked).toBeGreaterThan(0);
+          expect(violations).toEqual([]);
         });
       }
 

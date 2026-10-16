@@ -2,7 +2,7 @@
 // The document argument lets callers pass any DOM (browser or jsdom) without importing globals.
 import type { TableModel, BodyRow, RowGroup } from "./model";
 import type { TableLayout } from "./layout";
-import { INDENT_STEP, columnAlignOf } from "./layout";
+import { INDENT_STEP, columnAlignOf, normalizeMaxLines } from "./layout";
 
 // Base left padding on stub cells, matching the CSS `.tbl-table tbody th` padding and the SVG
 // renderer's PAD_X — so the corner, group headers, and row labels share one left edge.
@@ -18,6 +18,21 @@ const bodyRows = new WeakMap<Element, BodyRow>();
 /** The model row a data <tr> produced by renderTableHtml was rendered from (undefined otherwise). */
 export function bodyRowOf(tr: Element): BodyRow | undefined {
   return bodyRows.get(tr);
+}
+
+/** Fill the live footnote list: one line per footnote, a <sup> marker then the text, with math and
+ *  `\\` breaks rendered as the rest of the table renders them (the PNG draws the same footnote with
+ *  renderFootnoteLinesSvg). A footnote with neither keeps its single text node. */
+export function fillFootnoteListHtml(block: HTMLElement, footnotes: Iterable<{ marker: string; text: string }>, doc: Document): void {
+  block.replaceChildren();
+  for (const fn of footnotes) {
+    const line = doc.createElement("div");
+    const sup = doc.createElement("sup");
+    sup.textContent = fn.marker;
+    line.appendChild(sup);
+    appendRichHtml(line, ` ${fn.text}`, doc);
+    block.appendChild(line);
+  }
 }
 
 /**
@@ -38,7 +53,7 @@ export function renderTableHtml(
 ): HTMLTableElement {
   const { leaves, headerRows, body } = model;
   const { stubWidth, colW } = layout;
-  const headerMaxLines = spec?.header_max_lines;
+  const headerMaxLines = normalizeMaxLines(spec?.header_max_lines);
   const stubNowrap = spec?.stub_nowrap === true;
   // Stub wraps only when explicitly opted in (and not also forced nowrap); otherwise it stays on
   // one line and is clipped to the column when capped narrower than the label.

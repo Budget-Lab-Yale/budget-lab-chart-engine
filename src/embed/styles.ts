@@ -1132,18 +1132,22 @@ td.is-neg {
 /* ---- Inline math: sub/superscripts + stacked sub+super ---- */
 /* Math scripts (from \( … \) markup) inherit the cell's text color — overriding the muted
    footnote <sup> styling above — and use a slightly smaller size. */
+/* The footnote list renders math too and sits outside the <table>, so it gets the same rules. */
 .tbl-table sup.tbl-math,
-.tbl-table sub.tbl-math {
+.tbl-table sub.tbl-math,
+.tbl-table-footnotes sup.tbl-math,
+.tbl-table-footnotes sub.tbl-math {
   font-size: 0.72em;
   line-height: 0;
   color: inherit;
 }
-.tbl-table sup.tbl-math { vertical-align: super; }
-.tbl-table sub.tbl-math { vertical-align: sub; }
+.tbl-table sup.tbl-math, .tbl-table-footnotes sup.tbl-math { vertical-align: super; }
+.tbl-table sub.tbl-math, .tbl-table-footnotes sub.tbl-math { vertical-align: sub; }
 /* Stacked sub+super (e.g. \theta_1^K → θ with K above, 1 below): a tight inline column placed
    right after the base glyph, sized down like a script and left-aligned so digits/letters of
    different widths share a common left edge. */
-.tbl-table .tbl-msubsup {
+.tbl-table .tbl-msubsup,
+.tbl-table-footnotes .tbl-msubsup {
   display: inline-flex;
   flex-direction: column;
   /* Center the two-line stack on the text's midline so the super sits at cap height and the

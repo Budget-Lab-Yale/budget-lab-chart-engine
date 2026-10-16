@@ -5,8 +5,8 @@
 // `renderTableSvg` only, without a spec, so footnotes, the export chrome and collapse seeding are
 // unguarded there. These goldens let a refactor of the table export path prove itself output-neutral.
 //
-// They pin today's output INCLUDING known defects (finding A10 from the 2026-10-15 debt review).
-// A case marked "expected to change in phase 5" moves only under that phase's named exception.
+// The four A10 cases were recorded pinning the finding A10 defects (2026-10-15 debt review) and
+// re-recorded once, in phase 5 (T5.9), when those defects were fixed.
 //
 // Text measurement: the same fallback the existing table goldens get under jsdom, which has no
 // canvas. `makeMeasureText` (src/table/measure.ts) returns `s.length * fontPx * 0.6`, and the chrome's
@@ -37,7 +37,7 @@ const rowsOf = (rs: Array<Record<string, string | number>>): TidyRow[] =>
 const BS2 = "\\\\"; // the two-character `\\` hard-break token
 
 describe("table export goldens", () => {
-  // pins A10 (footnote marker dropped on the text cell, kept on the numeric) — expected to change in phase 5
+  // A10: the text cell carries its footnote marker, as the numeric cell does
   it("footnotes on a text cell and a numeric cell", async () => {
     const spec: TableSpec = {
       title: "Provisions", source: "The Budget Lab", data: "d.csv",
@@ -56,7 +56,7 @@ describe("table export goldens", () => {
     await expect(ser(svg)).toMatchFileSnapshot("../fixtures/export/table-footnotes.golden.svg");
   });
 
-  // pins A10 (upper header "H" drawn over a/b instead of c/d) — expected to change in phase 5
+  // A10: the upper header "H" sits over c/d, its own columns
   it("multi-tier header with a blank top tier over a two-column group", async () => {
     const spec: TableSpec = {
       title: "Three-tier header", data: "d.csv",
@@ -71,7 +71,7 @@ describe("table export goldens", () => {
     await expect(ser(svg)).toMatchFileSnapshot("../fixtures/export/table-blank-top-tier.golden.svg");
   });
 
-  // pins A10 (`\\` in a group label: second line overlaps the next row) — expected to change in phase 5
+  // A10: the group row is a line taller, so the label's second line stays inside it
   it("line break in a group label", async () => {
     const spec: TableSpec = {
       title: "Grouped", data: "d.csv",
@@ -101,7 +101,7 @@ describe("table export goldens", () => {
     await expect(ser(svg)).toMatchFileSnapshot("../fixtures/export/table-collapsible.golden.svg");
   });
 
-  // pins A10 (-0.04 at 1dp prints "-0.0" coloured negative) — expected to change in phase 5
+  // A10: -0.04 and +0.04 at 1dp both print "0.0", uncoloured
   it("negative value that rounds to zero", async () => {
     const spec: TableSpec = {
       title: "Rounding", data: "d.csv",
@@ -115,7 +115,7 @@ describe("table export goldens", () => {
       { row: "Large cut", per: "2027", value: 1.5 },
     ]);
     const svg = buildTableExportSvg(spec, rows);
-    expect(svg.textContent).toContain("-0.0");
+    expect(svg.textContent).not.toContain("-0.0");
     await expect(ser(svg)).toMatchFileSnapshot("../fixtures/export/table-negative-zero.golden.svg");
   });
 });

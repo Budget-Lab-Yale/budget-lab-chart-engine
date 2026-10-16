@@ -7,16 +7,15 @@ import type { TableSpec } from "../spec/table-types.js";
 import type { TidyRow } from "../data/index.js";
 import type { TableModel } from "../table/model.js";
 import { buildTableModel, applyCollapse } from "../table/model.js";
-import { layoutTable, layoutOptionsFromSpec } from "../table/layout.js";
-import { renderTableSvg } from "../table/render-svg.js";
+import { layoutTable, layoutOptionsFromSpec, footnoteListLines } from "../table/layout.js";
+import { renderTableSvg, renderFootnoteLinesSvg } from "../table/render-svg.js";
 import { makeMeasureText } from "../table/measure.js";
 import { layoutPanes } from "../table/panes.js";
-import { noteBreakLines } from "../table/richtext.js";
+import { noteBreakLines, richWidth } from "../table/richtext.js";
 import {
   W,
   MARGIN,
   HEADING,
-  MUTED,
   W_BOLD,
   createExportRoot,
   composeTopChrome,
@@ -38,6 +37,8 @@ const PANE_TITLE_SIZE = 14;
 const PANE_TITLE_RISE = 16; // baseline drop from the cursor to the subheading
 const PANE_TITLE_GAP = 8; // gap from the subheading down to its table
 const PANE_GAP = 22; // gap between one pane's table and the next pane's subheading
+
+const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Figure-level footnote list geometry.
 const FN_TOP_GAP = 10;
@@ -194,13 +195,20 @@ function buildMultiPaneExportSvg(
     cursor += layout.totalHeight;
   });
 
-  // Figure-level footnote list.
+  // Figure-level footnote list, wrapped to the frame (live, the list wraps in the card) and drawn
+  // by the same builder as the single-pane list, so math and breaks render as they do there.
   if (figFootnotes.length) {
-    cursor += FN_TOP_GAP;
-    for (const fn of figFootnotes) {
-      cursor += FN_LINE;
-      root.appendChild(textEl(document, MARGIN, cursor, `${fn.marker} ${fn.text}`, { size: FN_FONT, fill: MUTED }));
-    }
+    const lines = footnoteListLines(figFootnotes, {
+      maxWidth: width - MARGIN * 2,
+      measure: (s) => richWidth(s, FN_FONT, 400, measureText),
+    });
+    const g = document.createElementNS(SVG_NS, "g");
+    g.setAttribute("class", "tbl-figure-footnotes");
+    for (const t of renderFootnoteLinesSvg(document, lines, {
+      x: MARGIN, firstBaselineY: cursor + FN_TOP_GAP + FN_LINE, lineHeight: FN_LINE, measure: measureText,
+    })) g.appendChild(t);
+    root.appendChild(g);
+    cursor += FN_TOP_GAP + lines.length * FN_LINE;
   }
 
   const by = cursor;

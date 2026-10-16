@@ -161,6 +161,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 - Value labels count decimals to 12 significant digits of the chart's largest value, so where that
   value is 1e10 or more, decimals below its 12th digit are dropped (a label on 12345678901.25 reads
   12345678901.3). No published figure has values that large.
+- Tables, a value that rounds to zero at its decimals: it prints without a sign and takes no
+  `sign_color`, live and in the PNG. The sign was read before rounding, so -0.04 at one decimal
+  printed "-0.0" (in red under `sign_color`) and +0.04 printed "0.0" in green. See **Upgrading**.
+- Table PNG export: a footnote marker on a text cell is drawn. Only numeric cells drew theirs. A
+  marker after math sits at the usual height beside the whole text; after a trailing superscript it
+  rose with the superscript, and after a stacked sub- and superscript it could overlap it.
+- Table PNG export with three or more header tiers where a leaf's blank upper tier is absorbed
+  from below: each upper-tier header cell now sits over its own columns. It was placed after the
+  previous cell drawn in its tier, so it could land over the absorbed leaves' columns, and the
+  banner-width fit widened those columns instead.
+- Table PNG export, `\\` in a group label, the corner (`stub_header`), a banner or a sublabel: the
+  row or header tier is a line taller per break, so every line sits in its own band. The second
+  line was drawn into the next row or the tier below with no room reserved. A banner centres its
+  lines; the corner grows upward from the leaf-label baseline, as the leaf labels do. Text without
+  a `\\` lays out as before. See **Upgrading**.
+- Tables with both `stub_wrap` and `stub_nowrap`: `stub_nowrap` wins in the layout as it did in the
+  live cell, so the stub is sized to its longest label and the PNG keeps each label on one line.
+  The layout wrapped the stub, so the PNG wrapped labels the live table kept on one line, overrunning
+  a stub column sized for the wrapped text.
+- Table PNG export with `header_max_lines`: a leaf header that needs more lines shows its first N,
+  the last ending in an ellipsis, as the live clamp does. The last line took all the remaining words
+  and ran past its column. A header that fits in N lines is unchanged. A `header_max_lines` below 1
+  now means no limit and a fraction is rounded down, live and in the PNG; on screen neither clamped
+  (the CSS clamp takes only a whole number), while the export left the header out of the column
+  width as if it would wrap.
+- Table footnote list: math in a footnote renders on screen (it printed its `\( … \)` source while
+  the PNG rendered it), and a `\\` starts a new line on screen and in both PNG layouts, with the
+  height reserved. A multi-pane table's PNG now wraps a long footnote to the frame (it ran off the
+  edge) and renders its math (it printed the source). Footnotes with neither are unchanged.
 - Tooltip swatches and a `legendKey` hook's `ctx.rendered`: a colour containing quotes (such as
   `url("#p")`) no longer breaks the swatch markup.
 - CONFIG-SPEC corrections, where the code was right and the page wrong (no output changes):
@@ -288,6 +317,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   series' tag, so legend hover and pin dim the wrong bars; and the BLSMM `plot_10yr_yield` and
   `plot_federal_funds` charts, where a scenario that leaves the first variable unchanged blanks its
   Scenario series and the second variable's Scenario line takes the first's tag.
+- **Table export, line breaks and signed zero** (see **Fixed**). In `budget-lab-charts` only PNG
+  downloads change; no archive table uses what the live-table fixes touch. One published figure
+  moves: `articles/2026/10/revenue-potential-top-taxes/income-above-top-thresholds`, whose banners
+  "Income above \\ threshold" and "After-tax income \\ above threshold" have a line break. The
+  banner row is 15 px taller, so the figure is 15 px taller and both banner lines sit above the
+  "$ billions" / "% of GDP" row (the second line was drawn 13 px above it, inside that row). The
+  banner rules are placed as before, moved down with the taller row.
+  No other `budget-lab-charts` table changes: none has `footnote_column` or `footnotes`, a
+  `stub_wrap`/`stub_nowrap` pair, a header longer than its `header_max_lines`, a value that rounds
+  to zero under `sign_color`, a `\\` outside its banners, or an upper header tier that the fix
+  moves. In State of Tariffs, on re-vendor: the `alternative-scenarios/summary-statistics` cells
+  that print "-0.0%" or "-0.00 pp" and the two in `alternative-scenarios/etr-by-country` (and
+  earlier vintages) lose the minus, on screen and in the PNG; the 2026-02-21 and 2026-03-09
+  `summary-statistics` banners with a `\\` (such as "Policy Before\\SCOTUS Ruling") get a
+  taller banner row.
 
 ## [1.18.0] - 2026-10-14
 
