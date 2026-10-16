@@ -28,8 +28,9 @@ export interface LayoutOptions {
   stubMinWidth?: number;
   /** Allow stub (row-label) cells to wrap, shrinking the column toward stubMinWidth. */
   stubWrap?: boolean;
-  /** Stretch the table to exactly this total width (stub + columns scaled proportionally). Used to
-   *  align multi-pane sub-tables to a shared width. Ignored when ≤ the natural width. */
+  /** Stretch the table to this total width by scaling the data columns proportionally (the stub
+   *  keeps its width). Aligns multi-pane sub-tables to a shared width, and fills a narrow table's
+   *  PNG frame. Ignored when ≤ the natural width. */
   fillWidth?: number;
 }
 export interface CellRect { x: number; y: number; w: number; h: number; }

@@ -145,7 +145,9 @@ describe("A10 header_max_lines clamp", () => {
     title: "T", data: "d.csv", stub: [{ label: "row" }], header: ["col"], value: "value",
     header_max_lines: n, column_width: 100, column_labels: { c: label },
   });
-  const rows = rowsOf([{ row: "r", col: "c", value: 1 }]);
+  // Five 100 px columns: wider than the PNG frame's 480 px content width, so the export does not
+  // stretch the table and the clamped column stays 100 px wide.
+  const rows = rowsOf(["c", "d", "e", "f", "g"].map((col) => ({ row: "r", col, value: 1 })));
   const leafLines = (label: string, n: number) => {
     const s = spec(label, n);
     const layout = layoutTable(buildTableModel(s, rows), { measureText: (x) => x.length * 7, ...layoutOptionsFromSpec(s) });

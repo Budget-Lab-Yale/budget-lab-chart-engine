@@ -6,7 +6,9 @@
 // unguarded there. These goldens let a refactor of the table export path prove itself output-neutral.
 //
 // The four A10 cases were recorded pinning the finding A10 defects (2026-10-15 debt review) and
-// re-recorded once, in phase 5 (T5.9), when those defects were fixed.
+// re-recorded once, in phase 5 (T5.9), when those defects were fixed. All five were re-recorded again
+// (U4, owner waiver 2026-10-16) when the export began stretching a table narrower than the frame to
+// the frame's content width, as the live table fills its card; no published table is that narrow.
 //
 // Text measurement: the same fallback the existing table goldens get under jsdom, which has no
 // canvas. `makeMeasureText` (src/table/measure.ts) returns `s.length * fontPx * 0.6`, and the chrome's

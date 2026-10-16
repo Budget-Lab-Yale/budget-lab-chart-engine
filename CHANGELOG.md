@@ -189,6 +189,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   now means no limit and a fraction is rounded down, live and in the PNG; on screen neither clamped
   (the CSS clamp takes only a whole number), while the export left the header out of the column
   width as if it would wrap.
+- Table PNG export, a table narrower than the frame: it is stretched to the frame's content width
+  (480 px in the 560 px frame), as the live table fills its card. It was drawn at its natural width,
+  flush left, under a title, notes and source that span the frame. As on screen, a single table
+  scales its row-label column and every data column, `stub_width` and `column_width` included, by
+  one factor. A multi-pane table keeps its shared row-label width and its data columns take the
+  rest in proportion to their widths (on screen they take equal shares). Row labels, text cells,
+  clamped headers and group notes wrap at the wider widths, and a banner left no room for its
+  flanking rules can now have them. A table at or wider than the frame is unchanged. See
+  **Upgrading**.
 - Table footnote list: math in a footnote renders on screen (it printed its `\( … \)` source while
   the PNG rendered it), and a `\\` starts a new line on screen and in both PNG layouts, with the
   height reserved. A multi-pane table's PNG now wraps a long footnote to the frame (it ran off the
@@ -261,6 +270,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     `connectorColor`), `category_order`, table `collapsible.control`, `category_colors` on
     waterfalls, the dumbbell gap label's default of 1 decimal place, and `legend` in the
     `annotations.xAxis` / `annotations.yAxis` entry shapes.
+  - Tables: `stub_width` and `column_width` are no longer called fixed. A table narrower than the
+    card stretches on screen, and these columns widen with it; a multi-pane table's data columns
+    split the width beside the row labels equally whatever their `column_width`. The PNG export
+    now stretches too (see the narrow-table entry above).
 
 ### Changed
 - Validation is stricter, and looser where it rejected figures that render correctly. See
@@ -436,6 +449,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   `summary-statistics` banners with a `\\` (such as "Policy Before\\SCOTUS Ruling") get a
   taller banner row and measured rules. Its banners without a break were not rendered for this
   check; any whose rules are drawn backwards today change as above.
+- **Narrow tables in the PNG** (see **Fixed**): no `budget-lab-charts` figure moves. All 13 of its
+  tables are wider than the 480 px content width (the narrowest,
+  `articles/2026/07/ai-fiscal/key-parameters`, is 512 px), so their PNGs are unchanged, the five
+  figures named under **Table export, line breaks and signed zero** included. Live tables are
+  unchanged. State of Tariffs tables were not checked. The five table export goldens, all narrow
+  synthetic tables, were re-recorded for this change under an owner waiver.
 
 ## [1.18.0] - 2026-10-14
 

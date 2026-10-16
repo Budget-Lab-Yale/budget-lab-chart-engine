@@ -183,6 +183,15 @@ describe("layoutTable — banner width fit (bug #3)", () => {
       expect(layout.colX[i]).toBe(layout.colX[i - 1]! + layout.colW[i - 1]!);
     }
   });
+
+  // CONFIG-SPEC `column_width`: a banner wider than its columns widens them past an author width.
+  it("widens columns past column_width to fit the banner", () => {
+    const model = buildTableModel(wideSpec, wideRows);
+    const layout = layoutTable(model, { measureText, columnWidth: 20 });
+    const sumColW = layout.colW.reduce((a, b) => a + b, 0);
+    expect(sumColW).toBeGreaterThanOrEqual(measureText(BANNER) + 32);
+    layout.colW.forEach((w) => expect(w).toBeGreaterThan(20));
+  });
 });
 
 describe("layoutTable — width + wrap config (5c)", () => {

@@ -23,9 +23,9 @@
 // recomputed here all use the same `s.length * fontPx * 0.6` fallback (src/table/measure.ts).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mountTable } from "../../src/table/mount";
-import { buildTableExportSvg } from "../../src/embed/export-table-png";
+import { buildTableExportSvg, tableExportLayout } from "../../src/embed/export-table-png";
 import { buildTableModel } from "../../src/table/model";
-import { layoutTable, layoutOptionsFromSpec, type TableLayout } from "../../src/table/layout";
+import type { TableLayout } from "../../src/table/layout";
 import { makeMeasureText } from "../../src/table/measure";
 import { richWidth } from "../../src/table/richtext";
 import { tokens } from "../../src/theme/tokens";
@@ -134,12 +134,11 @@ function render(spec: TableSpec, rows: TidyRow[]): Rendered {
   const table = container.querySelector("table.tbl-table") as HTMLTableElement;
   const root = buildTableExportSvg(spec, rows);
   const body = root.querySelector("g.tbl-table-header")!.parentNode as Element;
-  // The layout the export drew from, recomputed the way buildTableExportSvg computes it (same
-  // model, measurer and spec options; none of these specs collapse a group). Used for column edges
-  // and band rects only; the width check below proves it is the same layout.
-  const layout = layoutTable(buildTableModel(spec, rows), {
-    measureText: makeMeasureText(), ...layoutOptionsFromSpec(spec),
-  });
+  // The layout the export drew from, recomputed by the export's own tableExportLayout (same model,
+  // measurer and spec; none of these specs collapse a group), so a narrow table's stretch to the
+  // frame is included. Used for column edges and band rects only; the width check below proves it
+  // is the same layout.
+  const layout = tableExportLayout(buildTableModel(spec, rows), spec, makeMeasureText());
   expect(Number(body.getAttribute("width"))).toBe(layout.totalWidth);
   expect(Number(body.getAttribute("height"))).toBe(layout.totalHeight);
   return { table, card, body, layout };
