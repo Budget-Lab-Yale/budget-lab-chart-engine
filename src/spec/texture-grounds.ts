@@ -139,9 +139,8 @@ function waterfallGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumn
  *    accent too (embed/export-png.ts; before A1 was fixed it did not, and painted them).
  *  - histogram (marks/histogram.ts): highlight dimming; else, on one series, `bar_color` if set;
  *    else the accent (one series) and the series colour.
- *  - stacked (marks/stacked.ts): highlight dimming; else a `barStack.mono` stack paints tonal tiers,
- *    never an authored colour. Otherwise the accent (one series) and the series colour, through the
- *    colour map (engine/pane.ts).
+ *  - stacked: a `barStack.mono` stack paints tonal tiers, never an authored colour. Otherwise the
+ *    accent (one series) and the series colour, through the colour map (engine/pane.ts).
  *  - area: the accent (one series) and the series colour. */
 function seriesGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns): Ground[] {
   const out: Ground[] = [];
@@ -186,7 +185,6 @@ function seriesGrounds(spec: ChartSpec, rows: TidyRow[], cols: ResolvedColumns):
           else push(...colorMap);
           break;
         case "stacked":
-          if (dimmed) break;
           if (!spec.barStack?.mono) push(...colorMap);
           break;
         case "area":

@@ -141,10 +141,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   one segment and pointed at another. Positive and negative values now sum separately, as the bars
   stack: a negative series' callout points at its outer end below zero. No published figure moves: every
   archive point callout is on a line chart.
-- `highlightSeries` on a stacked bar now dims every series it does not list, as on a bar chart
-  (mono tiers included); it was ignored. The legend and the PNG key show the dim, and a segment
-  label on a dimmed segment is drawn in dark text. A key the data lacks is now a validation
-  error on a stacked chart too. No published figure sets the field.
 - Stacked and waterfall value labels without `valueLabels.decimals`: the precision is now the
   fewest decimals the data needs, as CONFIG-SPEC says. Rounding error in a sum counted as
   precision, so stacked nets of 1.1 + 2.2 and 1.5 + 2.5 printed "3.30" and "4.00", and a waterfall
@@ -294,11 +290,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
   fixture `scripts/slides/fixtures/unknown-field/chart.yaml`, already failed.
   `budget-lab-interactives` has no specs this engine validates.
 - **Newly rejected** by `tbl-chart validate` (and `validateChart`). Except for table `decimals`
-  from 11 to 100 (below), each of these rendered wrongly, blank, or not at all, so a spec that now
-  fails needs fixing, not waiving. The validation changes below alter no rendered output.
+  from 11 to 100 and `highlightSeries` off a bar or histogram (below), each of these rendered
+  wrongly, blank, or not at all, so a spec that now fails needs fixing, not waiving. The validation
+  changes below alter no rendered output.
   - A spec key that names a value in the data and is not in the data, on every chart type,
     histograms included, wherever the chart reads the field: the `series_*` maps,
-    `highlightSeries` (bar, histogram, stacked), `series_marker` and `gap_annotation.series_a`/`series_b`
+    `highlightSeries` (bar, histogram), `series_marker` and `gap_annotation.series_a`/`series_b`
     (dumbbell), `barStack.stackOrder` (stacked), `x_labels` (where a hover card or a callout's `{x}`
     is sure to read it), `section_order`, `section_labels`,
     `small_multiples.pane_order`/`pane_titles`/`pane_widths`, `overlays[].facet`,
@@ -332,6 +329,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
     `footnote_column` naming a column the data lacks (a typo dropped every emphasis or footnote).
   - An `overlays[].fun` function name inherited from JavaScript objects (`constructor(x)`); see
     **Fixed**.
+  - `highlightSeries` on a line, area, stacked, scatter, dot plot, waterfall or dumbbell chart
+    (timelines and treemaps already rejected it). Only `bar` and `histogram` read it: CONFIG-SPEC
+    listed it under the bar and stacked-bar options, but a stacked chart, like the others, drew
+    exactly as it would without the field. Stacked charts do not support it. No published figure
+    sets the field.
 - **No longer rejected**, because they render correctly:
   - `small_multiples.pane_widths` sized to the panes the grid draws, when a facet cell is blank. A
     blank cell is not a pane, but it was counted as one.

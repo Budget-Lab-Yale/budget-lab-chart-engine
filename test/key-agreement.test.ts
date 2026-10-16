@@ -181,16 +181,6 @@ const CHARTS: Array<{ name: string; spec: Record<string, unknown>; rows: TidyRow
     rows: ROWS_CAT,
   },
   {
-    name: "stacked with highlightSeries dimming",
-    spec: {
-      chartType: "stacked",
-      xAxisType: "categorical",
-      series_colors: COLORS,
-      highlightSeries: ["one"],
-    },
-    rows: ROWS_CAT,
-  },
-  {
     // Redundant colour+shape: each series gets its own SYMBOL, which is the case where a key can name
     // a shape the chart does not draw. The ink tests below cannot see that — same colour, wrong shape.
     name: "scatter, shape redundant with series",

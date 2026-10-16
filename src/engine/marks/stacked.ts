@@ -221,7 +221,7 @@ export function buildStackedMarks(
   const monoBase = spec.barStack?.mono?.base;
   // series → mono tier hex (darkest at bottom of the visual stack), or null when categorical.
   let monoTierForSeries: Map<string, string> | null = null;
-  let fillChannel: (d: PreparedRow) => string;
+  let fillChannel: string | ((d: PreparedRow) => string);
   // Ranked over every section's rows when section_order leaves some out (ctx.monoBasis), so a
   // drawn series keeps its shade.
   const monoSeries = ctx.monoBasis?.seriesNames ?? seriesNames;
@@ -240,14 +240,6 @@ export function buildStackedMarks(
   } else {
     // Categorical: literal accessor against the engine color map (matches the legend).
     fillChannel = (d: PreparedRow) => colors.get(d.series) || TBL.color.blue;
-  }
-  // highlightSeries: every series not listed is painted annotationDim, over mono tiers too, as bar.ts
-  // dims. The legend and export keys take the dim from the painted rects (AssembleResult.seriesPainted),
-  // so `seriesColors` below keeps naming each series' own colour, as bar.ts's colour map does.
-  const highlightSet = spec.highlightSeries && spec.highlightSeries.length ? new Set(spec.highlightSeries) : null;
-  if (highlightSet) {
-    const baseFill = fillChannel;
-    fillChannel = (d: PreparedRow) => (highlightSet.has(d.series) ? baseFill(d) : TBL.color.annotationDim);
   }
 
   // Resolved series → fill color: the source of truth for the legend swatches. Mono uses
@@ -371,18 +363,14 @@ export function buildStackedMarks(
   // `segmentLabelsDropped` rather than letting the pill side re-derive it.
   let segmentLabelsDropped = false;
   if (stackedSegmentLabelsShown(spec, netMode, pane)) {
-    // Series painted a light fill get dark text; everything else white. Light fills are the mono
-    // light tiers (the two lightest, 100 & 200 per the Style-Guide; monoScale returns darkest-first,
-    // so they are the last two hexes assigned) and the highlightSeries dim.
+    // Mono light tiers (the two lightest, 100 & 200 per the Style-Guide) get dark text;
+    // everything else white. monoScale returns darkest-first, so the light tiers are the
+    // last two hexes assigned.
     let lightSeries: Set<string> | null = null;
     if (monoTierForSeries) {
       const lightHexes = new Set(monoScale(monoBase as string, monoSeries.length).slice(-2));
       lightSeries = new Set<string>();
       for (const [s, hex] of monoTierForSeries) if (lightHexes.has(hex)) lightSeries.add(s);
-    }
-    if (highlightSet) {
-      lightSeries ??= new Set<string>();
-      for (const s of seriesNames) if (!highlightSet.has(s)) lightSeries.add(s);
     }
     const segLabels = buildSegmentLabels(data, categories, {
       catField,
@@ -392,6 +380,7 @@ export function buildStackedMarks(
       horizontal,
       plotHeight: ctx.plotHeight ?? 0,
       plotWidth: ctx.plotWidth ?? 0,
+      mono: monoBase != null,
       lightSeries,
       fmt: segFmt,
       hooks: ctx.hooks,
@@ -524,6 +513,7 @@ function buildSegmentLabels(
     horizontal: boolean;
     plotHeight: number;
     plotWidth: number;
+    mono: boolean;
     lightSeries: Set<string> | null;
     fmt: (d: number) => string;
     hooks: MarkContext["hooks"];
@@ -534,7 +524,7 @@ function buildSegmentLabels(
 ): { marks: unknown[]; dropped: boolean } {
   const {
     catField, rank, posSumByCat, normalize,
-    horizontal, plotHeight, plotWidth, lightSeries, fmt, hooks, facet, rowChannels,
+    horizontal, plotHeight, plotWidth, mono, lightSeries, fmt, hooks, facet, rowChannels,
   } = opts;
 
   // Per-category totals (sum of |value| on each side) for normalization shares.
@@ -609,8 +599,8 @@ function buildSegmentLabels(
         dropped = true;
         continue;
       }
-      // Light fills (mono 100/200 tiers, the highlight dim) get dark text; everything else white (§7).
-      const light = lightSeries != null && lightSeries.has(r.series);
+      // Light mono tiers (100/200) get dark text; everything else white (§7).
+      const light = mono && lightSeries != null && lightSeries.has(r.series);
       const text = applyValueLabelHook(fmt(labelNum), hooks, {
         series: r.series,
         category: cat,
@@ -622,7 +612,7 @@ function buildSegmentLabels(
   }
 
   if (!rows.length) return { marks: [], dropped };
-  // Text color: white, dark on a light fill (per-row).
+  // Text color: white on categorical/dark mono; dark on light mono tiers (per-row).
   const fill = (d: LabelRow) => (d.light ? TBL.color.heading : WHITE);
   const common = {
     className: SEGMENT_LABEL_CLASS,

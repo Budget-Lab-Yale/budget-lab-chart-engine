@@ -160,6 +160,15 @@ function tooltipSeriesNameChartTypeError(spec: {
   return `tooltip_series_name is supported on chartType "scatter" only (got ${JSON.stringify(spec.chartType)}) — on other chart types the series name labels a tooltip ROW, not the header`;
 }
 
+/** `highlightSeries` is read by marks/bar.ts and marks/histogram.ts only; on any other chart type it
+ *  rendered exactly as its absence. PRESENCE, not value, as the sibling gates above. The timeline
+ *  and treemap gates reject it first, with their own message. */
+function highlightSeriesChartTypeError(spec: { chartType?: unknown; highlightSeries?: unknown }): string | null {
+  if (spec.highlightSeries === undefined) return null;
+  if (spec.chartType === "bar" || spec.chartType === "histogram") return null;
+  return `highlightSeries is supported on chartType "bar" and "histogram" only (got ${JSON.stringify(spec.chartType)})`;
+}
+
 /** `tooltip_section` puts the section in the hover CARD's header, so it needs sections: rejected
  *  without `columns.section` (no section to name), or a horizontal chart's `columns.facet`, whose
  *  values draw as sections (spec/facet-groups.ts). PRESENCE, not value, as the sibling gates.
@@ -1031,6 +1040,7 @@ const SPEC_RULES: readonly SpecRule[] = [
   // Before the rug rule, which leaves a band or shading bound on a date axis to this one.
   dateCoordinateErrors,
   legendAndRugErrors,
+  single(highlightSeriesChartTypeError),
 ];
 
 const ajvValidationErrors = (spec: unknown): string[] =>

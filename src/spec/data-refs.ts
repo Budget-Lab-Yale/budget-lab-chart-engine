@@ -109,10 +109,9 @@ export const DATA_KEY_REFERENCES: readonly KeyRefRule[] = [
     field: "shading[].from / to", domain: "category",
     refs: (s) => each(s.shading, (r, i) => [...one(`shading[${i}].from`, r.from), ...one(`shading[${i}].to`, r.to)]),
   },
-  // marks/bar.ts, marks/histogram.ts and marks/stacked.ts are its only readers.
+  // marks/bar.ts and marks/histogram.ts are its only readers.
   {
-    field: "highlightSeries", domain: "series",
-    readBy: (s) => s.chartType === "bar" || s.chartType === "histogram" || s.chartType === "stacked",
+    field: "highlightSeries", domain: "series", readBy: (s) => s.chartType === "bar" || s.chartType === "histogram",
     refs: (s) => list("highlightSeries", s.highlightSeries),
   },
   { field: "series_marker", domain: "series", readBy: dumbbell, refs: (s) => list("series_marker", s.series_marker) },
