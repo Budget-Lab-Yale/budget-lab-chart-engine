@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/); this project
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-10-20
+
+### Added
+- `parseInlineLinks` and `isAllowedHref` (and the `TextRun` type) are exported from
+  `budget-lab-chart-engine/spec`, so a consumer can link note and source text exactly as the engine
+  does. budget-lab-charts uses them for the no-JS fallback on chart pages. No rendered output
+  changes.
+
 ## [1.19.0] - 2026-10-16
 
 ### Fixed
