@@ -9,3 +9,7 @@ export type { ValidationResult } from "./validate";
 // had nothing to type it with.
 export type * from "./hooks";
 export type { NetMode } from "./bar-stack";
+// budget-lab-charts builds a no-JS fallback for each chart page and must link exactly what the chart
+// links, so it calls this rule rather than keeping a copy that could drift.
+export { parseInlineLinks, isAllowedHref } from "./rich-text";
+export type { TextRun } from "./rich-text";
