@@ -7,7 +7,7 @@
 //   npm run goldens:record   record: --update=new writes goldens that do not exist yet (existing
 //                            ones are still compared, never overwritten). This is the one explicit
 //                            path for adding a NEW golden. Re-recording an existing golden is
-//                            forbidden by CLAUDE.md (Hard invariants), so "all" is never offered.
+//                            forbidden by AGENTS.md (Hard invariants), so "all" is never offered.
 //
 // Orphan guard: every *.golden.svg under test/ must be named, as a quoted path relative to the test
 // file, in one of the discovered test files. A golden nothing compares against guards nothing, and a renamed case

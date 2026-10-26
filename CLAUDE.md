@@ -17,51 +17,23 @@ The chart engine: the tool that renders Budget Lab figures. Content (chart specs
   legend and rug), carrying 81 unchecked task boxes and none checked. Rationale for a change goes in
   the PR description, transient plans stay in the session scratchpad, and invariants go in a comment
   where they apply. See the global policy in `~/.claude/CLAUDE.md`.
+- **Subagents**: dispatch implementers and fixers as `engine-implementer`, first-pass and
+  whole-branch reviewers as `engine-reviewer`, and fix-round re-reviewers as `engine-rereviewer`
+  (`.claude/agents/`), not `general-purpose`. They carry the repo rules; the dispatch carries the
+  task. Sessions started from `C:\dev\GitHub` see them through a junction at
+  `C:\dev\GitHub\.claude\agents\chart-engine`.
+- **Review rounds must converge.** Only Critical and Important findings open a fix round; Minors and
+  Pre-existing findings go on a ledger for the whole-branch review. A re-review covers the fix diff
+  only. If a task still has open findings after two re-review rounds, stop and bring it to Sylva
+  with the open findings and a question about the approach, rather than a third round.
+- **Codex** (`gpt-review`) reviews each task commit alongside the Claude reviewer, and the branch
+  again before the PR, but not fix rounds: the `engine-rereviewer` covers those. An audit of 98
+  Codex findings (2026-10-26) found per-task Codex runs caught 20 ordinary-input defects the parallel
+  Claude reviewer missed, while fix-round runs added one.
 
-## Hard invariants
+## Invariants and review rules
 
-Constraints that no single file states and that a reviewer cannot infer from a diff. **A violation of
-any of these is a top-severity finding, not a nitpick.** Paste this section verbatim into code-review
-prompts (see the `gpt-review` skill). Add to it when a bug or a review reveals a new one.
+The hard invariants and the review rules live in `AGENTS.md` so Codex reads them too. Edit them
+there.
 
-- **No `eval`, no `new Function` in shipped code** — `src/` and everything bundled from it (`dist/`,
-  standalone HTML). The engine bundles into standalone HTML served under a strict CSP. Test harnesses
-  that execute generated page scripts inside jsdom (`test/serve.test.ts` `runOpenAll`) are outside
-  it: the invariant exists for the CSP of published pages. The `overlays[].fun` grammar is *parsed
-  and interpreted* (`src/spec/expr.ts`); it is never evaluated. (Plot's vendored DSV code contains a
-  textual `new Function` the engine never reaches — do not "fix" it, and do not cite it as
-  precedent.)
-- **Rendered output must stay byte-identical for every pre-existing spec, except by a named
-  exception.** Golden SVG tests enforce it. A repin re-renders the entire published archive, so an
-  unconditional behaviour change alters already-published figures at once. **A moved golden means
-  something fires that should be gated — diagnose it; never re-record to make the suite pass.**
-  A defect fix may change rendered output, and some have, but only when all three hold: every
-  affected published figure is found by reading the archive's **specs** (not by regexing rendered
-  text — read that way, a scan named two colour keys as callout labels and put them in a changelog);
-  each is named under **Upgrading** with what moves and why; and **no golden is re-recorded**, so
-  either the change is gated or the goldens provably never covered it. A waiver granted without that
-  archive scan is not a waiver — that is the gap that left the 1.14.0 axis-domain waiver correct in
-  substance but unverified in process.
-  Goldens are verified with `npm run goldens`, which cannot write snapshots; a local `npm test` run
-  is not evidence that output is unchanged if it could have written one. A new golden is recorded
-  only with `npm run goldens:record`.
-- **`CONFIG-SPEC.md` is vendored verbatim by `budget-lab-charts` and gated in its CI.** A statement in
-  it that the code does not honour is a real defect shipped to figure authors, not a docs nit. Five
-  false claims were found in it during 1.12.0, several added in good faith by describing what someone
-  believed the code did. Verify a claim with a test before writing it, and **search for the claim's
-  text, not its line number** — the same promise is asserted in more than one place.
-- **The PNG export re-renders from the spec** (`buildExportSvg` in `src/embed/export-png.ts`); it does
-  not serialise the live DOM. Anything applied only to live DOM or CSS is silently absent from the
-  download. Every render-path feature needs its export path checked, not assumed.
-- **Functions cannot cross the publish boundary.** `src/cli/index.ts` → `buildStandaloneHtml`
-  JSON-serialises spec and rows into a `<script>`, so hooks are static/build-time and events bubble.
-  Nothing callable survives the trip.
-- **Module graph:** `src/spec/*` must not import `src/engine/*`. `src/engine/overlays.ts` must not
-  import `annotation-legend.ts` (it reports `keyed: boolean`; the caller mints the key).
-- **HTML injected into an SVG lands in the XHTML namespace and does not rasterise.** Markup helpers
-  come in pairs for this reason (`legendRowMarkup` / `legendRowMarkupSvg` in `src/engine/icon.ts`), and
-  hook contexts carry `medium: "html" | "svg"` so a consumer can branch. Screen-only correctness here
-  is a silent divergence in the download.
-- **A green suite is not evidence a feature works.** Goldens catch regressions and are silent on
-  behaviour that was wrong from its first commit — `method: "poly"` drew nothing on any temporal axis
-  through 2219 passing tests. New behaviour needs a test that would fail if the feature did nothing.
+@AGENTS.md
