@@ -7,8 +7,10 @@ coverage/
 test-results/
 playwright-report/
 .vitest/
-# agent worktrees
-.claude/
+# agent worktrees and local settings; agent definitions and review evals are committed
+.claude/*
+!.claude/agents/
+!.claude/evals/
 # vitest globalSetup build artifacts
 test/.tmp/
 # generated chart artifacts

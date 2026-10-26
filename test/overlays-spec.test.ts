@@ -407,7 +407,7 @@ describe("overlays — facet validation (3a)", () => {
 //
 // "would the pooled polyline zig-zag" is a question about DRAWN GEOMETRY. What gets drawn is
 // decided by six filters that all live in `src/engine`, which `src/spec/*` may not import
-// (module-graph invariant, CLAUDE.md). Every version of the check therefore re-derived the scope
+// (module-graph invariant, AGENTS.md). Every version of the check therefore re-derived the scope
 // from the raw table, and every version got part of it wrong:
 //
 //   1. compared raw cell SPELLINGS, so "1" and "1.0" counted as differing values;
